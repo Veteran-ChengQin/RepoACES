@@ -1,0 +1,8 @@
+M	.claude/design/vector-db-migration.md
+M	packages/service/common/vectorDB/migration/controller.ts
+M	packages/service/common/vectorDB/migration/exporters.ts
+M	packages/service/common/vectorDB/migration/importers.ts
+M	packages/service/common/vectorDB/migration/index.ts
+M	packages/service/common/vectorDB/migration/type.ts
+M	projects/app/src/pages/api/admin/migrateVector.ts
+M	scripts/migrateVector.ts

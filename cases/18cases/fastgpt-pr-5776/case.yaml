@@ -1,0 +1,27 @@
+id: fastgpt-pr-5776
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "19846905ff007bcd0060299e1ca4fefaf59a23c2"
+  pr_number: 5776
+  pr_url: https://github.com/labring/FastGPT/pull/5776
+  pr_title_raw: "feat: add health check to MongoDB service in Docker Compose templates"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    - Add health check configuration to MongoDB service in both development and production Docker Compose templates
+    - Use mongo client ping command with authentication to verify service availability
+    - Configure health check with 10s interval, 5s timeout, 5 retries, and 30s start period
+    - Ensures MongoDB service health monitoring is consistent with other services (Redis, PostgreSQL, MinIO)
+
+validation:
+  head_commit: "edf5b0964f3d356d12e3f901c2ac9933578b60cc"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-5776.patch"
+  patch_sha256: "382babaa64118f270709150cbcd2d0ed53750d23ef5cca6e55126bcdc9a3528e"
+  changed_files_file: "patches/fastgpt-pr-5776.changed_files.txt"
+  manual_functionality_description: |
+    Check that MongoDB services in both development and production Docker Compose templates include a healthcheck.
+    The healthcheck should use a Mongo client ping command with authentication, use the configured interval/timeout/retry/start-period values, and be applied consistently across generated deployment templates and public documentation copies.

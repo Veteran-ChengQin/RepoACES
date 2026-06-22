@@ -1,0 +1,73 @@
+diff --git a/.github/workflows/docs-deploy.yml b/.github/workflows/docs-deploy.yml
+index 512ee5f79d7d..95faa619795a 100644
+--- a/.github/workflows/docs-deploy.yml
++++ b/.github/workflows/docs-deploy.yml
+@@ -121,6 +121,8 @@ jobs:
+           platforms: linux/amd64
+           build-args: |
+             FASTGPT_HOME_DOMAIN=${{ matrix.domain_config.domain }}
++            DOC_TRACK_SRC=${{ secrets.DOC_TRACK_SRC }}
++            DOC_TRACK_SITE_ID=${{ secrets.DOC_TRACK_CN }}
+ 
+       - name: Build and push Docker images (IO)
+         if: matrix.domain_config.suffix == 'io'
+@@ -134,6 +136,8 @@ jobs:
+           platforms: linux/amd64
+           build-args: |
+             FASTGPT_HOME_DOMAIN=${{ matrix.domain_config.domain }}
++            DOC_TRACK_SRC=${{ secrets.DOC_TRACK_SRC }}
++            DOC_TRACK_SITE_ID=${{ secrets.DOC_TRACK_IO }}
+ 
+   update-images:
+     needs: [generate-timestamp, build-images]
+diff --git a/document/Dockerfile b/document/Dockerfile
+index 7c88d341cafa..5eff866c59a1 100644
+--- a/document/Dockerfile
++++ b/document/Dockerfile
+@@ -20,8 +20,12 @@ RUN apk add --no-cache \
+ WORKDIR /app
+ 
+ ARG FASTGPT_HOME_DOMAIN
++ARG DOC_TRACK_SRC
++ARG DOC_TRACK_SITE_ID
+ 
+ ENV FASTGPT_HOME_DOMAIN=$FASTGPT_HOME_DOMAIN
++ENV NEXT_PUBLIC_DOC_TRACK_SRC=$DOC_TRACK_SRC
++ENV NEXT_PUBLIC_DOC_TRACK_SITE_ID=$DOC_TRACK_SITE_ID
+ 
+ COPY . .
+ RUN npm install 
+diff --git a/document/app/[lang]/layout.tsx b/document/app/[lang]/layout.tsx
+index 427fcb4b853d..8078873b332f 100644
+--- a/document/app/[lang]/layout.tsx
++++ b/document/app/[lang]/layout.tsx
+@@ -4,6 +4,7 @@ import { Inter } from 'next/font/google';
+ import type { ReactNode } from 'react';
+ import type { Translations } from 'fumadocs-ui/i18n';
+ import CustomSearchDialog from '@/components/CustomSearchDialog';
++import Script from 'next/script';
+ 
+ const inter = Inter({
+   subsets: ['latin']
+@@ -41,9 +42,21 @@ export default async function Layout({
+ }) {
+   const { lang } = await params;
+ 
++  // Get tracking config from env (site ID is injected per-build by CI)
++  const trackSrc = process.env.NEXT_PUBLIC_DOC_TRACK_SRC;
++  const siteId = process.env.NEXT_PUBLIC_DOC_TRACK_SITE_ID;
++
+   return (
+     <html lang={lang} className={inter.className} suppressHydrationWarning>
+       <body className="flex flex-col min-h-screen">
++        {trackSrc && siteId && (
++          <Script
++            src={trackSrc}
++            data-site-id={siteId}
++            defer
++            strategy="afterInteractive"
++          />
++        )}
+         <RootProvider
+           i18n={{
+             locale: lang,

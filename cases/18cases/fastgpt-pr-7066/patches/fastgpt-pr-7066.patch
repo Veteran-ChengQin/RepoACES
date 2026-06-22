@@ -1,0 +1,905 @@
+diff --git a/document/content/self-host/upgrading/4-15/41504.mdx b/document/content/self-host/upgrading/4-15/41504.mdx
+index 38cc55c1dc8f..e917af79124d 100644
+--- a/document/content/self-host/upgrading/4-15/41504.mdx
++++ b/document/content/self-host/upgrading/4-15/41504.mdx
+@@ -34,6 +34,7 @@ description: 'FastGPT V4.15.0-beta4 更新说明'
+ 3. 应用/知识库增加虚拟列表渲染。
+ 4. 增加单独的 openapi 文档，区分 devapi 文档。
+ 5. 导出工作流模板，同时导出名字和介绍。
++6. HTML 输出自动切换预览。
+ 
+ ## ⚙️ 优化
+ 
+diff --git a/document/data/doc-last-modified.json b/document/data/doc-last-modified.json
+index dbdc43b37cbd..62778128a56d 100644
+--- a/document/data/doc-last-modified.json
++++ b/document/data/doc-last-modified.json
+@@ -416,4 +416,4 @@
+   "content/self-host/upgrading/upgrade-intruction.mdx": "2026-04-26T21:08:47+08:00",
+   "content/toc.en.mdx": "2026-06-10T17:33:23+08:00",
+   "content/toc.mdx": "2026-06-10T17:33:23+08:00"
+-}
+\ No newline at end of file
++}
+diff --git a/projects/app/src/components/Markdown/codeBlock/CodeLight.tsx b/projects/app/src/components/Markdown/codeBlock/CodeLight.tsx
+index e9b87428671c..0288415d21f7 100644
+--- a/projects/app/src/components/Markdown/codeBlock/CodeLight.tsx
++++ b/projects/app/src/components/Markdown/codeBlock/CodeLight.tsx
+@@ -309,6 +309,7 @@ const CodeLight = ({
+ 
+     return (
+       <Box
++        className="code-block-wrapper"
+         my={3}
+         borderRadius={'md'}
+         overflow={'overlay'}
+diff --git a/projects/app/src/components/Markdown/codeBlock/iframe-html.tsx b/projects/app/src/components/Markdown/codeBlock/iframe-html.tsx
+index b5fb71e7a971..cacfb57c351a 100644
+--- a/projects/app/src/components/Markdown/codeBlock/iframe-html.tsx
++++ b/projects/app/src/components/Markdown/codeBlock/iframe-html.tsx
+@@ -1,4 +1,4 @@
+-import React, { useMemo, useState } from 'react';
++import React, { useEffect, useMemo, useRef, useState } from 'react';
+ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+ import {
+   Box,
+@@ -18,6 +18,45 @@ import { useMarkdownWidth } from '../hooks';
+ import type { IconNameType } from '@fastgpt/web/components/common/Icon/type';
+ import { codeLight } from './CodeLight';
+ import MyTooltip from '@fastgpt/web/components/common/MyTooltip';
++import styles from '../index.module.scss';
++
++type HtmlCodeBlockViewMode = 'source' | 'iframe';
++
++/**
++ * 管理 HTML 代码块的 Code/Preview 视图状态。
++ *
++ * 自动预览只服务聊天流式 HTML 输出：流式阶段保持源码，流式结束后切到预览；
++ * 用户主动选择 Code/Preview 后，后续流式状态变化不再覆盖用户选择。
++ */
++const useHtmlCodeBlockViewMode = ({
++  shouldAutoPreview,
++  showAnimation
++}: {
++  shouldAutoPreview: boolean;
++  showAnimation?: boolean;
++}) => {
++  const [viewMode, setViewMode] = useState<HtmlCodeBlockViewMode>(() =>
++    shouldAutoPreview && !showAnimation ? 'iframe' : 'source'
++  );
++  const hasUserSelectedViewRef = useRef(false);
++
++  useEffect(() => {
++    if (!shouldAutoPreview) return;
++    if (hasUserSelectedViewRef.current) return;
++
++    setViewMode(showAnimation ? 'source' : 'iframe');
++  }, [shouldAutoPreview, showAnimation]);
++
++  const selectViewMode = (mode: HtmlCodeBlockViewMode) => {
++    hasUserSelectedViewRef.current = true;
++    setViewMode(mode);
++  };
++
++  return {
++    viewMode,
++    selectViewMode
++  };
++};
+ 
+ const StyledButton = ({
+   label,
+@@ -31,7 +70,7 @@ const StyledButton = ({
+   iconName: IconNameType;
+   onClick: () => void;
+   isActive?: boolean;
+-  viewMode: 'source' | 'iframe';
++  viewMode: HtmlCodeBlockViewMode;
+   isMobile?: boolean;
+ }) => {
+   const isPreview = viewMode === 'iframe';
+@@ -81,20 +120,49 @@ const StyledButton = ({
+   );
+ };
+ 
++const HtmlPreviewIframe = ({ code }: { code: string }) => (
++  <iframe
++    srcDoc={code}
++    sandbox="allow-popups"
++    referrerPolicy="no-referrer"
++    style={{
++      display: 'block',
++      width: '100%',
++      height: '100%',
++      border: 'none',
++      background: 'white'
++    }}
++  />
++);
++
+ const IframeHtmlCodeBlock = ({
+   children,
+   className,
+   codeBlock,
+-  match
++  match,
++  showAnimation,
++  autoPreviewHtmlCodeBlock
+ }: {
+   children: React.ReactNode & React.ReactNode[];
+   className?: string;
+   codeBlock?: boolean;
+   match: RegExpExecArray | null;
++  showAnimation?: boolean;
++  autoPreviewHtmlCodeBlock?: boolean;
+ }) => {
+   const { t } = useTranslation();
+   const { copyData } = useCopyData();
+-  const [viewMode, setViewMode] = useState<'source' | 'iframe'>('source');
++  const code = String(children);
++  const lang = match?.[1]?.toLowerCase();
++  const isHtmlBlock = lang === 'html' || lang === 'htm';
++  const shouldAutoPreview = !!autoPreviewHtmlCodeBlock && isHtmlBlock;
++  // 流式阶段仍展示源码高亮；只额外接管滚动，让最新输出保持可见。
++  const showStreamingSourceCode = !!autoPreviewHtmlCodeBlock && isHtmlBlock && showAnimation;
++  const { viewMode, selectViewMode } = useHtmlCodeBlockViewMode({
++    shouldAutoPreview,
++    showAnimation
++  });
++  const streamingCodeRef = useRef<HTMLPreElement | null>(null);
+   const isPreview = viewMode === 'iframe';
+ 
+   const { isOpen, onOpen, onClose } = useDisclosure();
+@@ -102,6 +170,23 @@ const IframeHtmlCodeBlock = ({
+   const { width, Ref } = useMarkdownWidth();
+   const isMobile = width <= 420;
+ 
++  const SourcePreTag = useMemo(
++    () =>
++      function SourcePreTag(props: React.HTMLAttributes<HTMLPreElement>) {
++        return (
++          <pre
++            {...props}
++            ref={(node) => {
++              if (showStreamingSourceCode) {
++                streamingCodeRef.current = node;
++              }
++            }}
++          />
++        );
++      },
++    [showStreamingSourceCode]
++  );
++
+   const codeBoxName = useMemo(() => {
+     const input = match?.['input'] || '';
+     if (!input) return match?.[1]?.toUpperCase();
+@@ -110,27 +195,23 @@ const IframeHtmlCodeBlock = ({
+     return splitInput[1] || match?.[1]?.toUpperCase();
+   }, [match]);
+ 
+-  const Iframe = useMemo(
+-    () => (
+-      <iframe
+-        srcDoc={String(children)}
+-        sandbox="allow-popups"
+-        referrerPolicy="no-referrer"
+-        style={{
+-          width: '100%',
+-          height: '100%',
+-          border: 'none',
+-          background: 'white'
+-        }}
+-      />
+-    ),
+-    [children]
+-  );
++  useEffect(() => {
++    if (!showStreamingSourceCode) return;
++    if (isPreview) return;
++
++    const node = streamingCodeRef.current;
++    if (!node) return;
++
++    // 源码面板限制最大高度，流式写入时需要跟随到底部才能看到最新代码。
++    node.scrollTop = node.scrollHeight;
++  }, [code, isPreview, showStreamingSourceCode]);
+ 
+   if (codeBlock) {
+     return (
+       <Box
+         ref={Ref}
++        className={`${styles.htmlCodeBlock} code-block-wrapper`}
++        w="100%"
+         my={3}
+         borderRadius={'md'}
+         overflow={'hidden'}
+@@ -139,10 +220,13 @@ const IframeHtmlCodeBlock = ({
+         }
+       >
+         <Flex
++          className="code-header"
+           py={2}
+           px={4}
+           color={'white'}
+           userSelect={'none'}
++          position="relative"
++          zIndex={2}
+           alignItems="center"
+           fontSize={'sm'}
+           gap={1.5}
+@@ -163,19 +247,14 @@ const IframeHtmlCodeBlock = ({
+             color={isPreview ? 'myGray.800' : 'rgba(255, 255, 255, 0.9)'}
+           >
+             {codeBoxName}
+-            <Flex
+-              cursor="pointer"
+-              onClick={() => copyData(String(children))}
+-              alignItems="center"
+-              ml={2}
+-            >
++            <Flex cursor="pointer" onClick={() => copyData(code)} alignItems="center" ml={2}>
+               <Icon name="copy" width="14px" />
+             </Flex>
+           </Box>
+           <StyledButton
+             label={t('common:Code')}
+             iconName="code"
+-            onClick={() => setViewMode('source')}
++            onClick={() => selectViewMode('source')}
+             isActive={viewMode === 'source'}
+             viewMode={viewMode}
+             isMobile={isMobile}
+@@ -183,7 +262,7 @@ const IframeHtmlCodeBlock = ({
+           <StyledButton
+             label={t('common:Preview')}
+             iconName="preview"
+-            onClick={() => setViewMode('iframe')}
++            onClick={() => selectViewMode('iframe')}
+             isActive={viewMode === 'iframe'}
+             viewMode={viewMode}
+             isMobile={isMobile}
+@@ -197,12 +276,19 @@ const IframeHtmlCodeBlock = ({
+           />
+         </Flex>
+         {isPreview ? (
+-          <Box w={width} h="60vh">
+-            {Iframe}
++          <Box className="code-block-body" h={'60vh'}>
++            <HtmlPreviewIframe code={code} />
+           </Box>
+         ) : (
+-          <SyntaxHighlighter style={codeLight as any} language={match?.[1]} PreTag="pre">
+-            {String(children).replace(/&nbsp;/g, ' ')}
++          <SyntaxHighlighter
++            style={codeLight as any}
++            language={match?.[1]}
++            PreTag={SourcePreTag}
++            customStyle={{
++              margin: 0
++            }}
++          >
++            {code.replace(/&nbsp;/g, ' ')}
+           </SyntaxHighlighter>
+         )}
+ 
+@@ -227,7 +313,7 @@ const IframeHtmlCodeBlock = ({
+               </ModalHeader>
+ 
+               <ModalBody p={0} flex="1">
+-                {Iframe}
++                <HtmlPreviewIframe code={code} />
+               </ModalBody>
+             </ModalContent>
+           </Modal>
+diff --git a/projects/app/src/components/Markdown/index.module.scss b/projects/app/src/components/Markdown/index.module.scss
+index a4d7deb185ea..403202c47f80 100644
+--- a/projects/app/src/components/Markdown/index.module.scss
++++ b/projects/app/src/components/Markdown/index.module.scss
+@@ -9,6 +9,9 @@
+   animation: blink 0.6s infinite;
+   vertical-align: baseline;
+ }
++.waitingAnimation > .htmlCodeBlock:last-child::after {
++  display: none;
++}
+ 
+ .animation {
+   height: 20px;
+@@ -495,3 +498,68 @@
+ .mermaid {
+   overflow-x: auto;
+ }
++
++// 聊天 HTML 代码块：内容区随高度伸缩，上限 60vh，超出后滚动。
++.htmlCodeBlock {
++  width: 100%;
++
++  :global(.code-block-body) {
++    width: 100%;
++    max-height: 60vh;
++    overflow: auto;
++
++    iframe {
++      display: block;
++      width: 100%;
++      height: 100%;
++      border: none;
++    }
++  }
++
++  :global(pre) {
++    width: 100%;
++    height: auto !important;
++    max-height: 60vh !important;
++    margin: 0 !important;
++    overflow: auto !important;
++  }
++}
++
++// 完整响应弹窗代码块：外层固定为弹窗内容区 80%，header 固定，内容区内部滚动。
++.codeJsonConstrained {
++  :global(.markdown) :global(.code-block-wrapper),
++  :global(.markdown) :global(.htmlCodeBlock) {
++    display: flex;
++    flex-direction: column;
++    height: var(--response-code-block-height);
++    max-height: var(--response-code-block-height);
++    width: 100%;
++    overflow: hidden;
++    border-radius: var(--chakra-radii-md);
++  }
++
++  :global(.markdown) :global(.code-header) {
++    flex-shrink: 0;
++  }
++
++  :global(.markdown) :global(.code-block-wrapper) pre,
++  :global(.markdown) :global(.htmlCodeBlock) pre,
++  :global(.markdown) :global(.code-block-body) {
++    flex: 1 1 0;
++    min-height: 0;
++    height: auto !important;
++    max-height: none !important;
++    overflow: auto !important;
++    margin: 0 !important;
++    border-bottom-left-radius: var(--chakra-radii-md);
++    border-bottom-right-radius: var(--chakra-radii-md);
++  }
++
++  // HTML 预览区在完整响应弹窗内跟随外层限高，覆盖聊天的 60vh 上限。
++  :global(.markdown) :global(.htmlCodeBlock) :global(.code-block-body) {
++    flex: 1 1 0;
++    min-height: 0;
++    max-height: none !important;
++    overflow: auto !important;
++  }
++}
+diff --git a/projects/app/src/components/Markdown/index.tsx b/projects/app/src/components/Markdown/index.tsx
+index be4f66438732..3cd29126d245 100644
+--- a/projects/app/src/components/Markdown/index.tsx
++++ b/projects/app/src/components/Markdown/index.tsx
+@@ -1,4 +1,4 @@
+-import React, { useCallback, useMemo } from 'react';
++import React, { useCallback, useContext, useMemo } from 'react';
+ import ReactMarkdown from 'react-markdown';
+ import 'katex/dist/katex.min.css';
+ import RemarkMath from 'remark-math'; // Math syntax
+@@ -12,9 +12,9 @@ import dynamic from 'next/dynamic';
+ 
+ import { Box } from '@chakra-ui/react';
+ import { CodeClassNameEnum, mdTextFormat } from './utils';
+-import { useCreation } from 'ahooks';
+ import type { AProps } from './A';
+ import MarkdownTable from '@fastgpt/web/components/common/Markdown/MarkdownTable';
++import { MarkdownRendererRuntimeContext } from './runtimeContext';
+ 
+ const CodeLight = dynamic(() => import('./codeBlock/CodeLight'), { ssr: false });
+ const MermaidCodeBlock = dynamic(() => import('./img/MermaidCodeBlock'), { ssr: false });
+@@ -29,12 +29,56 @@ const ChatGuide = dynamic(() => import('./chat/Guide'), { ssr: false });
+ const QuestionGuide = dynamic(() => import('./chat/QuestionGuide'), { ssr: false });
+ const A = dynamic(() => import('./A'), { ssr: false });
+ 
++function MarkdownImgRenderer(props: any) {
++  const { chatAuthData } = useContext(MarkdownRendererRuntimeContext);
++  return <Image {...props} alt={props.alt} chatAuthData={chatAuthData} />;
++}
++
++function MarkdownCodeRenderer(props: any) {
++  const { showAnimation, autoPreviewHtmlCodeBlock, markdownClassName } = useContext(
++    MarkdownRendererRuntimeContext
++  );
++
++  return (
++    <Code
++      {...props}
++      showAnimation={showAnimation}
++      autoPreviewHtmlCodeBlock={autoPreviewHtmlCodeBlock}
++      markdownClassName={markdownClassName}
++    />
++  );
++}
++
++function MarkdownLinkRenderer(props: any) {
++  const { showAnimation, chatAuthData, onOpenCiteModal } = useContext(
++    MarkdownRendererRuntimeContext
++  );
++
++  return (
++    <A
++      {...props}
++      showAnimation={showAnimation}
++      chatAuthData={chatAuthData}
++      onOpenCiteModal={onOpenCiteModal}
++    />
++  );
++}
++
++const markdownComponents = {
++  img: MarkdownImgRenderer,
++  pre: RewritePre,
++  code: MarkdownCodeRenderer,
++  table: MarkdownTable as any,
++  a: MarkdownLinkRenderer
++};
++
+ type Props = {
+   source?: string;
+   showAnimation?: boolean;
+   isDisabled?: boolean;
+   forbidZhFormat?: boolean;
+   className?: string;
++  autoPreviewHtmlCodeBlock?: boolean;
+ } & AProps;
+ const Markdown = (props: Props) => {
+   const source = props.source || '';
+@@ -51,26 +95,21 @@ const MarkdownRender = ({
+   isDisabled,
+   forbidZhFormat,
+   className,
++  autoPreviewHtmlCodeBlock,
+ 
+   chatAuthData,
+   onOpenCiteModal
+ }: Props) => {
+-  const components = useCreation(() => {
+-    return {
+-      img: (props: any) => <Image {...props} alt={props.alt} chatAuthData={chatAuthData} />,
+-      pre: RewritePre,
+-      code: (props: any) => <Code {...props} markdownClassName={className} />,
+-      table: MarkdownTable as any,
+-      a: (props: any) => (
+-        <A
+-          {...props}
+-          showAnimation={showAnimation}
+-          chatAuthData={chatAuthData}
+-          onOpenCiteModal={onOpenCiteModal}
+-        />
+-      )
+-    };
+-  }, [chatAuthData, onOpenCiteModal, showAnimation]);
++  const renderContextValue = useMemo(
++    () => ({
++      showAnimation,
++      autoPreviewHtmlCodeBlock,
++      markdownClassName: className,
++      chatAuthData,
++      onOpenCiteModal
++    }),
++    [autoPreviewHtmlCodeBlock, chatAuthData, className, onOpenCiteModal, showAnimation]
++  );
+ 
+   const formatSource = useMemo(() => {
+     if (showAnimation || forbidZhFormat) return source;
+@@ -82,21 +121,25 @@ const MarkdownRender = ({
+   }, []);
+ 
+   return (
+-    <Box position={'relative'}>
+-      <ReactMarkdown
+-        className={`markdown ${styles.markdown}
++    <MarkdownRendererRuntimeContext.Provider value={renderContextValue}>
++      <Box position={'relative'}>
++        <ReactMarkdown
++          className={`markdown ${styles.markdown}
+       ${className || ''}
+       ${showAnimation ? `${formatSource ? styles.waitingAnimation : styles.animation}` : ''}
+     `}
+-        remarkPlugins={[RemarkMath, [RemarkGfm, { singleTilde: false }], RemarkBreaks]}
+-        rehypePlugins={[RehypeKatex, [RehypeExternalLinks, { target: '_blank' }]]}
+-        components={components}
+-        urlTransform={urlTransform}
+-      >
+-        {formatSource}
+-      </ReactMarkdown>
+-      {isDisabled && <Box position={'absolute'} top={0} right={0} left={0} bottom={0} />}
+-    </Box>
++          remarkPlugins={[RemarkMath, [RemarkGfm, { singleTilde: false }], RemarkBreaks]}
++          rehypePlugins={[RehypeKatex, [RehypeExternalLinks, { target: '_blank' }]]}
++          components={markdownComponents}
++          urlTransform={urlTransform}
++        >
++          {formatSource}
++        </ReactMarkdown>
++        {isDisabled && (
++          <Box position={'absolute'} top={0} right={0} left={0} bottom={0} zIndex={1} />
++        )}
++      </Box>
++    </MarkdownRendererRuntimeContext.Provider>
+   );
+ };
+ 
+@@ -104,50 +147,63 @@ export default React.memo(Markdown);
+ 
+ /* Custom dom */
+ function Code(e: any) {
+-  const { className, codeBlock, children, markdownClassName } = e;
++  const {
++    className,
++    codeBlock,
++    children,
++    showAnimation,
++    autoPreviewHtmlCodeBlock,
++    markdownClassName
++  } = e;
+   const match = /language-(\w+)/.exec(className || '');
+   const codeType = match?.[1]?.toLowerCase();
+ 
+   const strChildren = String(children);
+ 
+-  const Component = useMemo(() => {
+-    if (codeType === CodeClassNameEnum.mermaid) {
+-      return <MermaidCodeBlock code={strChildren} />;
+-    }
+-    if (codeType === CodeClassNameEnum.guide) {
+-      return <ChatGuide text={strChildren} className={markdownClassName} />;
+-    }
+-    if (codeType === CodeClassNameEnum.questionguide) {
+-      return <QuestionGuide text={strChildren} />;
+-    }
+-    if (codeType === CodeClassNameEnum.echarts) {
+-      return <EChartsCodeBlock code={strChildren} />;
+-    }
+-    if (codeType === CodeClassNameEnum.iframe) {
+-      return <IframeCodeBlock code={strChildren} />;
+-    }
+-    if (codeType === CodeClassNameEnum.html || codeType === CodeClassNameEnum.svg) {
+-      return (
+-        <IframeHtmlCodeBlock className={className} codeBlock={codeBlock} match={match}>
+-          {children}
+-        </IframeHtmlCodeBlock>
+-      );
+-    }
+-    if (codeType === CodeClassNameEnum.video) {
+-      return <VideoBlock code={strChildren} />;
+-    }
+-    if (codeType === CodeClassNameEnum.audio) {
+-      return <AudioBlock code={strChildren} />;
+-    }
+-
++  if (codeType === CodeClassNameEnum.mermaid) {
++    return <MermaidCodeBlock code={strChildren} />;
++  }
++  if (codeType === CodeClassNameEnum.guide) {
++    return <ChatGuide text={strChildren} className={markdownClassName} />;
++  }
++  if (codeType === CodeClassNameEnum.questionguide) {
++    return <QuestionGuide text={strChildren} />;
++  }
++  if (codeType === CodeClassNameEnum.echarts) {
++    return <EChartsCodeBlock code={strChildren} />;
++  }
++  if (codeType === CodeClassNameEnum.iframe) {
++    return <IframeCodeBlock code={strChildren} />;
++  }
++  if (
++    codeType === CodeClassNameEnum.html ||
++    codeType === CodeClassNameEnum.htm ||
++    codeType === CodeClassNameEnum.svg
++  ) {
+     return (
+-      <CodeLight className={className} codeBlock={codeBlock} match={match}>
++      <IframeHtmlCodeBlock
++        className={className}
++        codeBlock={codeBlock}
++        match={match}
++        showAnimation={showAnimation}
++        autoPreviewHtmlCodeBlock={autoPreviewHtmlCodeBlock}
++      >
+         {children}
+-      </CodeLight>
++      </IframeHtmlCodeBlock>
+     );
+-  }, [codeType, className, codeBlock, match, children, strChildren, markdownClassName]);
++  }
++  if (codeType === CodeClassNameEnum.video) {
++    return <VideoBlock code={strChildren} />;
++  }
++  if (codeType === CodeClassNameEnum.audio) {
++    return <AudioBlock code={strChildren} />;
++  }
+ 
+-  return Component;
++  return (
++    <CodeLight className={className} codeBlock={codeBlock} match={match}>
++      {children}
++    </CodeLight>
++  );
+ }
+ 
+ function Image({ src, chatAuthData }: { src?: string; chatAuthData?: AProps['chatAuthData'] }) {
+diff --git a/projects/app/src/components/Markdown/runtimeContext.ts b/projects/app/src/components/Markdown/runtimeContext.ts
+new file mode 100644
+index 000000000000..109eef736eed
+--- /dev/null
++++ b/projects/app/src/components/Markdown/runtimeContext.ts
+@@ -0,0 +1,17 @@
++import React from 'react';
++import type { AProps } from './A';
++
++export type MarkdownRendererRuntimeContextValue = {
++  showAnimation?: boolean;
++  autoPreviewHtmlCodeBlock?: boolean;
++  markdownClassName?: string;
++  chatAuthData?: AProps['chatAuthData'];
++  onOpenCiteModal?: AProps['onOpenCiteModal'];
++};
++
++/**
++ * 仅用于给 react-markdown 的稳定 components 传递 renderer 运行时参数。
++ * 不要放上层聊天/工作流业务状态，避免 Markdown 组件变成业务状态容器。
++ */
++export const MarkdownRendererRuntimeContext =
++  React.createContext<MarkdownRendererRuntimeContextValue>({});
+diff --git a/projects/app/src/components/Markdown/utils.ts b/projects/app/src/components/Markdown/utils.ts
+index 75722b5f3d41..55aed9e71e40 100644
+--- a/projects/app/src/components/Markdown/utils.ts
++++ b/projects/app/src/components/Markdown/utils.ts
+@@ -8,6 +8,7 @@ export enum CodeClassNameEnum {
+   latex = 'latex',
+   iframe = 'iframe',
+   html = 'html',
++  htm = 'htm',
+   svg = 'svg',
+   video = 'video',
+   audio = 'audio'
+diff --git a/projects/app/src/components/core/chat/components/AIResponseBox/RenderText.tsx b/projects/app/src/components/core/chat/components/AIResponseBox/RenderText.tsx
+index 863092874e20..f11058880050 100644
+--- a/projects/app/src/components/core/chat/components/AIResponseBox/RenderText.tsx
++++ b/projects/app/src/components/core/chat/components/AIResponseBox/RenderText.tsx
+@@ -49,6 +49,7 @@ const RenderText = React.memo(function RenderText({
+       chatAuthData={chatAuthData}
+       onOpenCiteModal={onOpenCiteModal}
+       isDisabled={isDisabled}
++      autoPreviewHtmlCodeBlock
+     />
+   );
+ });
+diff --git a/projects/app/src/components/core/chat/components/WholeResponseModal/ResponseBox.tsx b/projects/app/src/components/core/chat/components/WholeResponseModal/ResponseBox.tsx
+index 0cddc064fc17..f7cf622fa537 100644
+--- a/projects/app/src/components/core/chat/components/WholeResponseModal/ResponseBox.tsx
++++ b/projects/app/src/components/core/chat/components/WholeResponseModal/ResponseBox.tsx
+@@ -1,5 +1,6 @@
+-import React, { useCallback, useMemo, useState } from 'react';
++import React, { useCallback, useMemo, useRef, useState } from 'react';
+ import { Box, Flex, useDisclosure } from '@chakra-ui/react';
++import { useSize } from 'ahooks';
+ import dynamic from 'next/dynamic';
+ import type { ChatHistoryItemResType } from '@fastgpt/global/core/chat/type';
+ import { moduleTemplatesFlat } from '@fastgpt/global/core/workflow/template/constants';
+@@ -64,12 +65,16 @@ export const ResponseBox = React.memo(function ResponseBox({
+     onClose: onCloseMobileModal
+   } = useDisclosure();
+ 
++  const contentPanelRef = useRef<HTMLDivElement>(null);
++  const contentPanelSize = useSize(contentPanelRef);
++
+   return (
+     <>
+       {isPc && !useMobile ? (
+         <Flex
+           overflow={'hidden'}
+           height={'100%'}
++          minH={0}
+           bg={'myGray.25'}
+           border={'1px solid'}
+           borderColor={'myGray.200'}
+@@ -90,11 +95,12 @@ export const ResponseBox = React.memo(function ResponseBox({
+               onChange={setCurrentNodeId}
+             />
+           </Box>
+-          <Box flex={'1 0 0'} w={0} height={'100%'}>
++          <Box ref={contentPanelRef} flex={'1 0 0'} w={0} h={'100%'} minH={0} overflow={'hidden'}>
+             <WholeResponseContent
+               dataId={dataId}
+               activeModule={activeModule}
+               hideTabs={hideTabs}
++              contentHeight={contentPanelSize?.height}
+               onOpenRequestIdDetail={handleOpenRequestIdDetail}
+             />
+           </Box>
+@@ -155,11 +161,12 @@ export const ResponseBox = React.memo(function ResponseBox({
+                   {t(activeModule.moduleName as any, activeModule.moduleNameArgs)}
+                 </Box>
+               </Flex>
+-              <Box flex={'1 0 0'}>
++              <Box ref={contentPanelRef} flex={'1 0 0'} minH={0} overflow={'hidden'}>
+                 <WholeResponseContent
+                   dataId={dataId}
+                   activeModule={activeModule}
+                   hideTabs={hideTabs}
++                  contentHeight={contentPanelSize?.height}
+                   onOpenRequestIdDetail={handleOpenRequestIdDetail}
+                 />
+               </Box>
+diff --git a/projects/app/src/components/core/chat/components/WholeResponseModal/ResponseRows.tsx b/projects/app/src/components/core/chat/components/WholeResponseModal/ResponseRows.tsx
+index 1a5b009f890d..15f414e0c2b1 100644
+--- a/projects/app/src/components/core/chat/components/WholeResponseModal/ResponseRows.tsx
++++ b/projects/app/src/components/core/chat/components/WholeResponseModal/ResponseRows.tsx
+@@ -1,8 +1,10 @@
++import { type CSSProperties } from 'react';
+ import { Box, Flex, Grid, HStack } from '@chakra-ui/react';
+ import dynamic from 'next/dynamic';
+ import type { ChatHistoryItemResType } from '@fastgpt/global/core/chat/type';
+ import { getChildrenResponses } from '@fastgpt/global/core/chat/utils';
+ import { DatasetSearchModeMap } from '@fastgpt/global/core/dataset/constants';
++import styles from '@/components/Markdown/index.module.scss';
+ import { formatNumber } from '@fastgpt/global/common/math/tools';
+ import { getFileIcon } from '@fastgpt/global/common/file/icon';
+ import { completionFinishReasonMap } from '@fastgpt/global/core/ai/constants';
+@@ -337,8 +339,25 @@ const ReadFilesRows = ({ activeModule }: { activeModule: ChatHistoryItemResType
+   );
+ };
+ 
+-export const WorkflowResultRows = ({ activeModule }: { activeModule: ChatHistoryItemResType }) => {
++export const WorkflowResultRows = ({
++  activeModule,
++  contentHeight
++}: {
++  activeModule: ChatHistoryItemResType;
++  contentHeight?: number;
++}) => {
+   const { t } = useSafeTranslation();
++  const responseCodeBlockHeight = contentHeight
++    ? `${Math.floor(contentHeight * 0.8)}px`
++    : undefined;
++  const codeBlockContentBoxProps = responseCodeBlockHeight
++    ? {
++        className: styles.codeJsonConstrained,
++        style: {
++          '--response-code-block-height': responseCodeBlockHeight
++        } as CSSProperties
++      }
++    : undefined;
+ 
+   return (
+     <>
+@@ -372,9 +391,21 @@ export const WorkflowResultRows = ({ activeModule }: { activeModule: ChatHistory
+       />
+       <Row label={t('chat:tool_input')} value={activeModule.toolInput} />
+       <Row label={t('chat:tool_output')} value={activeModule.pluginOutput} />
+-      <Row label={t('common:core.chat.response.text output')} value={activeModule.textOutput} />
+-      <Row label={t('workflow:response.Custom inputs')} value={activeModule.customInputs} />
+-      <Row label={t('workflow:response.Custom outputs')} value={activeModule.customOutputs} />
++      <Row
++        label={t('common:core.chat.response.text output')}
++        value={activeModule.textOutput}
++        contentBoxProps={codeBlockContentBoxProps}
++      />
++      <Row
++        label={t('workflow:response.Custom inputs')}
++        value={activeModule.customInputs}
++        contentBoxProps={codeBlockContentBoxProps}
++      />
++      <Row
++        label={t('workflow:response.Custom outputs')}
++        value={activeModule.customOutputs}
++        contentBoxProps={codeBlockContentBoxProps}
++      />
+       <Row label={t('workflow:response.Code log')} value={activeModule.codeLog} />
+       <ReadFilesRows activeModule={activeModule} />
+       <Row
+diff --git a/projects/app/src/components/core/chat/components/WholeResponseModal/Row.tsx b/projects/app/src/components/core/chat/components/WholeResponseModal/Row.tsx
+index 2319809f1a47..28a9da636074 100644
+--- a/projects/app/src/components/core/chat/components/WholeResponseModal/Row.tsx
++++ b/projects/app/src/components/core/chat/components/WholeResponseModal/Row.tsx
+@@ -2,6 +2,7 @@ import { useMemo, type ReactNode } from 'react';
+ import { Box, type BoxProps } from '@chakra-ui/react';
+ import Markdown from '@/components/Markdown';
+ import { useSafeTranslation } from '@fastgpt/web/hooks/useSafeTranslation';
++import markdownStyles from '../../ChatContainer/ChatBox/components/AIChatBubble/index.module.scss';
+ 
+ export const responseRowValueBoxStyles: BoxProps = {
+   minH: '32px',
+@@ -44,12 +45,14 @@ export const Row = ({
+   label,
+   value,
+   rawDom,
+-  rawDomBoxProps
++  rawDomBoxProps,
++  contentBoxProps
+ }: {
+   label: string;
+   value?: string | number | boolean | object;
+   rawDom?: ReactNode;
+   rawDomBoxProps?: BoxProps;
++  contentBoxProps?: BoxProps;
+ }) => {
+   const { t } = useSafeTranslation();
+   const val = value || rawDom;
+@@ -57,7 +60,7 @@ export const Row = ({
+ 
+   const formatValue = useMemo(() => {
+     if (isObject) {
+-      return `~~~json\n${JSON.stringify(value, null, 2)}`;
++      return `~~~json\n${JSON.stringify(value, null, 2)}\n~~~`;
+     }
+     if (typeof value === 'string') {
+       return t(value);
+@@ -87,12 +90,16 @@ export const Row = ({
+           })}
+     >
+       <Box
++        {...contentBoxProps}
++        minW={0}
++        w={'100%'}
+         sx={{
+           '& .markdown': { fontSize: '12px !important' },
+-          '& .markdown pre': { fontSize: '12px !important' }
++          '& .markdown pre': { fontSize: '12px !important' },
++          ...contentBoxProps?.sx
+         }}
+       >
+-        <Markdown source={formatValue} />
++        <Markdown className={markdownStyles.markdown} source={formatValue} />
+       </Box>
+     </RowRender>
+   );
+diff --git a/projects/app/src/components/core/chat/components/WholeResponseModal/WholeResponseContent.tsx b/projects/app/src/components/core/chat/components/WholeResponseModal/WholeResponseContent.tsx
+index 6b7a54bbfadf..0b10d07428ed 100644
+--- a/projects/app/src/components/core/chat/components/WholeResponseModal/WholeResponseContent.tsx
++++ b/projects/app/src/components/core/chat/components/WholeResponseModal/WholeResponseContent.tsx
+@@ -7,11 +7,13 @@ export const WholeResponseContent = ({
+   activeModule,
+   hideTabs,
+   dataId,
++  contentHeight,
+   onOpenRequestIdDetail
+ }: {
+   activeModule: ChatHistoryItemResType;
+   hideTabs?: boolean;
+   dataId?: string;
++  contentHeight?: number;
+   onOpenRequestIdDetail?: (requestId: string) => void;
+ }) => {
+   const contentRef = useRef<HTMLDivElement>(null);
+@@ -27,6 +29,7 @@ export const WholeResponseContent = ({
+   return (
+     <Box
+       h={'100%'}
++      minH={0}
+       ref={contentRef}
+       py={3}
+       px={hideTabs ? 4 : 3}
+@@ -43,7 +46,7 @@ export const WholeResponseContent = ({
+       <CommonInfoRows activeModule={activeModule} />
+       <AiChatRows activeModule={activeModule} onOpenRequestIdDetail={onOpenRequestIdDetail} />
+       <DatasetSearchRows activeModule={activeModule} dataId={dataId} />
+-      <WorkflowResultRows activeModule={activeModule} />
++      <WorkflowResultRows activeModule={activeModule} contentHeight={contentHeight} />
+     </Box>
+   );
+ };
+diff --git a/projects/app/src/components/core/chat/components/WholeResponseModal/index.tsx b/projects/app/src/components/core/chat/components/WholeResponseModal/index.tsx
+index 17d69e7be9e3..ec379dfc2fdd 100644
+--- a/projects/app/src/components/core/chat/components/WholeResponseModal/index.tsx
++++ b/projects/app/src/components/core/chat/components/WholeResponseModal/index.tsx
+@@ -31,7 +31,7 @@ const WholeResponseModal = ({ onClose, dataId }: { onClose: () => void; dataId:
+       w={['90vw', '880px']}
+       maxW={['90vw', '880px']}
+       h={['90vh', '80vh']}
+-      maxH={['90vh', '700px']}
++      maxH={['90vh', '80vh']}
+       headerStyles={{
+         px: [5, 8],
+         pt: [6, 8]

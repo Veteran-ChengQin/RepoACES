@@ -1,0 +1,27 @@
+id: fastgpt-pr-7072
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "1d7b8768aecd53ae59372fd68b10af0e80722c79"
+  pr_number: 7072
+  pr_url: https://github.com/labring/FastGPT/pull/7072
+  pr_title_raw: "feat: upload parsed docx images from read file worker"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    - add a generic WorkerPool uploadFile mid-task channel so readFile workers can ask the main thread to upload parsed assets
+    - change docx image parsing to upload image buffers through the main thread and write the returned S3 key into markdown
+    - pass parsed-image prefixes through dataset, workflow, and agent file parsing paths; keep CSV-only template/backup flows unchanged
+    - allow uploadImage2S3Bucket to accept Buffer input while preserving existing base64 callers
+
+validation:
+  head_commit: "bfaef5eb8b9ac0a585455db87eeb7c7baa1f6b2f"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-7072.patch"
+  patch_sha256: "81f9c0b885c187c4cb6b31b3e13c96cd25c47b9c99b40db85648756aeda397e5"
+  changed_files_file: "patches/fastgpt-pr-7072.changed_files.txt"
+  manual_functionality_description: |
+    Check that DOCX image parsing can upload parsed image buffers from read-file workers through the main-thread upload channel.
+    The resulting markdown should contain returned S3 keys, parsed-image prefixes should flow through dataset, workflow, and agent file parsing paths, CSV-only template or backup flows should stay unchanged, and existing base64 image upload callers should continue to work.

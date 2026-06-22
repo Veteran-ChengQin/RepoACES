@@ -1,0 +1,27 @@
+id: fastgpt-pr-7140
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "62ed465571fec59b5ebdc7b852c91368efd7f442"
+  pr_number: 7140
+  pr_url: https://github.com/labring/FastGPT/pull/7140
+  pr_title_raw: "feat: add agent dataset auth entry"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    - Add `authTmbId` to app dataset params and default app form data.
+    - Preserve and restore the dataset auth setting for SimpleApp, ChatAgent, and Agent V2 workflows.
+    - Apply dataset auth filtering to Agent/Agent V2 dataset context and real dataset-search tool execution when 使用者鉴权 is enabled.
+    - Add visible 使用者鉴权 switches in SimpleApp, ChatAgent, and Agent V2 dataset sections.
+
+validation:
+  head_commit: "3d02ffbcf0ab44232b9dffabeacae31cb50ff56b"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-7140.patch"
+  patch_sha256: "6d5dbe15b98c191671a0bfd11795f04c955ac35d34821bccf58156f2e5f2b78b"
+  changed_files_file: "patches/fastgpt-pr-7140.changed_files.txt"
+  manual_functionality_description: |
+    Check that Agent dataset authorization can be configured and enforced end to end.
+    SimpleApp, ChatAgent, and Agent V2 dataset sections should expose the user-authorization switch, the setting should be off by default and persist through form/workflow round trips, Agent runtime context and real dataset-search tool execution should filter datasets by the running member when enabled, and disabled auth should preserve the previous dataset behavior.

@@ -1,0 +1,340 @@
+diff --git a/deploy/dev/docker-compose.cn.yml b/deploy/dev/docker-compose.cn.yml
+index 45bd0cdf467c..f2005c03486f 100644
+--- a/deploy/dev/docker-compose.cn.yml
++++ b/deploy/dev/docker-compose.cn.yml
+@@ -48,6 +48,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/deploy/dev/docker-compose.yml b/deploy/dev/docker-compose.yml
+index 8226df375b08..a91211255b6b 100644
+--- a/deploy/dev/docker-compose.yml
++++ b/deploy/dev/docker-compose.yml
+@@ -48,6 +48,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/deploy/docker/cn/docker-compose.milvus.yml b/deploy/docker/cn/docker-compose.milvus.yml
+index 058c5ab3fe84..218b9950b651 100644
+--- a/deploy/docker/cn/docker-compose.milvus.yml
++++ b/deploy/docker/cn/docker-compose.milvus.yml
+@@ -99,6 +99,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/deploy/docker/cn/docker-compose.oceanbase.yml b/deploy/docker/cn/docker-compose.oceanbase.yml
+index 1d287c19d389..401c54726045 100644
+--- a/deploy/docker/cn/docker-compose.oceanbase.yml
++++ b/deploy/docker/cn/docker-compose.oceanbase.yml
+@@ -76,6 +76,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/deploy/docker/cn/docker-compose.pg.yml b/deploy/docker/cn/docker-compose.pg.yml
+index ccce9b2526bf..676eec0821df 100644
+--- a/deploy/docker/cn/docker-compose.pg.yml
++++ b/deploy/docker/cn/docker-compose.pg.yml
+@@ -57,6 +57,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/deploy/docker/cn/docker-compose.zilliz.yml b/deploy/docker/cn/docker-compose.zilliz.yml
+index 20fa6f3822ed..9ed29d97fa30 100644
+--- a/deploy/docker/cn/docker-compose.zilliz.yml
++++ b/deploy/docker/cn/docker-compose.zilliz.yml
+@@ -40,6 +40,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/deploy/docker/global/docker-compose.milvus.yml b/deploy/docker/global/docker-compose.milvus.yml
+index 6dc6527fd371..344a485b2dd7 100644
+--- a/deploy/docker/global/docker-compose.milvus.yml
++++ b/deploy/docker/global/docker-compose.milvus.yml
+@@ -99,6 +99,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/deploy/docker/global/docker-compose.oceanbase.yml b/deploy/docker/global/docker-compose.oceanbase.yml
+index e38eb9672146..f44d01e40355 100644
+--- a/deploy/docker/global/docker-compose.oceanbase.yml
++++ b/deploy/docker/global/docker-compose.oceanbase.yml
+@@ -76,6 +76,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/deploy/docker/global/docker-compose.pg.yml b/deploy/docker/global/docker-compose.pg.yml
+index facce6202a76..7720868a43bf 100644
+--- a/deploy/docker/global/docker-compose.pg.yml
++++ b/deploy/docker/global/docker-compose.pg.yml
+@@ -57,6 +57,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/deploy/docker/global/docker-compose.ziliiz.yml b/deploy/docker/global/docker-compose.ziliiz.yml
+index b68566d854b0..2858da416112 100644
+--- a/deploy/docker/global/docker-compose.ziliiz.yml
++++ b/deploy/docker/global/docker-compose.ziliiz.yml
+@@ -40,6 +40,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/deploy/templates/docker-compose.dev.yml b/deploy/templates/docker-compose.dev.yml
+index c231a6b67642..132c517c54c6 100644
+--- a/deploy/templates/docker-compose.dev.yml
++++ b/deploy/templates/docker-compose.dev.yml
+@@ -48,6 +48,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/deploy/templates/docker-compose.prod.yml b/deploy/templates/docker-compose.prod.yml
+index fe3fc8252961..a0cc60c2932a 100644
+--- a/deploy/templates/docker-compose.prod.yml
++++ b/deploy/templates/docker-compose.prod.yml
+@@ -39,6 +39,12 @@ ${{vec.db}}
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/document/public/deploy/docker/cn/docker-compose.milvus.yml b/document/public/deploy/docker/cn/docker-compose.milvus.yml
+index 058c5ab3fe84..218b9950b651 100644
+--- a/document/public/deploy/docker/cn/docker-compose.milvus.yml
++++ b/document/public/deploy/docker/cn/docker-compose.milvus.yml
+@@ -99,6 +99,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/document/public/deploy/docker/cn/docker-compose.oceanbase.yml b/document/public/deploy/docker/cn/docker-compose.oceanbase.yml
+index 1d287c19d389..401c54726045 100644
+--- a/document/public/deploy/docker/cn/docker-compose.oceanbase.yml
++++ b/document/public/deploy/docker/cn/docker-compose.oceanbase.yml
+@@ -76,6 +76,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/document/public/deploy/docker/cn/docker-compose.pg.yml b/document/public/deploy/docker/cn/docker-compose.pg.yml
+index ccce9b2526bf..676eec0821df 100644
+--- a/document/public/deploy/docker/cn/docker-compose.pg.yml
++++ b/document/public/deploy/docker/cn/docker-compose.pg.yml
+@@ -57,6 +57,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/document/public/deploy/docker/cn/docker-compose.zilliz.yml b/document/public/deploy/docker/cn/docker-compose.zilliz.yml
+index 20fa6f3822ed..9ed29d97fa30 100644
+--- a/document/public/deploy/docker/cn/docker-compose.zilliz.yml
++++ b/document/public/deploy/docker/cn/docker-compose.zilliz.yml
+@@ -40,6 +40,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/document/public/deploy/docker/global/docker-compose.milvus.yml b/document/public/deploy/docker/global/docker-compose.milvus.yml
+index 6dc6527fd371..344a485b2dd7 100644
+--- a/document/public/deploy/docker/global/docker-compose.milvus.yml
++++ b/document/public/deploy/docker/global/docker-compose.milvus.yml
+@@ -99,6 +99,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/document/public/deploy/docker/global/docker-compose.oceanbase.yml b/document/public/deploy/docker/global/docker-compose.oceanbase.yml
+index e38eb9672146..f44d01e40355 100644
+--- a/document/public/deploy/docker/global/docker-compose.oceanbase.yml
++++ b/document/public/deploy/docker/global/docker-compose.oceanbase.yml
+@@ -76,6 +76,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/document/public/deploy/docker/global/docker-compose.pg.yml b/document/public/deploy/docker/global/docker-compose.pg.yml
+index facce6202a76..7720868a43bf 100644
+--- a/document/public/deploy/docker/global/docker-compose.pg.yml
++++ b/document/public/deploy/docker/global/docker-compose.pg.yml
+@@ -57,6 +57,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c
+diff --git a/document/public/deploy/docker/global/docker-compose.ziliiz.yml b/document/public/deploy/docker/global/docker-compose.ziliiz.yml
+index b68566d854b0..2858da416112 100644
+--- a/document/public/deploy/docker/global/docker-compose.ziliiz.yml
++++ b/document/public/deploy/docker/global/docker-compose.ziliiz.yml
+@@ -40,6 +40,12 @@ services:
+       - MONGO_INITDB_ROOT_PASSWORD=mypassword
+     volumes:
+       - ./mongo/data:/data/db
++    healthcheck:
++      test: ['CMD', 'mongo', '-u', 'myusername', '-p', 'mypassword', '--authenticationDatabase', 'admin', '--eval', "db.adminCommand('ping')"]
++      interval: 10s
++      timeout: 5s
++      retries: 5
++      start_period: 30s
+     entrypoint:
+       - bash
+       - -c

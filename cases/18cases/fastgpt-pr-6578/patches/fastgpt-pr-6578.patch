@@ -1,0 +1,2382 @@
+diff --git a/packages/global/core/chat/type.ts b/packages/global/core/chat/type.ts
+index 608ae1944ad5..49fa467234f8 100644
+--- a/packages/global/core/chat/type.ts
++++ b/packages/global/core/chat/type.ts
+@@ -69,13 +69,15 @@ export type SandboxStatusItemType = {
+   providerSandboxId?: string; // present on 'ready' for edit-debug
+ };
+ 
+-/* Skill call announce */
+-export type SkillCallItemType = {
+-  name: string; // skill name
+-  description: string; // skill description
+-  avatar?: string; // skill avatar
+-  skillMdPath: string; // path of the SKILL.md being loaded
+-};
++/* Skill module response */
++export const SkillModuleResponseItemSchema = z.object({
++  id: z.string(),
++  skillName: z.string(),
++  skillAvatar: z.string(),
++  description: z.string(),
++  skillMdPath: z.string()
++});
++export type SkillModuleResponseItemType = z.infer<typeof SkillModuleResponseItemSchema>;
+ 
+ /* --------- chat ---------- */
+ export type ChatSchemaType = {
+@@ -185,6 +187,7 @@ export const AIChatItemValueSchema = z.object({
+     })
+     .nullish(),
+   tools: z.array(ToolModuleResponseItemSchema).nullish(),
++  skills: z.array(SkillModuleResponseItemSchema).nullish(),
+   interactive: WorkflowInteractiveResponseTypeSchema.optional(),
+   plan: AgentPlanSchema.nullish(),
+   stepTitle: StepTitleItemSchema.nullish(),
+diff --git a/packages/global/core/workflow/runtime/type.ts b/packages/global/core/workflow/runtime/type.ts
+index df3c72a98f03..59f7e2f9ca6f 100644
+--- a/packages/global/core/workflow/runtime/type.ts
++++ b/packages/global/core/workflow/runtime/type.ts
+@@ -72,6 +72,7 @@ export type ChatDispatchProps = {
+   lastInteractive?: WorkflowInteractiveResponseType; // last interactive response
+   stream: boolean;
+   retainDatasetCite?: boolean;
++  showSkillReferences?: boolean;
+   maxRunTimes: number;
+   isToolCall?: boolean;
+   workflowStreamResponse?: WorkflowResponseType;
+diff --git a/packages/global/support/outLink/type.ts b/packages/global/support/outLink/type.ts
+index 79a158a5930d..f590f0b7deda 100644
+--- a/packages/global/support/outLink/type.ts
++++ b/packages/global/support/outLink/type.ts
+@@ -63,6 +63,8 @@ export type OutLinkSchema<T extends OutlinkAppType = undefined> = {
+   showCite: boolean;
+   // whether to show the running status
+   showRunningStatus: boolean;
++  // whether to show skill reference logs
++  showSkillReferences: boolean;
+   // whether to show the full text reader
+   showFullText: boolean;
+   // whether can download source
+@@ -98,6 +100,7 @@ export type OutLinkEditType<T extends OutlinkAppType = undefined> = {
+   name: string;
+   showCite?: OutLinkSchema<T>['showCite'];
+   showRunningStatus?: OutLinkSchema<T>['showRunningStatus'];
++  showSkillReferences?: OutLinkSchema<T>['showSkillReferences'];
+   showFullText?: OutLinkSchema<T>['showFullText'];
+   canDownloadSource?: OutLinkSchema<T>['canDownloadSource'];
+   // response when request
+@@ -112,6 +115,7 @@ export type OutLinkEditType<T extends OutlinkAppType = undefined> = {
+ 
+ export const PlaygroundVisibilityConfigSchema = z.object({
+   showRunningStatus: z.boolean(),
++  showSkillReferences: z.boolean(),
+   showCite: z.boolean(),
+   showFullText: z.boolean(),
+   canDownloadSource: z.boolean(),
+diff --git a/packages/service/core/agentSkills/zipBuilder.ts b/packages/service/core/agentSkills/zipBuilder.ts
+index 766017ec8155..90bda2c25863 100644
+--- a/packages/service/core/agentSkills/zipBuilder.ts
++++ b/packages/service/core/agentSkills/zipBuilder.ts
+@@ -15,6 +15,9 @@
+ 
+ import JSZip from 'jszip';
+ 
++// Re-export JSZip for test files that need direct access
++export { JSZip };
++
+ export type CreateSkillPackageParams = {
+   name: string;
+   skillMd: string;
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/capability/sandboxSkills.ts b/packages/service/core/workflow/dispatch/ai/agent/capability/sandboxSkills.ts
+index a614872cd2f0..5c9672c50be3 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/capability/sandboxSkills.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/capability/sandboxSkills.ts
+@@ -29,7 +29,10 @@ import {
+ import { getLogger, LogCategories } from '../../../../../../common/logger';
+ import { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
+ import type { WorkflowResponseType } from '../../../type';
+-import type { SandboxStatusItemType } from '@fastgpt/global/core/chat/type';
++import type {
++  AIChatItemValueItemType,
++  SandboxStatusItemType
++} from '@fastgpt/global/core/chat/type';
+ import type { AgentSandboxContext, DeployedSkillInfo } from '../sub/sandbox/types';
+ import { MongoAgentSkills } from '../../../../../agentSkills/schema';
+ import { MongoSandboxInstance } from '../../../../../ai/sandbox/schema';
+@@ -38,6 +41,12 @@ import { downloadSkillPackage } from '../../../../../agentSkills/storage';
+ import { extractSkillMdInfoFromBuffer } from '../../../../../agentSkills/archiveUtils';
+ import { parseSkillMarkdown } from '../../../../../agentSkills/utils';
+ 
++type SandboxToolResult = {
++  response: string;
++  usages: any[];
++  assistantResponses?: AIChatItemValueItemType[];
++};
++
+ type SandboxSkillsCapabilityParams = {
+   skillIds: string[];
+   teamId: string;
+@@ -45,6 +54,7 @@ type SandboxSkillsCapabilityParams = {
+   sessionId: string;
+   mode: 'sessionRuntime' | 'editDebug';
+   workflowStreamResponse?: WorkflowResponseType; // SSE stream for lifecycle and skill events
++  showSkillReferences: boolean;
+   allFilesMap: Record<string, { url: string; name: string; type: string }>;
+ };
+ 
+@@ -56,14 +66,16 @@ async function fetchSkillsMetaForPrompt(
+ ): Promise<DeployedSkillInfo[]> {
+   const skills = await MongoAgentSkills.find(
+     { _id: { $in: skillIds }, teamId, deleteTime: null },
+-    { name: 1, description: 1, currentStorage: 1 }
++    { name: 1, description: 1, avatar: 1, currentStorage: 1 }
+   ).lean();
+ 
+   const results = await Promise.allSettled(
+     skills.map(async (skill) => {
+       const fallback: DeployedSkillInfo = {
++        id: String(skill._id),
+         name: skill.name,
+         description: skill.description ?? '',
++        avatar: skill.avatar,
+         skillMdPath: '',
+         directory: ''
+       };
+@@ -78,10 +90,12 @@ async function fetchSkillsMetaForPrompt(
+         const { frontmatter } = parseSkillMarkdown(info.content);
+         const skillMdPath = `${workDirectory}/${info.relativePath}`;
+         return {
++          id: fallback.id,
+           name: frontmatter.name ? String(frontmatter.name) : fallback.name,
+           description: frontmatter.description
+             ? String(frontmatter.description)
+             : fallback.description,
++          avatar: fallback.avatar,
+           skillMdPath,
+           directory: path.dirname(skillMdPath)
+         };
+@@ -95,8 +109,10 @@ async function fetchSkillsMetaForPrompt(
+     r.status === 'fulfilled'
+       ? r.value
+       : {
++          id: String(skills[i]._id),
+           name: skills[i].name,
+           description: skills[i].description ?? '',
++          avatar: skills[i].avatar,
+           skillMdPath: '',
+           directory: ''
+         }
+@@ -104,7 +120,7 @@ async function fetchSkillsMetaForPrompt(
+ }
+ 
+ /** Check whether an error indicates a sandbox that no longer exists or is unreachable. */
+-function isSandboxExpiredError(err: unknown): boolean {
++export function isSandboxExpiredError(err: unknown): boolean {
+   if (err instanceof Error) {
+     const msg = err.message.toLowerCase();
+     return (
+@@ -119,10 +135,73 @@ function isSandboxExpiredError(err: unknown): boolean {
+   return false;
+ }
+ 
++export function collectSkillReferenceResponses({
++  paths,
++  sandboxContext,
++  workflowStreamResponse,
++  showSkillReferences,
++  toolCallId
++}: {
++  paths: string[];
++  sandboxContext: AgentSandboxContext;
++  workflowStreamResponse?: WorkflowResponseType;
++  showSkillReferences: boolean;
++  toolCallId: string;
++}): AIChatItemValueItemType[] {
++  if (!showSkillReferences) return [];
++
++  const skillResponses: AIChatItemValueItemType[] = [];
++  for (const filePath of paths) {
++    if (!filePath.endsWith('/SKILL.md')) continue;
++
++    const skill = sandboxContext.deployedSkills.find(
++      (s) => s.skillMdPath === filePath || filePath.startsWith(s.directory + '/')
++    );
++    if (!skill) continue;
++
++    // Use toolCallId from the triggering tool call for correlation
++    workflowStreamResponse?.({
++      id: toolCallId,
++      event: SseResponseEventEnum.skillCall,
++      data: {
++        skill: {
++          id: toolCallId,
++          skillName: skill.name,
++          skillAvatar: skill.avatar || '',
++          description: skill.description,
++          skillMdPath: filePath
++        }
++      }
++    });
++
++    skillResponses.push({
++      skills: [
++        {
++          id: toolCallId,
++          skillName: skill.name,
++          skillAvatar: skill.avatar || '',
++          description: skill.description,
++          skillMdPath: filePath
++        }
++      ]
++    });
++  }
++  return skillResponses;
++}
++
+ export async function createSandboxSkillsCapability(
+   params: SandboxSkillsCapabilityParams
+ ): Promise<AgentCapability> {
+-  const { skillIds, teamId, tmbId, sessionId, mode, workflowStreamResponse, allFilesMap } = params;
++  const {
++    skillIds,
++    teamId,
++    tmbId,
++    sessionId,
++    mode,
++    workflowStreamResponse,
++    showSkillReferences,
++    allFilesMap
++  } = params;
+   const isEditDebug = mode === 'editDebug';
+   const defaults = getSandboxDefaults();
+   const logger = getLogger(LogCategories.MODULE.AI.AGENT);
+@@ -146,14 +225,16 @@ export async function createSandboxSkillsCapability(
+       id: 'sandbox-skills',
+       systemPrompt,
+       completionTools: allSandboxTools,
+-      handleToolCall: async (toolId, args) => {
++      handleToolCall: async (toolId, args, toolCallId) => {
+         if (!(Object.values(SandboxToolIds) as string[]).includes(toolId)) return null;
+         const result = await buildEditDebugHandler(
+           toolId,
+           args,
+           sandboxContext,
+           allFilesMap,
+-          workflowStreamResponse
++          workflowStreamResponse,
++          showSkillReferences,
++          toolCallId
+         );
+         if (result !== null) {
+           // Fire-and-forget: renew sandbox expiration after successful execution
+@@ -214,8 +295,8 @@ export async function createSandboxSkillsCapability(
+   }
+ 
+   async function executeWithRetry(
+-    executor: (ctx: AgentSandboxContext) => Promise<{ response: string; usages: [] }>
+-  ): Promise<{ response: string; usages: [] }> {
++    executor: (ctx: AgentSandboxContext) => Promise<SandboxToolResult>
++  ): Promise<SandboxToolResult> {
+     let ctx: AgentSandboxContext;
+     try {
+       ctx = await ensureSandbox();
+@@ -226,7 +307,7 @@ export async function createSandboxSkillsCapability(
+       };
+     }
+ 
+-    let result: { response: string; usages: [] };
++    let result: SandboxToolResult;
+     try {
+       result = await executor(ctx);
+     } catch (err) {
+@@ -258,11 +339,19 @@ export async function createSandboxSkillsCapability(
+     id: 'sandbox-skills',
+     systemPrompt,
+     completionTools: allSandboxTools,
+-    handleToolCall: async (toolId, args) => {
++    handleToolCall: async (toolId, args, toolCallId) => {
+       if (!(Object.values(SandboxToolIds) as string[]).includes(toolId)) return null;
+ 
+       return executeWithRetry(async (ctx) => {
+-        return buildSessionHandler(toolId, args, ctx, allFilesMap, workflowStreamResponse);
++        return buildSessionHandler(
++          toolId,
++          args,
++          ctx,
++          allFilesMap,
++          workflowStreamResponse,
++          showSkillReferences,
++          toolCallId
++        );
+       });
+     },
+     dispose: async () => {
+@@ -282,38 +371,27 @@ async function buildEditDebugHandler(
+   args: string,
+   sandboxContext: AgentSandboxContext,
+   allFilesMap: Record<string, { url: string; name: string; type: string }>,
+-  workflowStreamResponse?: WorkflowResponseType
+-): Promise<{ response: string; usages: [] } | null> {
+-  const handlers: Record<string, () => Promise<{ response: string; usages: [] }>> = {
++  workflowStreamResponse?: WorkflowResponseType,
++  showSkillReferences = false,
++  toolCallId = ''
++): Promise<SandboxToolResult | null> {
++  const handlers: Record<string, () => Promise<SandboxToolResult>> = {
+     [SandboxToolIds.readFile]: async () => {
+       const parsed = SandboxReadFileSchema.safeParse(parseJsonArgs(args));
+       if (!parsed.success) return { response: parsed.error.message, usages: [] };
+ 
+-      // Detect SKILL.md reads and emit skillCall event
+-      if (workflowStreamResponse) {
+-        for (const path of parsed.data.paths) {
+-          if (path.endsWith('/SKILL.md')) {
+-            const skill = sandboxContext.deployedSkills.find(
+-              (s) => s.skillMdPath === path || path.startsWith(s.directory + '/')
+-            );
+-            if (skill) {
+-              workflowStreamResponse({
+-                event: SseResponseEventEnum.skillCall,
+-                data: {
+-                  skill: {
+-                    name: skill.name,
+-                    description: skill.description,
+-                    avatar: '',
+-                    skillMdPath: path
+-                  }
+-                }
+-              });
+-            }
+-          }
+-        }
+-      }
++      const assistantResponses = collectSkillReferenceResponses({
++        paths: parsed.data.paths,
++        sandboxContext,
++        workflowStreamResponse,
++        showSkillReferences,
++        toolCallId
++      });
+ 
+-      return dispatchSandboxReadFile(sandboxContext, parsed.data);
++      return {
++        ...(await dispatchSandboxReadFile(sandboxContext, parsed.data)),
++        ...(assistantResponses.length > 0 && { assistantResponses })
++      };
+     },
+     [SandboxToolIds.writeFile]: async () => {
+       const parsed = SandboxWriteFileSchema.safeParse(parseJsonArgs(args));
+@@ -352,38 +430,27 @@ async function buildSessionHandler(
+   args: string,
+   sandboxContext: AgentSandboxContext,
+   allFilesMap: Record<string, { url: string; name: string; type: string }>,
+-  workflowStreamResponse?: WorkflowResponseType
+-): Promise<{ response: string; usages: [] }> {
+-  const handlers: Record<string, () => Promise<{ response: string; usages: [] }>> = {
++  workflowStreamResponse?: WorkflowResponseType,
++  showSkillReferences = false,
++  toolCallId = ''
++): Promise<SandboxToolResult> {
++  const handlers: Record<string, () => Promise<SandboxToolResult>> = {
+     [SandboxToolIds.readFile]: async () => {
+       const parsed = SandboxReadFileSchema.safeParse(parseJsonArgs(args));
+       if (!parsed.success) return { response: parsed.error.message, usages: [] };
+ 
+-      // Detect SKILL.md reads and emit skillCall event
+-      if (workflowStreamResponse) {
+-        for (const path of parsed.data.paths) {
+-          if (path.endsWith('/SKILL.md')) {
+-            const skill = sandboxContext.deployedSkills.find(
+-              (s) => s.skillMdPath === path || path.startsWith(s.directory + '/')
+-            );
+-            if (skill) {
+-              workflowStreamResponse({
+-                event: SseResponseEventEnum.skillCall,
+-                data: {
+-                  skill: {
+-                    name: skill.name,
+-                    description: skill.description,
+-                    avatar: '',
+-                    skillMdPath: path
+-                  }
+-                }
+-              });
+-            }
+-          }
+-        }
+-      }
++      const assistantResponses = collectSkillReferenceResponses({
++        paths: parsed.data.paths,
++        sandboxContext,
++        workflowStreamResponse,
++        showSkillReferences,
++        toolCallId
++      });
+ 
+-      return dispatchSandboxReadFile(sandboxContext, parsed.data);
++      return {
++        ...(await dispatchSandboxReadFile(sandboxContext, parsed.data)),
++        ...(assistantResponses.length > 0 && { assistantResponses })
++      };
+     },
+     [SandboxToolIds.writeFile]: async () => {
+       const parsed = SandboxWriteFileSchema.safeParse(parseJsonArgs(args));
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/capability/type.ts b/packages/service/core/workflow/dispatch/ai/agent/capability/type.ts
+index 6990df137f7f..abc9fb403e77 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/capability/type.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/capability/type.ts
+@@ -1,13 +1,16 @@
+ import type { ChatCompletionTool } from '@fastgpt/global/core/ai/type';
++import type { AIChatItemValueItemType } from '@fastgpt/global/core/chat/type';
+ 
+ export type CapabilityToolCallResult = {
+   response: string;
+   usages?: any[];
++  assistantResponses?: AIChatItemValueItemType[];
+ };
+ 
+ export type CapabilityToolCallHandler = (
+   toolId: string,
+-  args: string
++  args: string,
++  toolCallId: string
+ ) => Promise<CapabilityToolCallResult | null>;
+ 
+ // Capability interface: each capability contributes system prompt, tools, tool handler, and cleanup
+@@ -18,7 +21,11 @@ export type AgentCapability = {
+   // Additional tool definitions
+   completionTools?: ChatCompletionTool[];
+   // Tool call handler: return result if recognized, null otherwise
+-  handleToolCall?: (toolId: string, args: string) => Promise<CapabilityToolCallResult | null>;
++  handleToolCall?: (
++    toolId: string,
++    args: string,
++    toolCallId: string
++  ) => Promise<CapabilityToolCallResult | null>;
+   // Resource cleanup (called in finally)
+   dispose?: () => Promise<void>;
+ };
+@@ -27,10 +34,14 @@ export type AgentCapability = {
+ export function createCapabilityToolCallHandler(
+   capabilities: AgentCapability[]
+ ): CapabilityToolCallHandler {
+-  return async (toolId: string, args: string): Promise<CapabilityToolCallResult | null> => {
++  return async (
++    toolId: string,
++    args: string,
++    toolCallId: string
++  ): Promise<CapabilityToolCallResult | null> => {
+     for (const cap of capabilities) {
+       if (cap.handleToolCall) {
+-        const result = await cap.handleToolCall(toolId, args);
++        const result = await cap.handleToolCall(toolId, args, toolCallId);
+         if (result !== null) return result;
+       }
+     }
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/index.ts b/packages/service/core/workflow/dispatch/ai/agent/index.ts
+index 5bf67897f642..f3bf99e43154 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/index.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/index.ts
+@@ -87,6 +87,7 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+     usagePush,
+     mode,
+     chatId,
++    showSkillReferences,
+     params: {
+       model,
+       systemPrompt,
+@@ -186,6 +187,7 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+       sessionId: sandboxSessionId,
+       mode: sandboxMode,
+       workflowStreamResponse,
++      showSkillReferences: showSkillReferences === true,
+       allFilesMap
+     });
+     capabilities.push(sandboxCap);
+@@ -446,6 +448,14 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+                 stepId: step.id
+               }));
+             assistantResponses.push(...assistantResponse);
++            if (result.capabilityAssistantResponses?.length) {
++              assistantResponses.push(
++                ...result.capabilityAssistantResponses.map((item) => ({
++                  ...item,
++                  stepId: step.id
++                }))
++              );
++            }
+ 
+             step.response = result.stepResponse?.rawResponse;
+             step.summary = result.stepResponse?.summary;
+@@ -520,6 +530,9 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+           .map((item) => item.value as AIChatItemValueItemType[])
+           .flat();
+         assistantResponses.push(...assistantResponse);
++        if (result.capabilityAssistantResponses?.length) {
++          assistantResponses.push(...result.capabilityAssistantResponses);
++        }
+ 
+         // 触发了 plan
+         if (result.planResponse) {
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/master/call.ts b/packages/service/core/workflow/dispatch/ai/agent/master/call.ts
+index 973e619548a7..e639feeb2719 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/master/call.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/master/call.ts
+@@ -22,7 +22,10 @@ import { getOneStepResponseSummary } from './responseSummary';
+ import type { DispatchPlanAgentResponse } from '../sub/plan';
+ import { dispatchPlanAgent } from '../sub/plan';
+ import type { WorkflowResponseItemType } from '../../../type';
+-import type { ChatHistoryItemResType } from '@fastgpt/global/core/chat/type';
++import type {
++  AIChatItemValueItemType,
++  ChatHistoryItemResType
++} from '@fastgpt/global/core/chat/type';
+ import { getNanoid } from '@fastgpt/global/common/string/tools';
+ import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
+ import { i18nT } from '../../../../../../../web/i18n/utils';
+@@ -47,6 +50,7 @@ type Response = {
+   completeMessages: ChatCompletionMessageParam[];
+   assistantMessages: ChatCompletionMessageParam[];
+   masterMessages: ChatCompletionMessageParam[];
++  capabilityAssistantResponses?: AIChatItemValueItemType[];
+ 
+   nodeResponse: ChatHistoryItemResType;
+ };
+@@ -103,6 +107,7 @@ export const masterCall = async ({
+ 
+   const startTime = Date.now();
+   const childrenResponses: ChatHistoryItemResType[] = [];
++  const capabilityAssistantResponses: AIChatItemValueItemType[] = [];
+   const isStepCall = steps && step;
+   const stepId = step?.id;
+   const stepStreamResponse = (args: WorkflowResponseItemType) => {
+@@ -452,9 +457,13 @@ export const masterCall = async ({
+           // Capability tools (e.g. sandbox skills)
+           const capResult = await capabilityToolCallHandler?.(
+             toolId,
+-            call.function.arguments ?? ''
++            call.function.arguments ?? '',
++            callId
+           );
+           if (capResult != null) {
++            if (capResult.assistantResponses?.length) {
++              capabilityAssistantResponses.push(...capResult.assistantResponses);
++            }
+             const subInfo = getSubAppInfo(toolId);
+             childrenResponses.push({
+               nodeId: callId,
+@@ -719,7 +728,8 @@ export const masterCall = async ({
+       completeMessages,
+       assistantMessages,
+       nodeResponse,
+-      masterMessages: masterMessages.concat(assistantMessages)
++      masterMessages: masterMessages.concat(assistantMessages),
++      capabilityAssistantResponses
+     };
+   }
+ 
+@@ -730,6 +740,7 @@ export const masterCall = async ({
+     completeMessages,
+     assistantMessages,
+     nodeResponse,
+-    masterMessages: filterMemoryMessages(completeMessages)
++    masterMessages: filterMemoryMessages(completeMessages),
++    capabilityAssistantResponses
+   };
+ };
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/sub/sandbox/lifecycle.ts b/packages/service/core/workflow/dispatch/ai/agent/sub/sandbox/lifecycle.ts
+index 34bd863c08a8..3bab434a4f29 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/sub/sandbox/lifecycle.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/sub/sandbox/lifecycle.ts
+@@ -119,6 +119,7 @@ async function discoverSkillsInSandbox(
+     if (!frontmatter.name) continue;
+     const directory = file.path.replace(/\/SKILL\.md$/i, '');
+     result.push({
++      id: file.path,
+       name: String(frontmatter.name),
+       description: frontmatter.description ? String(frontmatter.description) : '',
+       directory,
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/sub/sandbox/types.ts b/packages/service/core/workflow/dispatch/ai/agent/sub/sandbox/types.ts
+index 15db9d63a3c7..40af047d1a24 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/sub/sandbox/types.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/sub/sandbox/types.ts
+@@ -3,8 +3,10 @@ import type { AgentSkillSchemaType } from '@fastgpt/global/core/agentSkills/type
+ 
+ // Info about a single skill directory discovered inside a deployed package.zip
+ export type DeployedSkillInfo = {
++  id: string; // skill id from Mongo
+   name: string; // from SKILL.md frontmatter
+   description: string; // from SKILL.md frontmatter
++  avatar?: string; // skill avatar
+   directory: string; // absolute path in sandbox, e.g. /workspace/projects/my-skill
+   skillMdPath: string; // absolute SKILL.md path in sandbox
+ };
+diff --git a/packages/service/support/outLink/schema.ts b/packages/service/support/outLink/schema.ts
+index da3de772e49d..b9e123456dd6 100644
+--- a/packages/service/support/outLink/schema.ts
++++ b/packages/service/support/outLink/schema.ts
+@@ -48,6 +48,10 @@ const OutLinkSchema = new Schema({
+     type: Boolean,
+     default: false
+   },
++  showSkillReferences: {
++    type: Boolean,
++    default: false
++  },
+   showCite: {
+     type: Boolean,
+     default: false
+diff --git a/packages/web/i18n/en/publish.json b/packages/web/i18n/en/publish.json
+index 5fc1aa23d3bd..f8eaa0578b76 100644
+--- a/packages/web/i18n/en/publish.json
++++ b/packages/web/i18n/en/publish.json
+@@ -26,6 +26,7 @@
+   "qpm_tips": "Maximum number of queries per minute per IP",
+   "request_address": "Request URL",
+   "show_node": "real-time running status",
++  "show_skill_reference": "Show skill references",
+   "show_share_link_modal_title": "Get Started",
+   "token_auth": "Token Authentication",
+   "token_auth_tips": "Token authentication server URL. If provided, a request will be sent to the specified server for authentication before each conversation.",
+diff --git a/packages/web/i18n/zh-CN/publish.json b/packages/web/i18n/zh-CN/publish.json
+index d71a60200baa..c6ed92a0ac22 100644
+--- a/packages/web/i18n/zh-CN/publish.json
++++ b/packages/web/i18n/zh-CN/publish.json
+@@ -26,6 +26,7 @@
+   "qpm_tips": "每个 IP 每分钟最多提问多少次",
+   "request_address": "请求地址",
+   "show_node": "实时运行状态",
++  "show_skill_reference": "查看 skill 引用",
+   "show_share_link_modal_title": "开始使用",
+   "token_auth": "身份验证",
+   "token_auth_tips": "身份校验服务器地址",
+diff --git a/packages/web/i18n/zh-Hant/publish.json b/packages/web/i18n/zh-Hant/publish.json
+index 111e6024b085..71fc9b964ed3 100644
+--- a/packages/web/i18n/zh-Hant/publish.json
++++ b/packages/web/i18n/zh-Hant/publish.json
+@@ -26,6 +26,7 @@
+   "qpm_tips": "每個 IP 每分鐘最高查詢次數",
+   "request_address": "請求網址",
+   "show_node": "即時執行狀態",
++  "show_skill_reference": "查看 skill 引用",
+   "show_share_link_modal_title": "開始使用",
+   "token_auth": "身分驗證",
+   "token_auth_tips": "身分驗證伺服器網址。若有提供，每次對話前將向指定伺服器傳送驗證請求。",
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 449570df05cc..d3c8a199cf0c 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -24166,4 +24166,4 @@ snapshots:
+       immer: 9.0.21
+       react: 18.3.1
+ 
+-  zwitch@2.0.4: {}
++  zwitch@2.0.4: {}
+\ No newline at end of file
+diff --git a/projects/app/src/components/core/chat/ChatContainer/ChatBox/index.tsx b/projects/app/src/components/core/chat/ChatContainer/ChatBox/index.tsx
+index 577efd0fda20..a6392e8c948e 100644
+--- a/projects/app/src/components/core/chat/ChatContainer/ChatBox/index.tsx
++++ b/projects/app/src/components/core/chat/ChatContainer/ChatBox/index.tsx
+@@ -323,14 +323,26 @@ const ChatBox = ({
+             };
+           }
+           if (event === SseResponseEventEnum.skillCall && skill) {
++            // 去重检查：避免同一个 skill 在同一步骤中重复展示
++            const alreadyExists = item.value.some(
++              (v) =>
++                v.stepId === stepId && v.skills?.some((s) => s.skillMdPath === skill.skillMdPath)
++            );
++            if (alreadyExists) return item;
++
++            const skillId = skill.id || responseValueId || getNanoid(10);
+             const val: AIChatItemValueItemType = {
+               id: responseValueId,
+               stepId,
+-              stepTitle: {
+-                stepId: responseValueId || '',
+-                title: t('chat:skill_calling', { name: skill.name }),
+-                folded: false
+-              }
++              skills: [
++                {
++                  id: skillId,
++                  skillName: skill.skillName,
++                  skillAvatar: skill.skillAvatar || '',
++                  description: skill.description,
++                  skillMdPath: skill.skillMdPath
++                }
++              ]
+             };
+             return {
+               ...item,
+diff --git a/projects/app/src/components/core/chat/ChatContainer/type.ts b/projects/app/src/components/core/chat/ChatContainer/type.ts
+index bfbc15e66b78..36567da8b4ff 100644
+--- a/projects/app/src/components/core/chat/ChatContainer/type.ts
++++ b/projects/app/src/components/core/chat/ChatContainer/type.ts
+@@ -5,7 +5,7 @@ import type {
+   StepTitleItemType,
+   ToolModuleResponseItemType,
+   SandboxStatusItemType,
+-  SkillCallItemType
++  SkillModuleResponseItemType
+ } from '@fastgpt/global/core/chat/type';
+ import type { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
+ import type {
+@@ -36,7 +36,7 @@ export type generatingMessageProps = {
+ 
+   // Sandbox
+   sandboxStatus?: SandboxStatusItemType;
+-  skill?: SkillCallItemType;
++  skill?: SkillModuleResponseItemType;
+ 
+   // HelperBot
+   collectionForm?: UserInputInteractive;
+diff --git a/projects/app/src/components/core/chat/components/AIResponseBox.tsx b/projects/app/src/components/core/chat/components/AIResponseBox.tsx
+index 399aabb05674..e34d6d9870fb 100644
+--- a/projects/app/src/components/core/chat/components/AIResponseBox.tsx
++++ b/projects/app/src/components/core/chat/components/AIResponseBox.tsx
+@@ -13,7 +13,8 @@ import {
+ import type {
+   AIChatItemValueItemType,
+   StepTitleItemType,
+-  ToolModuleResponseItemType
++  ToolModuleResponseItemType,
++  SkillModuleResponseItemType
+ } from '@fastgpt/global/core/chat/type';
+ import React, { useCallback, useMemo } from 'react';
+ import MyIcon from '@fastgpt/web/components/common/Icon';
+@@ -198,6 +199,48 @@ ${response}`}
+   (prevProps, nextProps) => isEqual(prevProps, nextProps)
+ );
+ 
++const RenderSkill = React.memo(
++  function RenderSkill({
++    showAnimation,
++    skill
++  }: {
++    showAnimation: boolean;
++    skill: SkillModuleResponseItemType;
++  }) {
++    const { t } = useSafeTranslation();
++
++    return (
++      <Accordion allowToggle>
++        <AccordionItem borderTop={'none'} borderBottom={'none'}>
++          <AccordionButton {...accordionButtonStyle}>
++            <Avatar src={skill.skillAvatar} w={'1.25rem'} h={'1.25rem'} borderRadius={'sm'} />
++            <Box mx={2} fontSize={'sm'} color={'myGray.900'}>
++              {skill.skillName}
++            </Box>
++            <AccordionIcon color={'myGray.600'} ml={5} />
++          </AccordionButton>
++          <AccordionPanel
++            py={0}
++            px={0}
++            mt={3}
++            borderRadius={'md'}
++            overflow={'hidden'}
++            maxH={'500px'}
++            overflowY={'auto'}
++          >
++            {skill.description && (
++              <Box mb={3} fontSize={'xs'} color={'myGray.500'} px={3}>
++                {skill.description}
++              </Box>
++            )}
++          </AccordionPanel>
++        </AccordionItem>
++      </Accordion>
++    );
++  },
++  (prevProps, nextProps) => isEqual(prevProps, nextProps)
++);
++
+ const onSendPrompt = (text: string) =>
+   eventBus.emit(EventNameEnum.sendQuestion, {
+     text,
+@@ -423,7 +466,9 @@ const AIResponseBox = ({
+   onOpenCiteModal?: (e?: OnOpenCiteModalProps) => void;
+ }) => {
+   const showRunningStatus = useContextSelector(ChatItemContext, (v) => v.showRunningStatus);
++  const showSkillReferences = useContextSelector(ChatItemContext, (v) => v.showSkillReferences);
+   const tools = value.tool ? [value.tool] : value.tools;
++  const skills = value.skills;
+ 
+   if ('text' in value && value.text) {
+     return (
+@@ -451,6 +496,13 @@ const AIResponseBox = ({
+       </Box>
+     ));
+   }
++  if (skills && showSkillReferences && showRunningStatus) {
++    return skills.map((skill) => (
++      <Box key={skill.id} _notLast={{ mb: 2 }}>
++        <RenderSkill showAnimation={isChatting} skill={skill} />
++      </Box>
++    ));
++  }
+   if ('interactive' in value && value.interactive) {
+     const interactive = extractDeepestInteractive(value.interactive);
+     if (interactive.type === 'userSelect' || interactive.type === 'agentPlanAskUserSelect') {
+diff --git a/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/ChatTest.tsx b/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/ChatTest.tsx
+index d5d79a335b32..01d7c4bc02a4 100644
+--- a/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/ChatTest.tsx
++++ b/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/ChatTest.tsx
+@@ -241,6 +241,7 @@ const Render = ({ appForm, setAppForm, setRenderEdit, form2WorkflowFn }: Props)
+       isShowCite={true}
+       isShowFullText={true}
+       showRunningStatus={true}
++      showSkillReferences={true}
+       showWholeResponse
+     >
+       <ChatRecordContextProvider params={chatRecordProviderParams}>
+diff --git a/projects/app/src/pageComponents/app/detail/Edit/HTTPTools/ChatTest.tsx b/projects/app/src/pageComponents/app/detail/Edit/HTTPTools/ChatTest.tsx
+index e7ea3d75cddc..05e393f10cb3 100644
+--- a/projects/app/src/pageComponents/app/detail/Edit/HTTPTools/ChatTest.tsx
++++ b/projects/app/src/pageComponents/app/detail/Edit/HTTPTools/ChatTest.tsx
+@@ -209,6 +209,7 @@ const Render = ({
+       isShowCite={true}
+       isShowFullText={true}
+       showRunningStatus={true}
++      showSkillReferences={true}
+       showWholeResponse={true}
+     >
+       <ChatRecordContextProvider params={chatRecordProviderParams}>
+diff --git a/projects/app/src/pageComponents/app/detail/Edit/MCPTools/ChatTest.tsx b/projects/app/src/pageComponents/app/detail/Edit/MCPTools/ChatTest.tsx
+index 4ebfd6748d42..d004289327a5 100644
+--- a/projects/app/src/pageComponents/app/detail/Edit/MCPTools/ChatTest.tsx
++++ b/projects/app/src/pageComponents/app/detail/Edit/MCPTools/ChatTest.tsx
+@@ -187,6 +187,7 @@ const Render = ({
+       isShowCite={true}
+       isShowFullText={true}
+       showRunningStatus={true}
++      showSkillReferences={true}
+       showWholeResponse={true}
+     >
+       <ChatRecordContextProvider params={chatRecordProviderParams}>
+diff --git a/projects/app/src/pageComponents/app/detail/Edit/SimpleApp/ChatTest.tsx b/projects/app/src/pageComponents/app/detail/Edit/SimpleApp/ChatTest.tsx
+index bfc8f454f3a3..dcdfa058ccf5 100644
+--- a/projects/app/src/pageComponents/app/detail/Edit/SimpleApp/ChatTest.tsx
++++ b/projects/app/src/pageComponents/app/detail/Edit/SimpleApp/ChatTest.tsx
+@@ -136,6 +136,7 @@ const Render = ({ appForm, setRenderEdit, form2WorkflowFn }: Props) => {
+       isShowCite={true}
+       isShowFullText={true}
+       showRunningStatus={true}
++      showSkillReferences={true}
+       showWholeResponse={true}
+     >
+       <ChatRecordContextProvider params={chatRecordProviderParams}>
+diff --git a/projects/app/src/pageComponents/app/detail/Logs/DetailLogsModal.tsx b/projects/app/src/pageComponents/app/detail/Logs/DetailLogsModal.tsx
+index c39ef0830b9d..364f80c05883 100644
+--- a/projects/app/src/pageComponents/app/detail/Logs/DetailLogsModal.tsx
++++ b/projects/app/src/pageComponents/app/detail/Logs/DetailLogsModal.tsx
+@@ -282,6 +282,7 @@ const Render = (props: Props) => {
+       isShowCite={true}
+       isShowFullText={true}
+       showRunningStatus={true}
++      showSkillReferences={true}
+       showWholeResponse={true}
+     >
+       <ChatRecordContextProvider params={params} feedbackRecordId={feedbackRecordId}>
+diff --git a/projects/app/src/pageComponents/app/detail/Publish/Link/index.tsx b/projects/app/src/pageComponents/app/detail/Publish/Link/index.tsx
+index 5e23c31f16a3..b3c273e7a21c 100644
+--- a/projects/app/src/pageComponents/app/detail/Publish/Link/index.tsx
++++ b/projects/app/src/pageComponents/app/detail/Publish/Link/index.tsx
+@@ -186,6 +186,7 @@ const Share = ({ appId }: { appId: string; type: PublishChannelEnum }) => {
+                                 canDownloadSource: item.canDownloadSource,
+                                 showFullText: item.showFullText,
+                                 showRunningStatus: item.showRunningStatus,
++                                showSkillReferences: item.showSkillReferences,
+                                 limit: item.limit
+                               })
+                           },
+@@ -413,7 +414,27 @@ function EditLinkModal({
+           </Box>
+           <Flex alignItems={'center'} mt={4} justify={'space-between'} height={'36px'}>
+             <FormLabel>{t('publish:show_node')}</FormLabel>
+-            <Switch {...register('showRunningStatus')} />
++            <Switch
++              {...register('showRunningStatus', {
++                onChange(e) {
++                  if (!e.target.checked) {
++                    setValue('showSkillReferences', false);
++                  }
++                }
++              })}
++            />
++          </Flex>
++          <Flex alignItems={'center'} mt={4} justify={'space-between'} height={'36px'}>
++            <FormLabel>{t('publish:show_skill_reference')}</FormLabel>
++            <Switch
++              {...register('showSkillReferences', {
++                onChange(e) {
++                  if (e.target.checked) {
++                    setValue('showRunningStatus', true);
++                  }
++                }
++              })}
++            />
+           </Flex>
+           <Flex alignItems={'center'} mt={4} justify={'space-between'} height={'36px'}>
+             <Flex alignItems={'center'}>
+diff --git a/projects/app/src/pageComponents/app/detail/Publish/Playground/index.tsx b/projects/app/src/pageComponents/app/detail/Publish/Playground/index.tsx
+index 7e42c493abe2..637caf713ca0 100644
+--- a/projects/app/src/pageComponents/app/detail/Publish/Playground/index.tsx
++++ b/projects/app/src/pageComponents/app/detail/Publish/Playground/index.tsx
+@@ -16,6 +16,7 @@ import { ChatSidebarPaneEnum } from '@/pageComponents/chat/constants';
+ 
+ const defaultPlaygroundVisibilityForm: PlaygroundVisibilityConfigType = {
+   showRunningStatus: true,
++  showSkillReferences: false,
+   showCite: true,
+   showFullText: true,
+   canDownloadSource: true,
+@@ -34,6 +35,7 @@ const PlaygroundVisibilityConfig = ({ appId }: { appId: string }) => {
+   const showFullText = watch('showFullText');
+   const canDownloadSource = watch('canDownloadSource');
+   const showRunningStatus = watch('showRunningStatus');
++  const showSkillReferences = watch('showSkillReferences');
+   const showWholeResponse = watch('showWholeResponse');
+ 
+   const playgroundLink = useMemo(() => {
+@@ -47,6 +49,7 @@ const PlaygroundVisibilityConfig = ({ appId }: { appId: string }) => {
+     onSuccess: (data) => {
+       reset({
+         showRunningStatus: data.showRunningStatus,
++        showSkillReferences: data.showSkillReferences,
+         showCite: data.showCite,
+         showFullText: data.showFullText,
+         canDownloadSource: data.canDownloadSource,
+@@ -117,11 +120,32 @@ const PlaygroundVisibilityConfig = ({ appId }: { appId: string }) => {
+             </FormLabel>
+             <Switch
+               {...register('showRunningStatus', {
+-                onChange: autoSave
++                onChange(e) {
++                  if (!e.target.checked) {
++                    setValue('showSkillReferences', false);
++                  }
++                  autoSave();
++                }
+               })}
+               isChecked={showRunningStatus}
+             />
+           </Flex>
++          <Flex alignItems={'center'}>
++            <FormLabel fontSize={'12px'} flex={'0 0 127px'}>
++              {t('publish:show_skill_reference')}
++            </FormLabel>
++            <Switch
++              {...register('showSkillReferences', {
++                onChange(e) {
++                  if (e.target.checked) {
++                    setValue('showRunningStatus', true);
++                  }
++                  autoSave();
++                }
++              })}
++              isChecked={showSkillReferences}
++            />
++          </Flex>
+           <Flex alignItems={'center'}>
+             <Flex alignItems={'center'} flex={'0 0 127px'}>
+               <FormLabel fontSize={'12px'}>
+diff --git a/projects/app/src/pageComponents/app/detail/WorkflowComponents/Flow/ChatTest.tsx b/projects/app/src/pageComponents/app/detail/WorkflowComponents/Flow/ChatTest.tsx
+index fcbd26ef1f7b..c78920f0fb54 100644
+--- a/projects/app/src/pageComponents/app/detail/WorkflowComponents/Flow/ChatTest.tsx
++++ b/projects/app/src/pageComponents/app/detail/WorkflowComponents/Flow/ChatTest.tsx
+@@ -221,6 +221,7 @@ const Render = (Props: Props) => {
+       isShowCite={true}
+       isShowFullText={true}
+       showRunningStatus={true}
++      showSkillReferences={true}
+       showWholeResponse={true}
+     >
+       <ChatRecordContextProvider params={chatRecordProviderParams}>
+diff --git a/projects/app/src/pageComponents/chat/ChatWindow/AppChatWindow.tsx b/projects/app/src/pageComponents/chat/ChatWindow/AppChatWindow.tsx
+index e489b66875a9..bbe9a2f19be3 100644
+--- a/projects/app/src/pageComponents/chat/ChatWindow/AppChatWindow.tsx
++++ b/projects/app/src/pageComponents/chat/ChatWindow/AppChatWindow.tsx
+@@ -42,6 +42,7 @@ const AppChatWindow = () => {
+ 
+   const isPlugin = useContextSelector(ChatItemContext, (v) => v.isPlugin);
+   const isShowCite = useContextSelector(ChatItemContext, (v) => v.isShowCite);
++  const showSkillReferences = useContextSelector(ChatItemContext, (v) => v.showSkillReferences);
+   const onChangeChatId = useContextSelector(ChatContext, (v) => v.onChangeChatId);
+   const chatBoxData = useContextSelector(ChatItemContext, (v) => v.chatBoxData);
+   const datasetCiteData = useContextSelector(ChatItemContext, (v) => v.datasetCiteData);
+@@ -108,7 +109,8 @@ const AppChatWindow = () => {
+           responseChatItemId,
+           appId,
+           chatId,
+-          retainDatasetCite: isShowCite
++          retainDatasetCite: isShowCite,
++          showSkillReferences
+         },
+         abortCtrl: controller,
+         onMessage: generatingMessage
+@@ -133,6 +135,7 @@ const AppChatWindow = () => {
+       setChatBoxData,
+       forbidLoadChat,
+       isShowCite,
++      showSkillReferences,
+       refreshRecentlyUsed
+     ]
+   );
+diff --git a/projects/app/src/pageComponents/chat/ChatWindow/HomeChatWindow.tsx b/projects/app/src/pageComponents/chat/ChatWindow/HomeChatWindow.tsx
+index 34b79c4282c7..4f5f8ec0fc1b 100644
+--- a/projects/app/src/pageComponents/chat/ChatWindow/HomeChatWindow.tsx
++++ b/projects/app/src/pageComponents/chat/ChatWindow/HomeChatWindow.tsx
+@@ -78,6 +78,7 @@ const HomeChatWindow = () => {
+   const setChatBoxData = useContextSelector(ChatItemContext, (v) => v.setChatBoxData);
+   const resetVariables = useContextSelector(ChatItemContext, (v) => v.resetVariables);
+   const isShowCite = useContextSelector(ChatItemContext, (v) => v.isShowCite);
++  const showSkillReferences = useContextSelector(ChatItemContext, (v) => v.showSkillReferences);
+ 
+   const pane = useContextSelector(ChatPageContext, (v) => v.pane);
+   const chatSettings = useContextSelector(ChatPageContext, (v) => v.chatSettings);
+@@ -212,7 +213,8 @@ const HomeChatWindow = () => {
+             responseChatItemId,
+             appId,
+             chatId,
+-            retainDatasetCite: isShowCite
++            retainDatasetCite: isShowCite,
++            showSkillReferences
+           },
+           abortCtrl: controller,
+           onMessage: generatingMessage
+@@ -263,6 +265,7 @@ const HomeChatWindow = () => {
+           appName: t('chat:home.chat_app'),
+           chatId,
+           retainDatasetCite: isShowCite,
++          showSkillReferences,
+           ...form2AppWorkflow(formData, t)
+         },
+         onMessage: generatingMessage,
+diff --git a/projects/app/src/pages/api/core/chat/chatTest.ts b/projects/app/src/pages/api/core/chat/chatTest.ts
+index a52b4aebf3e1..b01bde9a8a9d 100644
+--- a/projects/app/src/pages/api/core/chat/chatTest.ts
++++ b/projects/app/src/pages/api/core/chat/chatTest.ts
+@@ -213,7 +213,8 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+       stream: true,
+       maxRunTimes: WORKFLOW_MAX_RUN_TIMES,
+       workflowStreamResponse: workflowResponseWrite,
+-      responseDetail: true
++      responseDetail: true,
++      showSkillReferences: true
+     });
+ 
+     workflowResponseWrite({
+diff --git a/projects/app/src/pages/api/core/chat/record/getPaginationRecords.ts b/projects/app/src/pages/api/core/chat/record/getPaginationRecords.ts
+index eec72b65374a..2aa569fa6cd1 100644
+--- a/projects/app/src/pages/api/core/chat/record/getPaginationRecords.ts
++++ b/projects/app/src/pages/api/core/chat/record/getPaginationRecords.ts
+@@ -40,7 +40,7 @@ export async function handler(
+     };
+   }
+ 
+-  const [app, { showCite, showRunningStatus, authType }] = await Promise.all([
++  const [app, { showCite, showRunningStatus, showSkillReferences, authType }] = await Promise.all([
+     MongoApp.findById(appId, 'type').lean(),
+     authChatCrud({
+       req,
+@@ -85,7 +85,9 @@ export async function handler(
+         });
+ 
+         if (showRunningStatus === false) {
+-          item.value = item.value.filter((v) => !('tool' in v));
++          item.value = item.value.filter((v) => !('tool' in v) && !v.tools && !v.skills);
++        } else if (showSkillReferences === false) {
++          item.value = item.value.filter((v) => !v.skills);
+         }
+       }
+     }
+diff --git a/projects/app/src/pages/api/core/chat/record/getRecords_v2.ts b/projects/app/src/pages/api/core/chat/record/getRecords_v2.ts
+index a432cb57d613..427ee502e7f4 100644
+--- a/projects/app/src/pages/api/core/chat/record/getRecords_v2.ts
++++ b/projects/app/src/pages/api/core/chat/record/getRecords_v2.ts
+@@ -15,9 +15,71 @@ import {
+ } from '@fastgpt/global/core/chat/utils';
+ import { GetChatTypeEnum } from '@/global/core/chat/constants';
+ import type { LinkedPaginationProps, LinkedListResponse } from '@fastgpt/web/common/fetch/type';
+-import { type ChatItemType } from '@fastgpt/global/core/chat/type';
++import type { ChatItemType, AIChatItemValueItemType } from '@fastgpt/global/core/chat/type';
+ import { addPreviewUrlToChatItems } from '@fastgpt/service/core/chat/utils';
+ 
++/**
++ * Reorder AI response value array: insert skill records after their corresponding tool by matching id.
++ * Skills have the same id as the tool call that triggered them.
++ */
++export function reorderAIResponseValue(
++  value: AIChatItemValueItemType[]
++): AIChatItemValueItemType[] {
++  const skillItems: AIChatItemValueItemType[] = [];
++  const nonSkillItems: AIChatItemValueItemType[] = [];
++
++  // Separate skill items from non-skill items
++  for (const item of value) {
++    if (item.skills && item.skills.length > 0) {
++      skillItems.push(item);
++    } else {
++      nonSkillItems.push(item);
++    }
++  }
++
++  // If no skill items, return original array
++  if (skillItems.length === 0) return value;
++
++  // Build a map of tool call IDs from skill items for quick lookup
++  const skillByToolCallId = new Map<string, AIChatItemValueItemType>();
++  for (const skillItem of skillItems) {
++    const skillId = skillItem.skills?.[0]?.id;
++    if (skillId) {
++      skillByToolCallId.set(skillId, skillItem);
++    }
++  }
++
++  // Build result array, inserting skills after matching tools
++  const result: AIChatItemValueItemType[] = [];
++  const usedSkillIds = new Set<string>();
++
++  for (const item of nonSkillItems) {
++    result.push(item);
++
++    // Check if any tool in this item has a matching skill
++    const tools = item.tools;
++    if (tools) {
++      for (const tool of tools) {
++        const matchingSkill = skillByToolCallId.get(tool.id);
++        if (matchingSkill && !usedSkillIds.has(tool.id)) {
++          result.push(matchingSkill);
++          usedSkillIds.add(tool.id);
++        }
++      }
++    }
++  }
++
++  // Append any remaining unmatched skill items at the end
++  for (const skillItem of skillItems) {
++    const skillId = skillItem.skills?.[0]?.id;
++    if (skillId && !usedSkillIds.has(skillId)) {
++      result.push(skillItem);
++    }
++  }
++
++  return result;
++}
++
+ export type getChatRecordsQuery = {};
+ 
+ export type getChatRecordsBody = LinkedPaginationProps<GetChatRecordsProps>;
+@@ -51,7 +113,7 @@ async function handler(
+     };
+   }
+ 
+-  const [app, { showCite, showRunningStatus, authType }] = await Promise.all([
++  const [app, { showCite, showRunningStatus, showSkillReferences, authType }] = await Promise.all([
+     MongoApp.findById(appId, 'type').lean(),
+     authChatCrud({
+       req,
+@@ -89,6 +151,13 @@ async function handler(
+   // Presign file urls
+   await addPreviewUrlToChatItems(result.histories, isPlugin ? 'workflowTool' : 'chatFlow');
+ 
++  // Reorder AI response value: insert skill records after their corresponding tool
++  result.histories.forEach((item) => {
++    if (item.obj === ChatRoleEnum.AI) {
++      item.value = reorderAIResponseValue(item.value);
++    }
++  });
++
+   // Remove important information
+   if (isOutLink && app.type !== AppTypeEnum.workflowTool) {
+     result.histories.forEach((item) => {
+@@ -100,8 +169,15 @@ async function handler(
+ 
+         if (showRunningStatus === false) {
+           item.value = item.value.filter(
+-            (v) => v.text?.content || v.reasoning?.content || v.interactive || v.plan || !v.tools
++            (v) =>
++              v.text?.content ||
++              v.reasoning?.content ||
++              v.interactive ||
++              v.plan ||
++              (!v.tools && !v.skills)
+           );
++        } else if (showSkillReferences === false) {
++          item.value = item.value.filter((v) => !v.skills);
+         }
+       }
+     });
+diff --git a/projects/app/src/pages/api/support/outLink/playground/config.ts b/projects/app/src/pages/api/support/outLink/playground/config.ts
+index 2b4dd2e72134..c679a6fb4759 100644
+--- a/projects/app/src/pages/api/support/outLink/playground/config.ts
++++ b/projects/app/src/pages/api/support/outLink/playground/config.ts
+@@ -28,11 +28,12 @@ async function handler(
+       appId,
+       type: PublishChannelEnum.playground
+     },
+-    'showRunningStatus showCite showFullText canDownloadSource showWholeResponse'
++    'showRunningStatus showSkillReferences showCite showFullText canDownloadSource showWholeResponse'
+   ).lean();
+ 
+   return PlaygroundVisibilityConfigResponseSchema.parse({
+     showRunningStatus: existingConfig?.showRunningStatus ?? true,
++    showSkillReferences: existingConfig?.showSkillReferences ?? false,
+     showCite: existingConfig?.showCite ?? true,
+     showFullText: existingConfig?.showFullText ?? true,
+     canDownloadSource: existingConfig?.canDownloadSource ?? true,
+diff --git a/projects/app/src/pages/api/support/outLink/playground/update.ts b/projects/app/src/pages/api/support/outLink/playground/update.ts
+index 4cfa249249db..23ac9606ad71 100644
+--- a/projects/app/src/pages/api/support/outLink/playground/update.ts
++++ b/projects/app/src/pages/api/support/outLink/playground/update.ts
+@@ -10,8 +10,15 @@ import {
+ } from '@fastgpt/global/support/outLink/api';
+ 
+ async function handler(req: ApiRequestProps<UpdatePlaygroundVisibilityConfigBody, {}>) {
+-  const { appId, showRunningStatus, showCite, showFullText, canDownloadSource, showWholeResponse } =
+-    UpdatePlaygroundVisibilityConfigBodySchema.parse(req.body);
++  const {
++    appId,
++    showRunningStatus,
++    showSkillReferences,
++    showCite,
++    showFullText,
++    canDownloadSource,
++    showWholeResponse
++  } = UpdatePlaygroundVisibilityConfigBodySchema.parse(req.body);
+ 
+   const { teamId, tmbId } = await authApp({
+     req,
+@@ -33,6 +40,7 @@ async function handler(req: ApiRequestProps<UpdatePlaygroundVisibilityConfigBody
+         appId,
+         type: PublishChannelEnum.playground,
+         showRunningStatus: showRunningStatus,
++        showSkillReferences: showSkillReferences,
+         showCite: showCite,
+         showFullText: showFullText,
+         canDownloadSource: canDownloadSource,
+diff --git a/projects/app/src/pages/api/support/outLink/update.ts b/projects/app/src/pages/api/support/outLink/update.ts
+index 4332bc867b7e..b5cd32d894ee 100644
+--- a/projects/app/src/pages/api/support/outLink/update.ts
++++ b/projects/app/src/pages/api/support/outLink/update.ts
+@@ -26,8 +26,17 @@ export type OutLinkUpdateResponse = string;
+ async function handler(
+   req: ApiRequestProps<OutLinkUpdateBody, OutLinkUpdateQuery>
+ ): Promise<OutLinkUpdateResponse> {
+-  const { _id, name, showCite, limit, app, canDownloadSource, showRunningStatus, showFullText } =
+-    req.body;
++  const {
++    _id,
++    name,
++    showCite,
++    limit,
++    app,
++    canDownloadSource,
++    showRunningStatus,
++    showSkillReferences,
++    showFullText
++  } = req.body;
+ 
+   if (!_id) {
+     return Promise.reject(CommonErrEnum.missingParams);
+@@ -50,6 +59,7 @@ async function handler(
+     showCite,
+     canDownloadSource,
+     showRunningStatus,
++    showSkillReferences,
+     showFullText,
+     limit,
+     app
+diff --git a/projects/app/src/pages/api/v1/chat/completions.ts b/projects/app/src/pages/api/v1/chat/completions.ts
+index e46347613904..5e85f4823638 100644
+--- a/projects/app/src/pages/api/v1/chat/completions.ts
++++ b/projects/app/src/pages/api/v1/chat/completions.ts
+@@ -86,6 +86,7 @@ export type Props = ChatCompletionCreateParams &
+     stream?: boolean;
+     detail?: boolean;
+     retainDatasetCite?: boolean;
++    showSkillReferences?: boolean;
+     variables: Record<string, any>; // Global variables or plugin inputs
+   };
+ 
+@@ -95,6 +96,7 @@ type AuthResponseType = {
+   app: AppSchemaType;
+   showCite?: boolean;
+   showRunningStatus?: boolean;
++  showSkillReferences?: boolean;
+   authType: `${AuthUserTypeEnum}`;
+   apikey?: string;
+   responseAllData: boolean;
+@@ -117,6 +119,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+     stream = false,
+     detail = false,
+     retainDatasetCite = false,
++    showSkillReferences,
+     messages = [],
+     variables = {},
+     responseChatItemId = getNanoid(),
+@@ -165,7 +168,8 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+       apikey,
+       responseAllData,
+       outLinkUserId = customUid,
+-      showRunningStatus
++      showRunningStatus,
++      showSkillReferences: authShowSkillReferences
+     } = await (async () => {
+       // share chat
+       if (shareId && outLinkUid) {
+@@ -208,6 +212,8 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+     pushTrack.teamChatQPM({ teamId });
+ 
+     retainDatasetCite = retainDatasetCite && !!showCite;
++    const finalShowSkillReferences =
++      (showSkillReferences ?? authShowSkillReferences ?? false) && !!showRunningStatus;
+     const isPlugin = app.type === AppTypeEnum.workflowTool;
+ 
+     // Check message type
+@@ -321,6 +327,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+           histories: newHistories,
+           stream,
+           retainDatasetCite,
++          showSkillReferences: finalShowSkillReferences,
+           maxRunTimes: WORKFLOW_MAX_RUN_TIMES,
+           workflowStreamResponse: workflowResponseWrite
+         });
+@@ -547,8 +554,17 @@ const authShareChat = async ({
+   shareId: string;
+   chatId?: string;
+ }): Promise<AuthResponseType> => {
+-  const { teamId, tmbId, appId, authType, showCite, showRunningStatus, uid, sourceName } =
+-    await authOutLinkChatStart(data);
++  const {
++    teamId,
++    tmbId,
++    appId,
++    authType,
++    showCite,
++    showRunningStatus,
++    showSkillReferences,
++    uid,
++    sourceName
++  } = await authOutLinkChatStart(data);
+   const app = await MongoApp.findById(appId).lean();
+ 
+   if (!app) {
+@@ -571,7 +587,8 @@ const authShareChat = async ({
+     responseAllData: false,
+     showCite,
+     outLinkUserId: uid,
+-    showRunningStatus
++    showRunningStatus,
++    showSkillReferences
+   };
+ };
+ const authTeamSpaceChat = async ({
+@@ -609,6 +626,7 @@ const authTeamSpaceChat = async ({
+     apikey: '',
+     responseAllData: false,
+     showCite: true,
++    showSkillReferences: true,
+     outLinkUserId: uid
+   };
+ };
+@@ -690,7 +708,8 @@ const authHeaderRequest = async ({
+     authType,
+     sourceName,
+     responseAllData: true,
+-    showCite: true
++    showCite: true,
++    showSkillReferences: true
+   };
+ };
+ 
+diff --git a/projects/app/src/pages/api/v2/chat/completions.ts b/projects/app/src/pages/api/v2/chat/completions.ts
+index 3554b105f734..07c5a5b371cd 100644
+--- a/projects/app/src/pages/api/v2/chat/completions.ts
++++ b/projects/app/src/pages/api/v2/chat/completions.ts
+@@ -88,6 +88,7 @@ export type Props = ChatCompletionCreateParams &
+     stream?: boolean;
+     detail?: boolean;
+     retainDatasetCite?: boolean;
++    showSkillReferences?: boolean;
+     variables: Record<string, any>; // Global variables or plugin inputs
+   };
+ 
+@@ -97,6 +98,7 @@ type AuthResponseType = {
+   app: AppSchemaType;
+   showCite?: boolean;
+   showRunningStatus?: boolean;
++  showSkillReferences?: boolean;
+   authType: `${AuthUserTypeEnum}`;
+   apikey?: string;
+   responseAllData: boolean;
+@@ -119,6 +121,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+     stream = false,
+     detail = false,
+     retainDatasetCite = false,
++    showSkillReferences,
+     messages = [],
+     variables = {},
+     responseChatItemId = getNanoid(),
+@@ -167,7 +170,8 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+       apikey,
+       responseAllData,
+       outLinkUserId = customUid,
+-      showRunningStatus
++      showRunningStatus,
++      showSkillReferences: authShowSkillReferences
+     } = await (async () => {
+       // share chat
+       if (shareId && outLinkUid) {
+@@ -210,6 +214,8 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+     pushTrack.teamChatQPM({ teamId });
+ 
+     retainDatasetCite = retainDatasetCite && !!showCite;
++    const finalShowSkillReferences =
++      (showSkillReferences ?? authShowSkillReferences ?? false) && !!showRunningStatus;
+     const isPlugin = app.type === AppTypeEnum.workflowTool;
+ 
+     // Check message type
+@@ -323,6 +329,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+           histories: newHistories,
+           stream,
+           retainDatasetCite,
++          showSkillReferences: finalShowSkillReferences,
+           maxRunTimes: WORKFLOW_MAX_RUN_TIMES,
+           workflowStreamResponse: workflowResponseWrite,
+           responseAllData,
+@@ -520,8 +527,17 @@ const authShareChat = async ({
+   shareId: string;
+   chatId?: string;
+ }): Promise<AuthResponseType> => {
+-  const { teamId, tmbId, appId, authType, showCite, showRunningStatus, uid, sourceName } =
+-    await authOutLinkChatStart(data);
++  const {
++    teamId,
++    tmbId,
++    appId,
++    authType,
++    showCite,
++    showRunningStatus,
++    showSkillReferences,
++    uid,
++    sourceName
++  } = await authOutLinkChatStart(data);
+   const app = await MongoApp.findById(appId).lean();
+ 
+   if (!app) {
+@@ -544,7 +560,8 @@ const authShareChat = async ({
+     responseAllData: false,
+     showCite,
+     outLinkUserId: uid,
+-    showRunningStatus
++    showRunningStatus,
++    showSkillReferences
+   };
+ };
+ const authTeamSpaceChat = async ({
+diff --git a/projects/app/src/pages/chat/index.tsx b/projects/app/src/pages/chat/index.tsx
+index 71e735bf880e..0acc93c3f23c 100644
+--- a/projects/app/src/pages/chat/index.tsx
++++ b/projects/app/src/pages/chat/index.tsx
+@@ -92,6 +92,7 @@ type ChatPageProps = {
+   appId: string;
+   isStandalone?: string;
+   showRunningStatus: boolean;
++  showSkillReferences: boolean;
+   showCite: boolean;
+   showFullText: boolean;
+   canDownloadSource: boolean;
+@@ -153,6 +154,7 @@ const ChatContent = (props: ChatPageProps) => {
+       <ChatItemContextProvider
+         showRouteToDatasetDetail={isStandalone !== '1'}
+         showRunningStatus={props.showRunningStatus}
++        showSkillReferences={props.showSkillReferences}
+         canDownloadSource={props.canDownloadSource}
+         isShowCite={props.showCite}
+         isShowFullText={props.showFullText}
+@@ -188,7 +190,7 @@ export async function getServerSideProps(context: any) {
+           appId,
+           type: PublishChannelEnum.playground
+         },
+-        'showRunningStatus showCite showFullText canDownloadSource showWholeResponse'
++        'showRunningStatus showSkillReferences showCite showFullText canDownloadSource showWholeResponse'
+       ).lean();
+ 
+       return config;
+@@ -202,6 +204,7 @@ export async function getServerSideProps(context: any) {
+     props: {
+       appId,
+       showRunningStatus: chatQuoteReaderConfig?.showRunningStatus ?? true,
++      showSkillReferences: chatQuoteReaderConfig?.showSkillReferences ?? false,
+       showCite: chatQuoteReaderConfig?.showCite ?? true,
+       showFullText: chatQuoteReaderConfig?.showFullText ?? true,
+       canDownloadSource: chatQuoteReaderConfig?.canDownloadSource ?? true,
+diff --git a/projects/app/src/pages/chat/share.tsx b/projects/app/src/pages/chat/share.tsx
+index 0a0d2f3a4598..b39bd98920ea 100644
+--- a/projects/app/src/pages/chat/share.tsx
++++ b/projects/app/src/pages/chat/share.tsx
+@@ -60,6 +60,7 @@ type Props = {
+   isShowCite: boolean;
+   isShowFullText: boolean;
+   showRunningStatus: boolean;
++  showSkillReferences: boolean;
+ };
+ 
+ const OutLink = (props: Props) => {
+@@ -180,7 +181,8 @@ const OutLink = (props: Props) => {
+           responseChatItemId,
+           chatId: completionChatId,
+           ...outLinkAuthData,
+-          retainDatasetCite: isShowCite
++          retainDatasetCite: isShowCite,
++          showSkillReferences: props.showSkillReferences
+         },
+         onMessage: generatingMessage,
+         abortCtrl: controller
+@@ -219,6 +221,7 @@ const OutLink = (props: Props) => {
+       customVariables,
+       outLinkAuthData,
+       isShowCite,
++      props.showSkillReferences,
+       onUpdateHistoryTitle,
+       setChatBoxData,
+       forbidLoadChat,
+@@ -399,6 +402,7 @@ const Render = (props: Props) => {
+         isShowCite={props.isShowCite}
+         isShowFullText={props.isShowFullText}
+         showRunningStatus={props.showRunningStatus}
++        showSkillReferences={props.showSkillReferences}
+       >
+         <ChatRecordContextProvider params={chatRecordProviderParams}>
+           <OutLink {...props} />
+@@ -423,7 +427,7 @@ export async function getServerSideProps(context: any) {
+         {
+           shareId
+         },
+-        'appId canDownloadSource showCite showFullText showRunningStatus'
++        'appId canDownloadSource showCite showFullText showRunningStatus showSkillReferences'
+       )
+         .populate<{ associatedApp: AppSchemaType }>('associatedApp', 'name avatar intro')
+         .lean();
+@@ -446,6 +450,7 @@ export async function getServerSideProps(context: any) {
+       isShowCite: app?.showCite ?? false,
+       isShowFullText: app?.showFullText ?? false,
+       showRunningStatus: app?.showRunningStatus ?? false,
++      showSkillReferences: app?.showSkillReferences ?? false,
+       shareId: shareId ?? '',
+       authToken: authToken ?? '',
+       customUid,
+diff --git a/projects/app/src/service/support/permission/auth/chat.ts b/projects/app/src/service/support/permission/auth/chat.ts
+index e5e91e459b88..b977740f3628 100644
+--- a/projects/app/src/service/support/permission/auth/chat.ts
++++ b/projects/app/src/service/support/permission/auth/chat.ts
+@@ -29,6 +29,7 @@ import { authCert } from '@fastgpt/service/support/permission/auth/common';
+ export const defaultResponseShow = {
+   showCite: true,
+   showRunningStatus: true,
++  showSkillReferences: true,
+   showFullText: true,
+   canDownloadSource: true
+ };
+@@ -60,6 +61,7 @@ export async function authChatCrud({
+   chat?: ChatSchemaType;
+   showCite: boolean;
+   showRunningStatus: boolean;
++  showSkillReferences: boolean;
+   showFullText: boolean;
+   canDownloadSource: boolean;
+   authType?: `${AuthUserTypeEnum}`;
+@@ -117,6 +119,7 @@ export async function authChatCrud({
+ 
+         showCite: outLinkConfig.showCite ?? false,
+         showRunningStatus: outLinkConfig.showRunningStatus ?? true,
++        showSkillReferences: outLinkConfig.showSkillReferences ?? false,
+         showFullText: outLinkConfig.showFullText ?? false,
+         canDownloadSource: outLinkConfig.canDownloadSource ?? false,
+         authType: AuthUserTypeEnum.outLink
+@@ -132,6 +135,7 @@ export async function authChatCrud({
+         uid,
+         showCite: outLinkConfig.showCite ?? false,
+         showRunningStatus: outLinkConfig.showRunningStatus ?? true,
++        showSkillReferences: outLinkConfig.showSkillReferences ?? false,
+         showFullText: outLinkConfig.showFullText ?? false,
+         canDownloadSource: outLinkConfig.canDownloadSource ?? false,
+         authType: AuthUserTypeEnum.outLink
+@@ -145,6 +149,7 @@ export async function authChatCrud({
+       uid,
+       showCite: outLinkConfig.showCite ?? false,
+       showRunningStatus: outLinkConfig.showRunningStatus ?? true,
++      showSkillReferences: outLinkConfig.showSkillReferences ?? false,
+       showFullText: outLinkConfig.showFullText ?? false,
+       canDownloadSource: outLinkConfig.canDownloadSource ?? false,
+       authType: AuthUserTypeEnum.outLink
+diff --git a/projects/app/src/service/support/permission/auth/outLink.ts b/projects/app/src/service/support/permission/auth/outLink.ts
+index 594ba1064551..5b6920316b9f 100644
+--- a/projects/app/src/service/support/permission/auth/outLink.ts
++++ b/projects/app/src/service/support/permission/auth/outLink.ts
+@@ -65,6 +65,7 @@ export async function authOutLinkChatStart({
+     authType: AuthUserTypeEnum.token,
+     showCite: outLinkConfig.showCite,
+     showRunningStatus: outLinkConfig.showRunningStatus,
++    showSkillReferences: outLinkConfig.showSkillReferences,
+     showFullText: outLinkConfig.showFullText,
+     canDownloadSource: outLinkConfig.canDownloadSource,
+     appId,
+diff --git a/projects/app/src/web/common/api/fetch.ts b/projects/app/src/web/common/api/fetch.ts
+index c0b27ce8a8d7..8edcea1a3f75 100644
+--- a/projects/app/src/web/common/api/fetch.ts
++++ b/projects/app/src/web/common/api/fetch.ts
+@@ -15,7 +15,7 @@ import type { OnOptimizeCodeProps } from '@/pageComponents/app/detail/WorkflowCo
+ import type {
+   StepTitleItemType,
+   ToolModuleResponseItemType,
+-  SkillCallItemType
++  SkillModuleResponseItemType
+ } from '@fastgpt/global/core/chat/type';
+ import type { TopAgentFormDataType } from '@fastgpt/service/core/chat/HelperBot/dispatch/topAgent/type';
+ import type { UserInputInteractive } from '@fastgpt/global/core/workflow/template/system/interactive/type';
+@@ -71,7 +71,7 @@ type ResponseQueueItemType = CommonResponseType &
+       }
+     | {
+         event: SseResponseEventEnum.skillCall;
+-        skill: SkillCallItemType;
++        skill: SkillModuleResponseItemType;
+       }
+   );
+ 
+diff --git a/projects/app/src/web/core/app/constants.ts b/projects/app/src/web/core/app/constants.ts
+index eb9d3e7962d3..81fb2374779f 100644
+--- a/projects/app/src/web/core/app/constants.ts
++++ b/projects/app/src/web/core/app/constants.ts
+@@ -27,6 +27,7 @@ export const defaultApp: AppDetailType = {
+ export const defaultOutLinkForm: OutLinkEditType = {
+   name: '',
+   showRunningStatus: true,
++  showSkillReferences: false,
+   showCite: false,
+   showFullText: false,
+   canDownloadSource: false,
+diff --git a/projects/app/src/web/core/chat/context/chatItemContext.tsx b/projects/app/src/web/core/chat/context/chatItemContext.tsx
+index c3670ee3bbad..f931a5586888 100644
+--- a/projects/app/src/web/core/chat/context/chatItemContext.tsx
++++ b/projects/app/src/web/core/chat/context/chatItemContext.tsx
+@@ -17,6 +17,7 @@ type ContextProps = {
+   isShowCite: boolean;
+   isShowFullText: boolean;
+   showRunningStatus: boolean;
++  showSkillReferences: boolean;
+   showWholeResponse: boolean;
+ };
+ type ChatBoxDataType = {
+@@ -88,6 +89,13 @@ type ChatItemContextType = {
+ } & ContextProps;
+ 
+ export const ChatItemContext = createContext<ChatItemContextType>({
++  showRouteToDatasetDetail: true,
++  canDownloadSource: true,
++  isShowCite: true,
++  isShowFullText: true,
++  showRunningStatus: true,
++  showSkillReferences: true,
++  showWholeResponse: true,
+   ChatBoxRef: null,
+   // @ts-ignore
+   variablesForm: undefined,
+@@ -125,6 +133,7 @@ const ChatItemContextProvider = ({
+   isShowCite,
+   isShowFullText,
+   showRunningStatus,
++  showSkillReferences,
+   showWholeResponse
+ }: {
+   children: ReactNode;
+@@ -202,6 +211,7 @@ const ChatItemContextProvider = ({
+       isShowCite,
+       isShowFullText,
+       showRunningStatus,
++      showSkillReferences,
+       showWholeResponse,
+ 
+       datasetCiteData,
+@@ -220,6 +230,7 @@ const ChatItemContextProvider = ({
+     canDownloadSource,
+     isShowCite,
+     showRunningStatus,
++    showSkillReferences,
+     isShowFullText,
+     showWholeResponse,
+     datasetCiteData,
+diff --git a/projects/app/test/pages/api/core/chat/record/getRecords_v2.test.ts b/projects/app/test/pages/api/core/chat/record/getRecords_v2.test.ts
+new file mode 100644
+index 000000000000..395957f38459
+--- /dev/null
++++ b/projects/app/test/pages/api/core/chat/record/getRecords_v2.test.ts
+@@ -0,0 +1,233 @@
++import { describe, it, expect } from 'vitest';
++import { reorderAIResponseValue } from '@/pages/api/core/chat/record/getRecords_v2';
++import type { AIChatItemValueItemType } from '@fastgpt/global/core/chat/type';
++
++// Helper to create a tool item with required fields
++const createTool = (id: string, toolName: string) => ({
++  id,
++  toolName,
++  toolAvatar: '',
++  params: '',
++  functionName: toolName,
++  response: ''
++});
++
++describe('reorderAIResponseValue', () => {
++  it('should return empty array for empty input', () => {
++    const result = reorderAIResponseValue([]);
++    expect(result).toEqual([]);
++  });
++
++  it('should return original array when no skill items exist', () => {
++    const input: AIChatItemValueItemType[] = [
++      { text: { content: 'Hello' } },
++      { tools: [createTool('tool1', 'test')] }
++    ];
++    const result = reorderAIResponseValue(input);
++    expect(result).toEqual(input);
++  });
++
++  it('should insert skill after matching tool', () => {
++    const toolItem: AIChatItemValueItemType = {
++      tools: [createTool('tool-call-1', 'readFile')]
++    };
++    const skillItem: AIChatItemValueItemType = {
++      skills: [
++        {
++          id: 'tool-call-1',
++          skillName: 'MySkill',
++          skillAvatar: '',
++          description: 'A skill',
++          skillMdPath: '/work/skill/SKILL.md'
++        }
++      ]
++    };
++    const textItem: AIChatItemValueItemType = { text: { content: 'Result' } };
++
++    const input = [toolItem, textItem, skillItem];
++    const result = reorderAIResponseValue(input);
++
++    // Skill should be inserted right after the matching tool
++    expect(result).toEqual([toolItem, skillItem, textItem]);
++  });
++
++  it('should handle multiple tools and skills with correct matching', () => {
++    const tool1: AIChatItemValueItemType = {
++      tools: [createTool('call-1', 'tool1')]
++    };
++    const tool2: AIChatItemValueItemType = {
++      tools: [createTool('call-2', 'tool2')]
++    };
++    const skill1: AIChatItemValueItemType = {
++      skills: [
++        {
++          id: 'call-1',
++          skillName: 'Skill1',
++          skillAvatar: '',
++          description: '',
++          skillMdPath: '/skill1/SKILL.md'
++        }
++      ]
++    };
++    const skill2: AIChatItemValueItemType = {
++      skills: [
++        {
++          id: 'call-2',
++          skillName: 'Skill2',
++          skillAvatar: '',
++          description: '',
++          skillMdPath: '/skill2/SKILL.md'
++        }
++      ]
++    };
++
++    const input = [tool1, tool2, skill1, skill2];
++    const result = reorderAIResponseValue(input);
++
++    // Each skill should follow its matching tool
++    expect(result).toEqual([tool1, skill1, tool2, skill2]);
++  });
++
++  it('should append unmatched skills at the end', () => {
++    const toolItem: AIChatItemValueItemType = {
++      tools: [createTool('tool-1', 'test')]
++    };
++    const unmatchedSkill: AIChatItemValueItemType = {
++      skills: [
++        {
++          id: 'no-match',
++          skillName: 'OrphanSkill',
++          skillAvatar: '',
++          description: '',
++          skillMdPath: '/orphan/SKILL.md'
++        }
++      ]
++    };
++
++    const input = [toolItem, unmatchedSkill];
++    const result = reorderAIResponseValue(input);
++
++    // Unmatched skill should be at the end
++    expect(result).toEqual([toolItem, unmatchedSkill]);
++  });
++
++  it('should handle tool with multiple tool calls in one item', () => {
++    const multiToolItem: AIChatItemValueItemType = {
++      tools: [createTool('call-a', 'toolA'), createTool('call-b', 'toolB')]
++    };
++    const skillA: AIChatItemValueItemType = {
++      skills: [
++        {
++          id: 'call-a',
++          skillName: 'SkillA',
++          skillAvatar: '',
++          description: '',
++          skillMdPath: '/a/SKILL.md'
++        }
++      ]
++    };
++    const skillB: AIChatItemValueItemType = {
++      skills: [
++        {
++          id: 'call-b',
++          skillName: 'SkillB',
++          skillAvatar: '',
++          description: '',
++          skillMdPath: '/b/SKILL.md'
++        }
++      ]
++    };
++
++    const input = [multiToolItem, skillA, skillB];
++    const result = reorderAIResponseValue(input);
++
++    // Both skills should be inserted after the multi-tool item
++    expect(result).toEqual([multiToolItem, skillA, skillB]);
++  });
++
++  it('should not duplicate skills when same id appears multiple times', () => {
++    const tool1: AIChatItemValueItemType = {
++      tools: [createTool('same-id', 'tool1')]
++    };
++    const tool2: AIChatItemValueItemType = {
++      tools: [createTool('same-id', 'tool2')]
++    };
++    const skill: AIChatItemValueItemType = {
++      skills: [
++        {
++          id: 'same-id',
++          skillName: 'Skill',
++          skillAvatar: '',
++          description: '',
++          skillMdPath: '/skill/SKILL.md'
++        }
++      ]
++    };
++
++    const input = [tool1, tool2, skill];
++    const result = reorderAIResponseValue(input);
++
++    // Skill should only appear once, after the first matching tool
++    expect(result).toEqual([tool1, skill, tool2]);
++  });
++
++  it('should preserve non-tool non-skill items in order', () => {
++    const text1: AIChatItemValueItemType = { text: { content: 'First' } };
++    const reasoning: AIChatItemValueItemType = { reasoning: { content: 'Thinking...' } };
++    const tool: AIChatItemValueItemType = {
++      tools: [createTool('tool-1', 'test')]
++    };
++    const skill: AIChatItemValueItemType = {
++      skills: [
++        {
++          id: 'tool-1',
++          skillName: 'Skill',
++          skillAvatar: '',
++          description: '',
++          skillMdPath: '/skill/SKILL.md'
++        }
++      ]
++    };
++    const text2: AIChatItemValueItemType = { text: { content: 'Last' } };
++
++    const input = [text1, reasoning, tool, text2, skill];
++    const result = reorderAIResponseValue(input);
++
++    expect(result).toEqual([text1, reasoning, tool, skill, text2]);
++  });
++
++  it('should handle skill item with empty skills array as non-skill', () => {
++    const itemWithEmptySkills: AIChatItemValueItemType = { skills: [] };
++    const textItem: AIChatItemValueItemType = { text: { content: 'Hello' } };
++
++    const input = [itemWithEmptySkills, textItem];
++    const result = reorderAIResponseValue(input);
++
++    // Empty skills array should be treated as non-skill item
++    expect(result).toEqual(input);
++  });
++
++  it('should handle skill without id gracefully', () => {
++    const tool: AIChatItemValueItemType = {
++      tools: [createTool('tool-1', 'test')]
++    };
++    const skillWithoutId: AIChatItemValueItemType = {
++      skills: [
++        {
++          id: '',
++          skillName: 'NoIdSkill',
++          skillAvatar: '',
++          description: '',
++          skillMdPath: '/skill/SKILL.md'
++        }
++      ]
++    };
++
++    const input = [tool, skillWithoutId];
++    const result = reorderAIResponseValue(input);
++
++    // Skill with empty id is not added to the map, so it won't be matched
++    // and won't be appended at the end either (since skillId is falsy)
++    expect(result).toEqual([tool]);
++  });
++});
+diff --git a/projects/app/test/pages/api/support/outLink/playground/config.test.ts b/projects/app/test/pages/api/support/outLink/playground/config.test.ts
+index 0bc4a98bb83f..3eb27fc518dc 100644
+--- a/projects/app/test/pages/api/support/outLink/playground/config.test.ts
++++ b/projects/app/test/pages/api/support/outLink/playground/config.test.ts
+@@ -52,7 +52,8 @@ describe('Playground Visibility Config API', () => {
+         showCite: true,
+         showFullText: true,
+         canDownloadSource: true,
+-        showWholeResponse: true
++        showWholeResponse: true,
++        showSkillReferences: false
+       });
+     } else {
+       // If there are permission issues, we still expect the API to validate parameters
+@@ -93,7 +94,8 @@ describe('Playground Visibility Config API', () => {
+         showCite: false,
+         showFullText: false,
+         canDownloadSource: false,
+-        showWholeResponse: false
++        showWholeResponse: false,
++        showSkillReferences: false
+       });
+     } else {
+       // If there are permission issues, we still expect the API to validate parameters
+@@ -156,7 +158,8 @@ describe('Playground Visibility Config API', () => {
+         showCite: false,
+         showFullText: true,
+         canDownloadSource: false,
+-        showWholeResponse: true
++        showWholeResponse: true,
++        showSkillReferences: false
+       });
+     } else {
+       // If there are permission issues, we still expect the API to validate parameters
+diff --git a/projects/app/test/service/support/permission/auth/chat.test.ts b/projects/app/test/service/support/permission/auth/chat.test.ts
+index d991469754df..de1fef47bec9 100644
+--- a/projects/app/test/service/support/permission/auth/chat.test.ts
++++ b/projects/app/test/service/support/permission/auth/chat.test.ts
+@@ -58,6 +58,7 @@ const buildOutLinkConfig = (
+     type: PublishChannelEnum.share,
+     showCite: true,
+     showRunningStatus: true,
++    showSkillReferences: false,
+     showFullText: false,
+     canDownloadSource: false,
+     showWholeResponse: false,
+@@ -134,6 +135,7 @@ describe('authChatCrud', () => {
+         uid: 'user1',
+         showCite: true,
+         showRunningStatus: true,
++        showSkillReferences: true,
+         showFullText: true,
+         canDownloadSource: true,
+         authType: AuthUserTypeEnum.teamDomain
+@@ -171,6 +173,7 @@ describe('authChatCrud', () => {
+         chat: mockChat,
+         showCite: true,
+         showRunningStatus: true,
++        showSkillReferences: true,
+         showFullText: true,
+         canDownloadSource: true,
+         authType: AuthUserTypeEnum.teamDomain
+@@ -201,6 +204,7 @@ describe('authChatCrud', () => {
+         uid: 'user1',
+         showCite: true,
+         showRunningStatus: true,
++        showSkillReferences: true,
+         showFullText: true,
+         canDownloadSource: true,
+         authType: AuthUserTypeEnum.teamDomain
+@@ -365,6 +369,7 @@ describe('authChatCrud', () => {
+         uid: 'user1',
+         showCite: true,
+         showRunningStatus: false,
++        showSkillReferences: false,
+         showFullText: false,
+         canDownloadSource: true,
+         authType: AuthUserTypeEnum.outLink
+@@ -472,6 +477,7 @@ describe('authChatCrud', () => {
+         uid: 'tmb1',
+         showCite: true,
+         showRunningStatus: true,
++        showSkillReferences: true,
+         showFullText: true,
+         canDownloadSource: true,
+         authType: AuthUserTypeEnum.teamDomain
+@@ -512,6 +518,7 @@ describe('authChatCrud', () => {
+         chat: mockChat,
+         showCite: true,
+         showRunningStatus: true,
++        showSkillReferences: true,
+         showFullText: true,
+         canDownloadSource: true,
+         authType: AuthUserTypeEnum.teamDomain
+@@ -553,6 +560,7 @@ describe('authChatCrud', () => {
+         chat: mockChat,
+         showCite: true,
+         showRunningStatus: true,
++        showSkillReferences: true,
+         showFullText: true,
+         canDownloadSource: true,
+         authType: AuthUserTypeEnum.teamDomain
+@@ -586,6 +594,7 @@ describe('authChatCrud', () => {
+         uid: 'tmb1',
+         showCite: true,
+         showRunningStatus: true,
++        showSkillReferences: true,
+         showFullText: true,
+         canDownloadSource: true,
+         authType: AuthUserTypeEnum.teamDomain
+diff --git a/test/cases/service/core/agentSkills/import.test.ts b/test/cases/service/core/agentSkills/import.test.ts
+index 1a00928b9551..0955d112c569 100644
+--- a/test/cases/service/core/agentSkills/import.test.ts
++++ b/test/cases/service/core/agentSkills/import.test.ts
+@@ -1,5 +1,4 @@
+ import { describe, expect, it } from 'vitest';
+-import JSZip from 'jszip';
+ 
+ import type { ImportSkillBody } from '@fastgpt/global/core/agentSkills/api';
+ import type { SkillPackageType } from '@fastgpt/global/core/agentSkills/type';
+@@ -10,7 +9,7 @@ import {
+   getRootPrefix,
+   stripRootPrefix
+ } from '@fastgpt/service/core/agentSkills/archiveUtils';
+-import { repackFileMapAsZip } from '@fastgpt/service/core/agentSkills/zipBuilder';
++import { repackFileMapAsZip, JSZip } from '@fastgpt/service/core/agentSkills/zipBuilder';
+ 
+ // ---------------------------------------------------------------------------
+ // Helpers that mirror the core logic in the import API route
+diff --git a/test/cases/service/core/agentSkills/zipBuilder.test.ts b/test/cases/service/core/agentSkills/zipBuilder.test.ts
+index d3e4961ffd09..fe736da3de15 100644
+--- a/test/cases/service/core/agentSkills/zipBuilder.test.ts
++++ b/test/cases/service/core/agentSkills/zipBuilder.test.ts
+@@ -4,9 +4,9 @@ import {
+   addFileToZip,
+   generateZipBuffer,
+   validateZipStructure,
+-  extractSkillPackage
++  extractSkillPackage,
++  JSZip
+ } from '@fastgpt/service/core/agentSkills/zipBuilder';
+-import JSZip from 'jszip';
+ 
+ describe('zipBuilder', () => {
+   // ==================== createSkillPackage ====================
+diff --git a/test/cases/service/core/workflow/dispatch/ai/agent/capability/sandboxSkills.test.ts b/test/cases/service/core/workflow/dispatch/ai/agent/capability/sandboxSkills.test.ts
+new file mode 100644
+index 000000000000..5a2bcf116cc9
+--- /dev/null
++++ b/test/cases/service/core/workflow/dispatch/ai/agent/capability/sandboxSkills.test.ts
+@@ -0,0 +1,281 @@
++import { describe, it, expect, vi } from 'vitest';
++import {
++  isSandboxExpiredError,
++  collectSkillReferenceResponses
++} from '@fastgpt/service/core/workflow/dispatch/ai/agent/capability/sandboxSkills';
++import type { AgentSandboxContext } from '@fastgpt/service/core/workflow/dispatch/ai/agent/sub/sandbox/types';
++import { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
++
++describe('isSandboxExpiredError', () => {
++  it('should return true for "not found" error', () => {
++    const error = new Error('Sandbox not found');
++    expect(isSandboxExpiredError(error)).toBe(true);
++  });
++
++  it('should return true for "not exist" error', () => {
++    const error = new Error('Container does not exist');
++    expect(isSandboxExpiredError(error)).toBe(true);
++  });
++
++  it('should return true for "connection" error', () => {
++    const error = new Error('Connection timeout');
++    expect(isSandboxExpiredError(error)).toBe(true);
++  });
++
++  it('should return true for "sandbox_not_found" error', () => {
++    const error = new Error('sandbox_not_found: instance expired');
++    expect(isSandboxExpiredError(error)).toBe(true);
++  });
++
++  it('should return true for "ECONNREFUSED" error', () => {
++    const error = new Error('connect ECONNREFUSED 127.0.0.1:8080');
++    expect(isSandboxExpiredError(error)).toBe(true);
++  });
++
++  it('should return true for "ECONNRESET" error', () => {
++    const error = new Error('read ECONNRESET');
++    expect(isSandboxExpiredError(error)).toBe(true);
++  });
++
++  it('should return false for unrelated error', () => {
++    const error = new Error('Permission denied');
++    expect(isSandboxExpiredError(error)).toBe(false);
++  });
++
++  it('should return false for non-Error types', () => {
++    expect(isSandboxExpiredError('string error')).toBe(false);
++    expect(isSandboxExpiredError(null)).toBe(false);
++    expect(isSandboxExpiredError(undefined)).toBe(false);
++    expect(isSandboxExpiredError({ message: 'not found' })).toBe(false);
++    expect(isSandboxExpiredError(123)).toBe(false);
++  });
++
++  it('should be case insensitive', () => {
++    const error = new Error('SANDBOX NOT FOUND');
++    expect(isSandboxExpiredError(error)).toBe(true);
++  });
++});
++
++describe('collectSkillReferenceResponses', () => {
++  const createMockSandboxContext = (
++    deployedSkills: AgentSandboxContext['deployedSkills']
++  ): AgentSandboxContext =>
++    ({
++      deployedSkills,
++      workDirectory: '/work',
++      providerSandboxId: 'sandbox-123'
++    }) as AgentSandboxContext;
++
++  it('should return empty array when showSkillReferences is false', () => {
++    const context = createMockSandboxContext([
++      {
++        id: 'skill-1',
++        name: 'TestSkill',
++        description: 'A test skill',
++        avatar: '',
++        skillMdPath: '/work/skill/SKILL.md',
++        directory: '/work/skill'
++      }
++    ]);
++
++    const result = collectSkillReferenceResponses({
++      paths: ['/work/skill/SKILL.md'],
++      sandboxContext: context,
++      showSkillReferences: false,
++      toolCallId: 'call-1'
++    });
++
++    expect(result).toEqual([]);
++  });
++
++  it('should skip paths that do not end with /SKILL.md', () => {
++    const context = createMockSandboxContext([
++      {
++        id: 'skill-1',
++        name: 'TestSkill',
++        description: 'A test skill',
++        avatar: '',
++        skillMdPath: '/work/skill/SKILL.md',
++        directory: '/work/skill'
++      }
++    ]);
++
++    const result = collectSkillReferenceResponses({
++      paths: ['/work/skill/README.md', '/work/skill/index.ts'],
++      sandboxContext: context,
++      showSkillReferences: true,
++      toolCallId: 'call-1'
++    });
++
++    expect(result).toEqual([]);
++  });
++
++  it('should collect skill reference for matching SKILL.md path', () => {
++    const context = createMockSandboxContext([
++      {
++        id: 'skill-1',
++        name: 'TestSkill',
++        description: 'A test skill',
++        avatar: 'avatar.png',
++        skillMdPath: '/work/skill/SKILL.md',
++        directory: '/work/skill'
++      }
++    ]);
++
++    const result = collectSkillReferenceResponses({
++      paths: ['/work/skill/SKILL.md'],
++      sandboxContext: context,
++      showSkillReferences: true,
++      toolCallId: 'tool-call-123'
++    });
++
++    expect(result).toHaveLength(1);
++    expect(result[0]).toEqual({
++      skills: [
++        {
++          id: 'tool-call-123',
++          skillName: 'TestSkill',
++          skillAvatar: 'avatar.png',
++          description: 'A test skill',
++          skillMdPath: '/work/skill/SKILL.md'
++        }
++      ]
++    });
++  });
++
++  it('should match skill by directory prefix', () => {
++    const context = createMockSandboxContext([
++      {
++        id: 'skill-1',
++        name: 'TestSkill',
++        description: 'A test skill',
++        avatar: '',
++        skillMdPath: '/work/myskill/SKILL.md',
++        directory: '/work/myskill'
++      }
++    ]);
++
++    const result = collectSkillReferenceResponses({
++      paths: ['/work/myskill/subdir/SKILL.md'],
++      sandboxContext: context,
++      showSkillReferences: true,
++      toolCallId: 'call-1'
++    });
++
++    expect(result).toHaveLength(1);
++    expect(result[0].skills?.[0].skillName).toBe('TestSkill');
++  });
++
++  it('should call workflowStreamResponse with skillCall event', () => {
++    const mockStreamResponse = vi.fn();
++    const context = createMockSandboxContext([
++      {
++        id: 'skill-1',
++        name: 'StreamSkill',
++        description: 'Skill for stream test',
++        avatar: 'stream.png',
++        skillMdPath: '/work/stream/SKILL.md',
++        directory: '/work/stream'
++      }
++    ]);
++
++    collectSkillReferenceResponses({
++      paths: ['/work/stream/SKILL.md'],
++      sandboxContext: context,
++      workflowStreamResponse: mockStreamResponse,
++      showSkillReferences: true,
++      toolCallId: 'stream-call-1'
++    });
++
++    expect(mockStreamResponse).toHaveBeenCalledTimes(1);
++    expect(mockStreamResponse).toHaveBeenCalledWith({
++      id: 'stream-call-1',
++      event: SseResponseEventEnum.skillCall,
++      data: {
++        skill: {
++          id: 'stream-call-1',
++          skillName: 'StreamSkill',
++          skillAvatar: 'stream.png',
++          description: 'Skill for stream test',
++          skillMdPath: '/work/stream/SKILL.md'
++        }
++      }
++    });
++  });
++
++  it('should handle multiple SKILL.md paths', () => {
++    const context = createMockSandboxContext([
++      {
++        id: 'skill-1',
++        name: 'Skill1',
++        description: 'First skill',
++        avatar: '',
++        skillMdPath: '/work/skill1/SKILL.md',
++        directory: '/work/skill1'
++      },
++      {
++        id: 'skill-2',
++        name: 'Skill2',
++        description: 'Second skill',
++        avatar: '',
++        skillMdPath: '/work/skill2/SKILL.md',
++        directory: '/work/skill2'
++      }
++    ]);
++
++    const result = collectSkillReferenceResponses({
++      paths: ['/work/skill1/SKILL.md', '/work/skill2/SKILL.md'],
++      sandboxContext: context,
++      showSkillReferences: true,
++      toolCallId: 'multi-call'
++    });
++
++    expect(result).toHaveLength(2);
++    expect(result[0].skills?.[0].skillName).toBe('Skill1');
++    expect(result[1].skills?.[0].skillName).toBe('Skill2');
++  });
++
++  it('should skip SKILL.md paths with no matching skill', () => {
++    const context = createMockSandboxContext([
++      {
++        id: 'skill-1',
++        name: 'Skill1',
++        description: 'First skill',
++        avatar: '',
++        skillMdPath: '/work/skill1/SKILL.md',
++        directory: '/work/skill1'
++      }
++    ]);
++
++    const result = collectSkillReferenceResponses({
++      paths: ['/work/unknown/SKILL.md'],
++      sandboxContext: context,
++      showSkillReferences: true,
++      toolCallId: 'call-1'
++    });
++
++    expect(result).toEqual([]);
++  });
++
++  it('should use empty string for missing avatar', () => {
++    const context = createMockSandboxContext([
++      {
++        id: 'skill-1',
++        name: 'NoAvatarSkill',
++        description: 'Skill without avatar',
++        avatar: undefined as any,
++        skillMdPath: '/work/skill/SKILL.md',
++        directory: '/work/skill'
++      }
++    ]);
++
++    const result = collectSkillReferenceResponses({
++      paths: ['/work/skill/SKILL.md'],
++      sandboxContext: context,
++      showSkillReferences: true,
++      toolCallId: 'call-1'
++    });
++
++    expect(result[0].skills?.[0].skillAvatar).toBe('');
++  });
++});

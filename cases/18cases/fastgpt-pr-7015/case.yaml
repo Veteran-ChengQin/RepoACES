@@ -1,0 +1,28 @@
+id: fastgpt-pr-7015
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "805e32d7238da2bc2f904fabff1e9d0bc419bbcf"
+  pr_number: 7015
+  pr_url: https://github.com/labring/FastGPT/pull/7015
+  pr_title_raw: "feat: add context compression benchmark adapter"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    - add a FastGPT service adapter for the context compression benchmark
+    - route benchmark buckets to the real production compression functions
+    - include the pro benchmark package in the workspace and update the submodule pointer
+    - adjust lodash imports for tsx ESM dynamic loading compatibility
+    - ignore local benchmark eval outputs and source caches
+
+validation:
+  head_commit: "1de3555fccb3b6a1989341eaea427be6287de488"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-7015.patch"
+  patch_sha256: "10a0f2420031f215d73837d1b37a2da0f213fb45481730f13bb32bdd6766388a"
+  changed_files_file: "patches/fastgpt-pr-7015.changed_files.txt"
+  manual_functionality_description: |
+    Check that the context compression benchmark adapter routes benchmark buckets into the real production compression functions.
+    The pro benchmark package should be available in the workspace, tsx ESM dynamic loading should work with the adjusted imports, and local benchmark outputs or source caches should be ignored rather than committed.

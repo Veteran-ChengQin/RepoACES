@@ -1,0 +1,14 @@
+M	document/content/self-host/upgrading/4-15/41504.mdx
+M	document/data/doc-last-modified.json
+M	projects/app/src/components/Markdown/codeBlock/CodeLight.tsx
+M	projects/app/src/components/Markdown/codeBlock/iframe-html.tsx
+M	projects/app/src/components/Markdown/index.module.scss
+M	projects/app/src/components/Markdown/index.tsx
+M	projects/app/src/components/Markdown/runtimeContext.ts
+M	projects/app/src/components/Markdown/utils.ts
+M	projects/app/src/components/core/chat/components/AIResponseBox/RenderText.tsx
+M	projects/app/src/components/core/chat/components/WholeResponseModal/ResponseBox.tsx
+M	projects/app/src/components/core/chat/components/WholeResponseModal/ResponseRows.tsx
+M	projects/app/src/components/core/chat/components/WholeResponseModal/Row.tsx
+M	projects/app/src/components/core/chat/components/WholeResponseModal/WholeResponseContent.tsx
+M	projects/app/src/components/core/chat/components/WholeResponseModal/index.tsx

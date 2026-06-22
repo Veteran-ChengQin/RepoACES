@@ -1,0 +1,3 @@
+M	.github/workflows/docs-deploy.yml
+M	document/Dockerfile
+M	document/app/[lang]/layout.tsx

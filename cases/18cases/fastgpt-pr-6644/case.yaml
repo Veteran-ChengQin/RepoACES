@@ -1,0 +1,28 @@
+id: fastgpt-pr-6644
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "6a183afac680117a638180abb35f683525a05ae8"
+  pr_number: 6644
+  pr_url: https://github.com/labring/FastGPT/pull/6644
+  pr_title_raw: "feat(agentSkills): add skill version list API and fix OpenAPI spec in…"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    - Add `POST /core/agentSkills/version/list` endpoint for paginated skill version listing
+    - Fix HTTP method mismatch in OpenAPI spec: `GET /core/agentSkills/list` → `POST` (handler reads `req.body`)
+    - Bump `opensandbox-server` image from `v0.1.7` to `v0.1.9` across all deploy configs
+    - Make Docker API version configurable in volume-manager via `VM_DOCKER_API_VERSION` env var
+    - Remove obsolete `docker-compose.prod.copy.yml` template
+
+validation:
+  head_commit: "7b82d83934063978333b833e109f2e5cf69dddd8"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-6644.patch"
+  patch_sha256: "3f098c97d38ce0f4328099b388f075f890596666ffac19872c4b53fdebd9935a"
+  changed_files_file: "patches/fastgpt-pr-6644.changed_files.txt"
+  manual_functionality_description: |
+    Check that AgentSkill versions can be listed through a paginated POST API and that the OpenAPI definition matches the implemented request body behavior.
+    Also verify the related deployment changes: the opensandbox-server image version is updated consistently, the volume manager can read VM_DOCKER_API_VERSION, and obsolete compose template content is removed.

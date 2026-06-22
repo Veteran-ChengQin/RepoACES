@@ -1,0 +1,26 @@
+id: fastgpt-pr-7138
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "ffa1037a3443e08d5434c0a5b66a11d868186074"
+  pr_number: 7138
+  pr_url: https://github.com/labring/FastGPT/pull/7138
+  pr_title_raw: "feat(app): filter unavailable tools in system tool selector"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    - Filter SoonOffline/Offline system tools from new Agent selection candidates
+    - Preserve status metadata for system toolset children so unavailable children are filtered consistently
+    - Add API tests covering unavailable root and child tools
+
+validation:
+  head_commit: "c2e6e9a358eeb11348e7db3ba85a2e55ba4ccde2"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-7138.patch"
+  patch_sha256: "50cabc1e978d6a84b8c5c63e4ba3e7ec32cbb9f62ccfcd03eff9b21a39458de7"
+  changed_files_file: "patches/fastgpt-pr-7138.changed_files.txt"
+  manual_functionality_description: |
+    Check that unavailable system tools are filtered from new Agent system tool selection candidates.
+    Root tools marked SoonOffline or Offline should be hidden, toolset child status metadata should be preserved so unavailable children are filtered consistently, and available root tools and children should remain selectable through the system tool template API.

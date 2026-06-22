@@ -1,0 +1,26 @@
+id: fastgpt-pr-7066
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "445a5dc45465aea0e1c5693a479a09aea0182805"
+  pr_number: 7066
+  pr_url: https://github.com/labring/FastGPT/pull/7066
+  pr_title_raw: "feat: improve code block rendering"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    - auto preview HTML/HTM code blocks in chat responses after streaming finishes
+    - keep streaming HTML code blocks in source view and follow the latest content
+    - limit code node JSON output height in the whole response modal
+
+validation:
+  head_commit: "8dfcfd41a12f1e530aaaacbf155f9aab814f9a2e"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-7066.patch"
+  patch_sha256: "60716a4d94cff949596a8bf352c90f196a393f9c334ee74700f03eafd1bff42a"
+  changed_files_file: "patches/fastgpt-pr-7066.changed_files.txt"
+  manual_functionality_description: |
+    Check that HTML and HTM code blocks in chat responses automatically switch to preview mode after streaming finishes.
+    During streaming, HTML code blocks should remain in source view and keep following the latest content, ordinary code block rendering should remain usable, and JSON output in the whole-response modal should have a bounded display height.

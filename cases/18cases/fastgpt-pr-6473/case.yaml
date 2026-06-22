@@ -1,0 +1,24 @@
+id: fastgpt-pr-6473
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "4b24472106cde7f2364bd0e6753ba0ec5918b89b"
+  pr_number: 6473
+  pr_url: https://github.com/labring/FastGPT/pull/6473
+  pr_title_raw: "feat(docs): add analytics tracking script support"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    Add page analytics tracking script to the documentation site, with support for separate tracking IDs for CN and IO domains.
+
+validation:
+  head_commit: "5a8d7e17df7770de0cef6475cf1b2bfda61452d7"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-6473.patch"
+  patch_sha256: "07af0d46f37ab4aaa203586a113709be3977949fb93c52460ae81b8ffd33b522"
+  changed_files_file: "patches/fastgpt-pr-6473.changed_files.txt"
+  manual_functionality_description: |
+    Check that the documentation site can inject a page analytics tracking script.
+    The implementation should support separate tracking IDs for CN and IO domains, wire those IDs through the docs build/deploy environment, and keep the documentation build working when tracking IDs are absent.

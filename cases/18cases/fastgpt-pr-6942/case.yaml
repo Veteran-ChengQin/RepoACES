@@ -1,0 +1,27 @@
+id: fastgpt-pr-6942
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "92e695887d9876b7707af9be9602a28d6304ac54"
+  pr_number: 6942
+  pr_url: https://github.com/labring/FastGPT/pull/6942
+  pr_title_raw: "feat: support image dataset search"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    - add image inputs to dataset search and workflow dataset search flows
+    - support image caption/vector recall paths with related usage accounting
+    - restrict search-test image keys to current-team temp objects and skip stale image normalization failures
+    - add regression coverage for image search, workflow dispatch, and search-test image key auth
+
+validation:
+  head_commit: "ea8fe4cfebe94c803e89971fec5081be169757c0"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-6942.patch"
+  patch_sha256: "6de64ffa4ca0e84bdd007f1fb8e02d6c9e03003160bb33508c5891cde9583f43"
+  changed_files_file: "patches/fastgpt-pr-6942.changed_files.txt"
+  manual_functionality_description: |
+    Check that dataset search accepts image inputs in both normal dataset search and workflow dataset search flows.
+    Manual evaluation should cover image caption/vector recall, usage accounting for image-related recall paths, current-team authorization for temporary search-test image keys, and graceful handling when stale image normalization data cannot be reused.

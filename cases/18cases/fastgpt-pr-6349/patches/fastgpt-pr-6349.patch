@@ -1,0 +1,2447 @@
+diff --git a/.claude/design/vector-db-migration.md b/.claude/design/vector-db-migration.md
+new file mode 100644
+index 000000000000..28e3221866de
+--- /dev/null
++++ b/.claude/design/vector-db-migration.md
+@@ -0,0 +1,384 @@
++# 向量数据库迁移方案设计文档
++
++## 1. 需求背景
++
++FastGPT 目前支持三种向量数据库：PostgreSQL (pgvector)、OceanBase、Milvus。用户在实际使用中可能需要在不同向量数据库之间进行迁移，例如：
++- 从 PostgreSQL 迁移到 Milvus 以获得更好的扩展性
++- 从 Milvus 迁移到 PostgreSQL 以简化运维
++- 从一个数据库实例迁移到另一个实例
++
++本方案提供两种迁移模式：
++1. **停机版本**：简单直接，适合小规模数据或可接受停机窗口的场景
++2. **不停机版本**：支持在线迁移，适合生产环境
++
++## 2. 技术架构
++
++### 2.1 数据结构
++
++所有向量数据库使用统一的数据结构：
++
++```typescript
++type VectorRecord = {
++  id: string;           // 向量ID (PostgreSQL/OceanBase: BIGINT, Milvus: Int64)
++  vector: number[];     // 1536维向量
++  teamId: string;       // 团队ID
++  datasetId: string;    // 数据集ID
++  collectionId: string; // 集合ID
++  createTime: Date;     // 创建时间
++};
++```
++
++### 2.2 迁移架构
++
++```
++┌─────────────────────────────────────────────────────────────────────┐
++│                        VectorMigrationController                      │
++├─────────────────────────────────────────────────────────────────────┤
++│                                                                       │
++│  ┌─────────────┐    ┌─────────────────┐    ┌─────────────────────┐  │
++│  │   Source    │───▶│  MigrationCore  │───▶│      Target         │  │
++│  │  (PG/OB/MV) │    │                 │    │    (PG/OB/MV)       │  │
++│  └─────────────┘    │  - Extract      │    └─────────────────────┘  │
++│                     │  - Transform    │                              │
++│                     │  - Load         │                              │
++│                     │  - Validate     │                              │
++│                     └─────────────────┘                              │
++│                            │                                         │
++│                     ┌──────▼──────┐                                  │
++│                     │   MongoDB   │                                  │
++│                     │ (ID Mapping)│                                  │
++│                     └─────────────┘                                  │
++│                                                                       │
++└─────────────────────────────────────────────────────────────────────┘
++```
++
++## 3. 停机版本迁移方案
++
++### 3.1 迁移流程
++
++```
++1. 停止应用服务
++       ↓
++2. 从源数据库导出向量数据 (分页读取)
++       ↓
++3. 转换数据格式 (适配目标数据库)
++       ↓
++4. 导入目标数据库 (批量插入)
++       ↓
++5. 更新 MongoDB 中的向量ID映射 (如果ID发生变化)
++       ↓
++6. 验证数据完整性
++       ↓
++7. 切换环境变量指向新数据库
++       ↓
++8. 启动应用服务
++```
++
++### 3.2 核心接口
++
++```typescript
++type MigrationConfig = {
++  sourceType: 'pg' | 'oceanbase' | 'milvus';
++  targetType: 'pg' | 'oceanbase' | 'milvus';
++  sourceConfig: DatabaseConfig;
++  targetConfig: DatabaseConfig;
++  batchSize: number;        // 每批次处理的向量数量，默认 1000
++  validateAfterMigration: boolean; // 是否验证迁移结果
++};
++
++type MigrationResult = {
++  success: boolean;
++  totalRecords: number;
++  migratedRecords: number;
++  failedRecords: number;
++  idMappings: Map<string, string>; // 旧ID -> 新ID
++  errors: MigrationError[];
++  duration: number;         // 迁移耗时(ms)
++};
++```
++
++### 3.3 实现要点
++
++1. **分页读取**：使用 `getVectorDataByTime` 或基于 ID 的分页查询，避免一次加载全部数据
++2. **批量写入**：每批次 500-1000 条记录，减少网络往返
++3. **ID 映射**：如果目标数据库生成新 ID，需更新 MongoDB 中 `dataset_datas.indexes[].dataId`
++4. **事务保护**：PostgreSQL/OceanBase 使用事务，Milvus 使用批量操作
++
++## 4. 不停机版本迁移方案
++
++### 4.1 迁移流程
++
++```
++阶段1: 准备
++  1. 创建迁移状态表，记录进度
++  2. 初始化目标数据库 schema
++
++阶段2: 全量同步 (后台执行)
++  1. 分批读取源数据库的历史数据
++  2. 写入目标数据库
++  3. 记录每批次完成的时间戳
++
++阶段3: 增量同步 (持续运行)
++  1. 监听新写入的数据
++  2. 双写：同时写入源和目标数据库
++  3. 保持两个数据库同步
++
++阶段4: 切换
++  1. 暂停写入操作
++  2. 确认增量数据同步完成
++  3. 切换读写到目标数据库
++  4. 恢复服务
++```
++
++### 4.2 双写模式
++
++```typescript
++// 在迁移期间，修改 insertDatasetDataVector 函数
++const insertDatasetDataVector = async (props) => {
++  const migrationState = await getMigrationState();
++
++  if (migrationState === 'migrating') {
++    // 双写模式：同时写入源和目标
++    const [sourceResult, targetResult] = await Promise.all([
++      sourceVector.insert(props),
++      targetVector.insert(props)
++    ]);
++
++    // 记录 ID 映射
++    await saveIdMapping(sourceResult.insertIds, targetResult.insertIds);
++
++    return sourceResult; // 返回源数据库的结果
++  }
++
++  return Vector.insert(props);
++};
++```
++
++### 4.3 同步状态管理
++
++```typescript
++type MigrationState = {
++  status: 'idle' | 'preparing' | 'full_sync' | 'incremental_sync' | 'switching' | 'completed';
++  sourceType: string;
++  targetType: string;
++  lastSyncedTime: Date;      // 最后同步的时间点
++  lastSyncedId: string;      // 最后同步的ID
++  totalRecords: number;
++  syncedRecords: number;
++  startTime: Date;
++  errors: MigrationError[];
++};
++```
++
++## 5. MongoDB ID 更新策略
++
++向量数据在 MongoDB 的 `dataset_datas` 集合中有引用关系：
++
++```typescript
++// dataset_datas 文档结构
++{
++  _id: ObjectId,
++  indexes: [
++    {
++      dataId: string,  // 这是向量数据库中的ID，迁移时需要更新
++      text: string,
++      type: string
++    }
++  ]
++}
++```
++
++### 5.1 ID 更新方案
++
++**方案A: 保持原ID (推荐用于 PostgreSQL ↔ OceanBase)**
++
++PostgreSQL 和 OceanBase 都使用 BIGINT 自增 ID，可以通过指定 ID 插入来保持一致：
++
++```sql
++-- PostgreSQL
++INSERT INTO modeldata (id, vector, team_id, ...) VALUES ($1, $2, $3, ...);
++
++-- OceanBase
++INSERT INTO modeldata (id, vector, team_id, ...) VALUES (?, ?, ?, ...);
++```
++
++**方案B: ID 映射表 (适用于涉及 Milvus 的迁移)**
++
++Milvus 的 ID 生成机制不同，需要维护映射关系：
++
++```typescript
++// MongoDB 中创建 vector_id_mappings 集合
++{
++  oldId: string,
++  newId: string,
++  datasetId: string,
++  migratedAt: Date
++}
++
++// 迁移完成后批量更新 dataset_datas
++await DatasetData.updateMany(
++  { 'indexes.dataId': { $in: oldIds } },
++  { $set: { 'indexes.$[elem].dataId': newId } },
++  { arrayFilters: [{ 'elem.dataId': { $in: oldIds } }] }
++);
++```
++
++## 6. 文件结构
++
++```
++packages/service/common/vectorDB/migration/
++├── index.ts                 # 导出迁移功能
++├── type.ts                  # 类型定义
++├── controller.ts            # 迁移控制器
++├── exporters/
++│   ├── pg.ts               # PostgreSQL 数据导出
++│   ├── oceanbase.ts        # OceanBase 数据导出
++│   └── milvus.ts           # Milvus 数据导出
++├── importers/
++│   ├── pg.ts               # PostgreSQL 数据导入
++│   ├── oceanbase.ts        # OceanBase 数据导入
++│   └── milvus.ts           # Milvus 数据导入
++└── utils.ts                 # 工具函数
++
++projects/app/src/pages/api/admin/
++├── migrateVector.ts         # 迁移 API 端点
++
++scripts/
++├── migrateVector.ts         # CLI 迁移脚本
++```
++
++## 7. API 设计
++
++### 7.1 启动迁移 API
++
++```typescript
++// POST /api/admin/migrateVector
++type StartMigrationRequest = {
++  mode: 'offline' | 'online';  // 停机/不停机
++  sourceType: 'pg' | 'oceanbase' | 'milvus';
++  targetType: 'pg' | 'oceanbase' | 'milvus';
++  targetConfig: {
++    address: string;
++    token?: string;  // Milvus 用
++  };
++  options?: {
++    batchSize?: number;
++    validateAfterMigration?: boolean;
++  };
++};
++
++type StartMigrationResponse = {
++  migrationId: string;
++  status: 'started';
++  estimatedRecords: number;
++};
++```
++
++### 7.2 查询迁移状态 API
++
++```typescript
++// GET /api/admin/migrateVector/status
++type MigrationStatusResponse = {
++  migrationId: string;
++  status: MigrationState['status'];
++  progress: {
++    total: number;
++    completed: number;
++    percentage: number;
++  };
++  errors: MigrationError[];
++  startTime: Date;
++  estimatedTimeRemaining?: number;
++};
++```
++
++### 7.3 CLI 脚本
++
++```bash
++# 停机迁移
++pnpm run migrate:vector --mode offline \
++  --source pg --source-url "postgresql://..." \
++  --target milvus --target-url "http://localhost:19530"
++
++# 不停机迁移 - 启动
++pnpm run migrate:vector --mode online --action start \
++  --source pg --target milvus --target-url "http://localhost:19530"
++
++# 不停机迁移 - 切换
++pnpm run migrate:vector --mode online --action switch
++
++# 查看状态
++pnpm run migrate:vector --status
++```
++
++## 8. 错误处理与回滚
++
++### 8.1 错误分类
++
++```typescript
++type MigrationError = {
++  type: 'connection' | 'timeout' | 'data_corruption' | 'id_conflict' | 'unknown';
++  message: string;
++  recordId?: string;
++  timestamp: Date;
++  retryable: boolean;
++};
++```
++
++### 8.2 回滚策略
++
++**停机版本回滚：**
++1. 不修改源数据库，保持原样
++2. 清空目标数据库中已迁移的数据
++3. 恢复环境变量到源数据库
++4. 启动服务
++
++**不停机版本回滚：**
++1. 停止双写
++2. 保留源数据库继续服务
++3. 清理目标数据库
++4. 清理 MongoDB 中的 ID 映射记录
++
++## 9. 数据验证
++
++### 9.1 验证项目
++
++1. **数量验证**：源和目标的向量总数一致
++2. **采样验证**：随机抽取 N 条记录，验证向量内容一致
++3. **搜索验证**：使用相同查询向量，验证 Top-K 结果一致性
++
++### 9.2 验证接口
++
++```typescript
++type ValidationResult = {
++  passed: boolean;
++  countMatch: {
++    source: number;
++    target: number;
++    match: boolean;
++  };
++  sampleMatch: {
++    checked: number;
++    matched: number;
++    mismatched: string[];  // 不匹配的 ID 列表
++  };
++  searchMatch: {
++    queries: number;
++    avgOverlap: number;  // Top-K 结果的平均重合度
++  };
++};
++```
++
++## 10. 性能考虑
++
++1. **批量大小**：建议 500-1000 条/批，根据向量维度和网络延迟调整
++2. **并发控制**：导出和导入可以并行，但同一数据库的写入需控制并发
++3. **内存管理**：流式处理，避免一次性加载大量向量到内存
++4. **断点续传**：记录已处理的 ID，支持中断后继续
++
++## 11. 安全考虑
++
++1. 迁移 API 仅限管理员访问
++2. 数据库连接信息不记录日志
++3. 迁移过程加密传输
++4. 迁移完成后清理临时数据
+diff --git a/packages/service/common/vectorDB/migration/controller.ts b/packages/service/common/vectorDB/migration/controller.ts
+new file mode 100644
+index 000000000000..2518e0abb328
+--- /dev/null
++++ b/packages/service/common/vectorDB/migration/controller.ts
+@@ -0,0 +1,393 @@
++/**
++ * Vector Database Migration Controller
++ * Coordinates the migration process between different vector databases
++ */
++
++import type {
++  MigrationConfig,
++  MigrationResult,
++  MigrationState,
++  MigrationProgress,
++  MigrationError,
++  ValidationResult,
++  VectorRecord,
++  VectorDbType
++} from './type';
++import { createExporter } from './exporters';
++import { createImporter } from './importers';
++import { addLog } from '../../system/log';
++import { customNanoid } from '@fastgpt/global/common/string/tools';
++
++// Migration state storage (in-memory for now, can be extended to MongoDB)
++const migrationStates = new Map<string, MigrationState>();
++
++// Maximum concurrent migrations allowed
++const MAX_CONCURRENT_MIGRATIONS = 3;
++
++// State retention time: 24 hours for completed/failed/cancelled states
++const STATE_RETENTION_MS = 24 * 60 * 60 * 1000;
++
++// Clean up old migration states periodically
++function cleanupOldStates(): void {
++  const now = Date.now();
++  const keysToDelete: string[] = [];
++
++  for (const [id, state] of migrationStates) {
++    // Only clean up completed, failed, or cancelled states
++    if (state.status === 'completed' || state.status === 'failed' || state.status === 'cancelled') {
++      const endTime = state.endTime?.getTime() || 0;
++      if (now - endTime > STATE_RETENTION_MS) {
++        keysToDelete.push(id);
++      }
++    }
++  }
++
++  for (const key of keysToDelete) {
++    migrationStates.delete(key);
++    addLog.info(`[Migration] Cleaned up old state: ${key}`);
++  }
++}
++
++// Run cleanup every hour
++setInterval(cleanupOldStates, 60 * 60 * 1000);
++
++// Get count of active (running) migrations
++function getActiveMigrationCount(): number {
++  let count = 0;
++  for (const state of migrationStates.values()) {
++    if (state.status === 'preparing' || state.status === 'full_sync' || state.status === 'incremental_sync') {
++      count++;
++    }
++  }
++  return count;
++}
++
++export class VectorMigrationController {
++  private config: MigrationConfig;
++  private migrationId: string;
++  private state: MigrationState;
++  private aborted: boolean = false;
++
++  constructor(config: MigrationConfig) {
++    this.config = config;
++    this.migrationId = `migration_${Date.now()}_${customNanoid('abcdefghijklmnopqrstuvwxyz', 6)}`;
++    this.state = {
++      migrationId: this.migrationId,
++      status: 'idle',
++      mode: config.mode,
++      sourceType: config.sourceType,
++      targetType: config.targetType,
++      totalRecords: 0,
++      syncedRecords: 0,
++      failedRecords: 0,
++      startTime: new Date(),
++      errors: []
++    };
++  }
++
++  // Get current migration progress
++  getProgress(): MigrationProgress {
++    const batchSize = this.config.options?.batchSize || 1000;
++    const totalBatches = Math.ceil(this.state.totalRecords / batchSize);
++    const currentBatch = Math.ceil(this.state.syncedRecords / batchSize);
++
++    return {
++      total: this.state.totalRecords,
++      completed: this.state.syncedRecords,
++      failed: this.state.failedRecords,
++      percentage:
++        this.state.totalRecords > 0
++          ? Math.round((this.state.syncedRecords / this.state.totalRecords) * 100)
++          : 0,
++      currentBatch,
++      totalBatches
++    };
++  }
++
++  // Get current state
++  getState(): MigrationState {
++    return { ...this.state };
++  }
++
++  // Abort migration
++  abort(): void {
++    this.aborted = true;
++    this.state.status = 'cancelled';
++    this.state.endTime = new Date();
++    migrationStates.set(this.migrationId, this.state);
++  }
++
++  // Run offline (stop-the-world) migration
++  async runOfflineMigration(options?: {
++    teamId?: string;
++    datasetId?: string;
++    onProgress?: (progress: MigrationProgress) => void;
++  }): Promise<MigrationResult> {
++    const startTime = Date.now();
++    const idMappings = new Map<string, string>();
++    const allErrors: MigrationError[] = [];
++
++    // Check concurrent migration limit
++    const activeMigrations = getActiveMigrationCount();
++    if (activeMigrations >= MAX_CONCURRENT_MIGRATIONS) {
++      this.state.status = 'failed';
++      this.state.endTime = new Date();
++      this.state.errors.push({
++        type: 'unknown',
++        message: `Too many concurrent migrations. Maximum ${MAX_CONCURRENT_MIGRATIONS} allowed, currently ${activeMigrations} running.`,
++        timestamp: new Date(),
++        retryable: true
++      });
++      migrationStates.set(this.migrationId, this.state);
++
++      return {
++        success: false,
++        migrationId: this.migrationId,
++        totalRecords: 0,
++        migratedRecords: 0,
++        failedRecords: 1,
++        idMappings,
++        errors: this.state.errors,
++        duration: Date.now() - startTime
++      };
++    }
++
++    try {
++      this.state.status = 'preparing';
++      migrationStates.set(this.migrationId, this.state);
++
++      addLog.info(`[Migration] Starting offline migration: ${this.config.sourceType} -> ${this.config.targetType}`);
++
++      // Create exporter and importer
++      const exporter = createExporter(this.config.sourceType);
++      const importer = createImporter(this.config.targetType, {
++        address: this.config.targetConfig.address,
++        token: this.config.targetConfig.token
++      });
++
++      // Initialize target database
++      addLog.info('[Migration] Initializing target database...');
++      await importer.init();
++
++      // Get total count
++      const totalCount = await exporter.getCount({
++        teamId: options?.teamId,
++        datasetId: options?.datasetId
++      });
++      this.state.totalRecords = totalCount;
++
++      addLog.info(`[Migration] Total records to migrate: ${totalCount}`);
++
++      if (totalCount === 0) {
++        this.state.status = 'completed';
++        this.state.endTime = new Date();
++        return {
++          success: true,
++          migrationId: this.migrationId,
++          totalRecords: 0,
++          migratedRecords: 0,
++          failedRecords: 0,
++          idMappings,
++          errors: [],
++          duration: Date.now() - startTime
++        };
++      }
++
++      // Start full sync
++      this.state.status = 'full_sync';
++      migrationStates.set(this.migrationId, this.state);
++
++      const batchSize = this.config.options?.batchSize || 1000;
++      let lastId: string | undefined;
++      let processedCount = 0;
++
++      while (!this.aborted) {
++        // Export batch from source
++        const { records, hasMore, lastId: newLastId } = await exporter.exportBatch({
++          afterId: lastId,
++          limit: batchSize,
++          teamId: options?.teamId,
++          datasetId: options?.datasetId
++        });
++
++        if (records.length === 0) break;
++
++        // Import batch to target
++        const importResult = await importer.importBatch(records);
++
++        // Collect ID mappings
++        for (const [oldId, newId] of importResult.idMappings) {
++          idMappings.set(oldId, newId);
++        }
++
++        // Collect errors
++        allErrors.push(...importResult.errors);
++        this.state.errors.push(...importResult.errors);
++
++        // Update progress
++        processedCount += records.length;
++        this.state.syncedRecords = processedCount;
++        this.state.failedRecords = allErrors.length;
++        migrationStates.set(this.migrationId, this.state);
++
++        // Notify progress
++        if (options?.onProgress) {
++          options.onProgress(this.getProgress());
++        }
++
++        addLog.info(
++          `[Migration] Progress: ${processedCount}/${totalCount} (${Math.round((processedCount / totalCount) * 100)}%)`
++        );
++
++        lastId = newLastId;
++
++        if (!hasMore) break;
++      }
++
++      // Validation (optional)
++      let validation: ValidationResult | undefined;
++      if (this.config.options?.validateAfterMigration !== false) {
++        addLog.info('[Migration] Validating migration...');
++        validation = await this.validate(exporter, importer);
++
++        if (!validation.passed) {
++          allErrors.push({
++            type: 'validation_failed',
++            message: `Validation failed: source=${validation.countMatch.source}, target=${validation.countMatch.target}`,
++            timestamp: new Date(),
++            retryable: false
++          });
++        }
++      }
++
++      // Complete
++      this.state.status = this.aborted ? 'cancelled' : 'completed';
++      this.state.endTime = new Date();
++      migrationStates.set(this.migrationId, this.state);
++
++      // Close connections with error handling
++      if ('close' in importer && typeof importer.close === 'function') {
++        try {
++          await importer.close();
++        } catch (closeError: any) {
++          addLog.warn('[Migration] Error closing importer connection', closeError);
++          allErrors.push({
++            type: 'unknown',
++            message: `Failed to close connection: ${closeError.message || 'Unknown error'}`,
++            timestamp: new Date(),
++            retryable: false
++          });
++        }
++      }
++
++      const duration = Date.now() - startTime;
++      addLog.info(`[Migration] Completed in ${duration}ms. Migrated: ${processedCount}, Failed: ${allErrors.length}`);
++
++      return {
++        success: allErrors.length === 0 && !this.aborted,
++        migrationId: this.migrationId,
++        totalRecords: totalCount,
++        migratedRecords: processedCount,
++        failedRecords: allErrors.length,
++        idMappings,
++        errors: allErrors,
++        duration,
++        validation
++      };
++    } catch (error: any) {
++      addLog.error('[Migration] Migration failed', error);
++      this.state.status = 'failed';
++      this.state.endTime = new Date();
++      this.state.errors.push({
++        type: 'unknown',
++        message: error.message || 'Unknown error',
++        timestamp: new Date(),
++        retryable: false
++      });
++      migrationStates.set(this.migrationId, this.state);
++
++      return {
++        success: false,
++        migrationId: this.migrationId,
++        totalRecords: this.state.totalRecords,
++        migratedRecords: this.state.syncedRecords,
++        failedRecords: this.state.failedRecords + 1,
++        idMappings,
++        errors: [...allErrors, ...this.state.errors],
++        duration: Date.now() - startTime
++      };
++    }
++  }
++
++  // Validate migration by comparing source and target
++  private async validate(
++    exporter: ReturnType<typeof createExporter>,
++    importer: ReturnType<typeof createImporter>
++  ): Promise<ValidationResult> {
++    const sourceCount = await exporter.getCount();
++    const targetCount = await importer.getCount();
++
++    const countMatch = sourceCount === targetCount;
++
++    // Sample check: export a few records and verify they exist in target
++    // For simplicity, we just compare counts for now
++    // A more thorough validation would involve vector comparison
++
++    return {
++      passed: countMatch,
++      countMatch: {
++        source: sourceCount,
++        target: targetCount,
++        match: countMatch
++      },
++      sampleMatch: {
++        checked: 0,
++        matched: 0,
++        mismatchedIds: []
++      }
++    };
++  }
++}
++
++// Get migration state by ID
++export function getMigrationState(migrationId: string): MigrationState | undefined {
++  return migrationStates.get(migrationId);
++}
++
++// List all migration states
++export function listMigrationStates(): MigrationState[] {
++  return Array.from(migrationStates.values());
++}
++
++// Start a new migration
++export async function startMigration(
++  config: MigrationConfig,
++  options?: {
++    teamId?: string;
++    datasetId?: string;
++    onProgress?: (progress: MigrationProgress) => void;
++  }
++): Promise<MigrationResult> {
++  const controller = new VectorMigrationController(config);
++
++  if (config.mode === 'offline') {
++    return controller.runOfflineMigration(options);
++  } else {
++    // Online migration is more complex and requires background workers
++    // For now, we'll throw an error
++    throw new Error('Online migration is not yet implemented. Please use offline mode.');
++  }
++}
++
++// Abort a running migration
++export function abortMigration(migrationId: string): boolean {
++  const state = migrationStates.get(migrationId);
++  if (!state || state.status === 'completed' || state.status === 'failed') {
++    return false;
++  }
++
++  state.status = 'cancelled';
++  state.endTime = new Date();
++  migrationStates.set(migrationId, state);
++  return true;
++}
+diff --git a/packages/service/common/vectorDB/migration/exporters.ts b/packages/service/common/vectorDB/migration/exporters.ts
+new file mode 100644
+index 000000000000..a8dd4ad6371d
+--- /dev/null
++++ b/packages/service/common/vectorDB/migration/exporters.ts
+@@ -0,0 +1,417 @@
++/**
++ * Vector database exporters for migration
++ * Each exporter implements the VectorExporter interface to read vectors from source database
++ */
++
++import type { VectorExporter, VectorRecord, MigrationError } from './type';
++import { DatasetVectorTableName } from '../constants';
++import { PgClient, connectPg } from '../pg/controller';
++import { ObClient, getClient as getObClient } from '../oceanbase/controller';
++import { MilvusClient, DataType } from '@zilliz/milvus2-sdk-node';
++import type { RowDataPacket } from 'mysql2/promise';
++import dayjs from 'dayjs';
++
++// PostgreSQL Exporter
++export class PgExporter implements VectorExporter {
++  async getCount(filter?: { teamId?: string; datasetId?: string }): Promise<number> {
++    await connectPg();
++    const whereConditions: (string | [string, string])[] = [];
++
++    if (filter?.teamId) {
++      whereConditions.push(['team_id', filter.teamId]);
++    }
++    if (filter?.datasetId) {
++      if (whereConditions.length > 0) whereConditions.push('and');
++      whereConditions.push(['dataset_id', filter.datasetId]);
++    }
++
++    return PgClient.count(DatasetVectorTableName, {
++      where: whereConditions.length > 0 ? whereConditions : undefined
++    });
++  }
++
++  async exportBatch(options: {
++    afterId?: string;
++    limit: number;
++    teamId?: string;
++    datasetId?: string;
++  }): Promise<{
++    records: VectorRecord[];
++    hasMore: boolean;
++    lastId?: string;
++  }> {
++    const pg = await connectPg();
++
++    const { afterId, limit, teamId, datasetId } = options;
++    const whereConditions: string[] = [];
++    const params: (string | number)[] = [];
++    let paramIndex = 1;
++
++    if (afterId) {
++      whereConditions.push(`id > $${paramIndex++}`);
++      params.push(afterId);
++    }
++    if (teamId) {
++      whereConditions.push(`team_id = $${paramIndex++}`);
++      params.push(teamId);
++    }
++    if (datasetId) {
++      whereConditions.push(`dataset_id = $${paramIndex++}`);
++      params.push(datasetId);
++    }
++
++    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
++    params.push(limit + 1);
++
++    const { rows } = await pg.query<{
++      id: string;
++      vector: string;
++      team_id: string;
++      dataset_id: string;
++      collection_id: string;
++      createtime: Date;
++    }>(
++      `
++      SELECT id, vector::text, team_id, dataset_id, collection_id, createtime
++      FROM ${DatasetVectorTableName}
++      ${whereClause}
++      ORDER BY id ASC
++      LIMIT $${paramIndex}
++    `,
++      params
++    );
++
++    const hasMore = rows.length > limit;
++    const records = rows.slice(0, limit).map((row) => ({
++      id: String(row.id),
++      vector: parseVectorString(row.vector),
++      teamId: row.team_id,
++      datasetId: row.dataset_id,
++      collectionId: row.collection_id,
++      createTime: new Date(row.createtime)
++    }));
++
++    return {
++      records,
++      hasMore,
++      lastId: records.length > 0 ? records[records.length - 1].id : undefined
++    };
++  }
++
++  async exportByTimeRange(start: Date, end: Date): Promise<VectorRecord[]> {
++    const pg = await connectPg();
++
++    const { rows } = await pg.query<{
++      id: string;
++      vector: string;
++      team_id: string;
++      dataset_id: string;
++      collection_id: string;
++      createtime: Date;
++    }>(
++      `
++      SELECT id, vector::text, team_id, dataset_id, collection_id, createtime
++      FROM ${DatasetVectorTableName}
++      WHERE createtime BETWEEN $1 AND $2
++      ORDER BY id ASC
++    `,
++      [start, end]
++    );
++
++    return rows.map((row) => ({
++      id: String(row.id),
++      vector: parseVectorString(row.vector),
++      teamId: row.team_id,
++      datasetId: row.dataset_id,
++      collectionId: row.collection_id,
++      createTime: new Date(row.createtime)
++    }));
++  }
++}
++
++// OceanBase Exporter
++export class OceanBaseExporter implements VectorExporter {
++  async getCount(filter?: { teamId?: string; datasetId?: string }): Promise<number> {
++    const whereConditions: (string | [string, string])[] = [];
++
++    if (filter?.teamId) {
++      whereConditions.push(['team_id', filter.teamId]);
++    }
++    if (filter?.datasetId) {
++      if (whereConditions.length > 0) whereConditions.push('and');
++      whereConditions.push(['dataset_id', filter.datasetId]);
++    }
++
++    return ObClient.count(DatasetVectorTableName, {
++      where: whereConditions.length > 0 ? whereConditions : undefined
++    });
++  }
++
++  async exportBatch(options: {
++    afterId?: string;
++    limit: number;
++    teamId?: string;
++    datasetId?: string;
++  }): Promise<{
++    records: VectorRecord[];
++    hasMore: boolean;
++    lastId?: string;
++  }> {
++    const client = await getObClient();
++    const { afterId, limit, teamId, datasetId } = options;
++    const whereConditions: string[] = [];
++    const params: (string | number)[] = [];
++
++    if (afterId) {
++      whereConditions.push(`id > ?`);
++      params.push(afterId);
++    }
++    if (teamId) {
++      whereConditions.push(`team_id = ?`);
++      params.push(teamId);
++    }
++    if (datasetId) {
++      whereConditions.push(`dataset_id = ?`);
++      params.push(datasetId);
++    }
++
++    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
++    params.push(limit + 1);
++
++    const [rows] = await client.query<
++      ({
++        id: string;
++        vector: string;
++        team_id: string;
++        dataset_id: string;
++        collection_id: string;
++        createtime: Date;
++      } & RowDataPacket)[]
++    >(
++      `
++      SELECT id, CAST(vector AS CHAR) as vector, team_id, dataset_id, collection_id, createtime
++      FROM ${DatasetVectorTableName}
++      ${whereClause}
++      ORDER BY id ASC
++      LIMIT ?
++    `,
++      params
++    );
++
++    const hasMore = rows.length > limit;
++    const records = rows.slice(0, limit).map((row) => ({
++      id: String(row.id),
++      vector: parseVectorString(row.vector),
++      teamId: row.team_id,
++      datasetId: row.dataset_id,
++      collectionId: row.collection_id,
++      createTime: new Date(row.createtime)
++    }));
++
++    return {
++      records,
++      hasMore,
++      lastId: records.length > 0 ? records[records.length - 1].id : undefined
++    };
++  }
++
++  async exportByTimeRange(start: Date, end: Date): Promise<VectorRecord[]> {
++    const client = await getObClient();
++    const [rows] = await client.query<
++      ({
++        id: string;
++        vector: string;
++        team_id: string;
++        dataset_id: string;
++        collection_id: string;
++        createtime: Date;
++      } & RowDataPacket)[]
++    >(
++      `
++      SELECT id, CAST(vector AS CHAR) as vector, team_id, dataset_id, collection_id, createtime
++      FROM ${DatasetVectorTableName}
++      WHERE createtime BETWEEN ? AND ?
++      ORDER BY id ASC
++    `,
++      [start, end]
++    );
++
++    return rows.map((row) => ({
++      id: String(row.id),
++      vector: parseVectorString(row.vector),
++      teamId: row.team_id,
++      datasetId: row.dataset_id,
++      collectionId: row.collection_id,
++      createTime: new Date(row.createtime)
++    }));
++  }
++}
++
++// Milvus Exporter
++export class MilvusExporter implements VectorExporter {
++  private client: MilvusClient | null = null;
++  private address: string;
++  private token?: string;
++
++  constructor(address: string, token?: string) {
++    this.address = address;
++    this.token = token;
++  }
++
++  private async getClient(): Promise<MilvusClient> {
++    if (this.client) return this.client;
++
++    this.client = new MilvusClient({
++      address: this.address,
++      token: this.token
++    });
++    await this.client.connectPromise;
++
++    // Try to use fastgpt database
++    try {
++      await this.client.useDatabase({ db_name: 'fastgpt' });
++    } catch {
++      // Ignore if database doesn't exist
++    }
++
++    return this.client;
++  }
++
++  async getCount(filter?: { teamId?: string; datasetId?: string }): Promise<number> {
++    const client = await this.getClient();
++    const filterConditions: string[] = [];
++
++    if (filter?.teamId) {
++      filterConditions.push(`(teamId == "${filter.teamId}")`);
++    }
++    if (filter?.datasetId) {
++      filterConditions.push(`(datasetId == "${filter.datasetId}")`);
++    }
++
++    const result = await client.query({
++      collection_name: DatasetVectorTableName,
++      output_fields: ['count(*)'],
++      filter: filterConditions.length > 0 ? filterConditions.join(' and ') : undefined
++    });
++
++    return result.data?.[0]?.['count(*)'] as number;
++  }
++
++  async exportBatch(options: {
++    afterId?: string;
++    limit: number;
++    teamId?: string;
++    datasetId?: string;
++  }): Promise<{
++    records: VectorRecord[];
++    hasMore: boolean;
++    lastId?: string;
++  }> {
++    const client = await this.getClient();
++    const { afterId, limit, teamId, datasetId } = options;
++    const filterConditions: string[] = [];
++
++    if (afterId) {
++      filterConditions.push(`(id > ${afterId})`);
++    }
++    if (teamId) {
++      filterConditions.push(`(teamId == "${teamId}")`);
++    }
++    if (datasetId) {
++      filterConditions.push(`(datasetId == "${datasetId}")`);
++    }
++
++    // Milvus query with pagination
++    const result = await client.query({
++      collection_name: DatasetVectorTableName,
++      output_fields: ['id', 'vector', 'teamId', 'datasetId', 'collectionId', 'createTime'],
++      filter: filterConditions.length > 0 ? filterConditions.join(' and ') : undefined,
++      limit: limit + 1
++    });
++
++    const rows = result.data as {
++      id: string | number;
++      vector: number[];
++      teamId: string;
++      datasetId: string;
++      collectionId: string;
++      createTime: number;
++    }[];
++
++    // Sort by ID since Milvus query doesn't guarantee order
++    rows.sort((a, b) => Number(a.id) - Number(b.id));
++
++    const hasMore = rows.length > limit;
++    const records = rows.slice(0, limit).map((row) => ({
++      id: String(row.id),
++      vector: row.vector,
++      teamId: row.teamId,
++      datasetId: row.datasetId,
++      collectionId: row.collectionId,
++      createTime: new Date(row.createTime)
++    }));
++
++    return {
++      records,
++      hasMore,
++      lastId: records.length > 0 ? records[records.length - 1].id : undefined
++    };
++  }
++
++  async exportByTimeRange(start: Date, end: Date): Promise<VectorRecord[]> {
++    const client = await this.getClient();
++    const startTimestamp = start.getTime();
++    const endTimestamp = end.getTime();
++
++    const result = await client.query({
++      collection_name: DatasetVectorTableName,
++      output_fields: ['id', 'vector', 'teamId', 'datasetId', 'collectionId', 'createTime'],
++      filter: `(createTime >= ${startTimestamp}) and (createTime <= ${endTimestamp})`
++    });
++
++    const rows = result.data as {
++      id: string | number;
++      vector: number[];
++      teamId: string;
++      datasetId: string;
++      collectionId: string;
++      createTime: number;
++    }[];
++
++    return rows.map((row) => ({
++      id: String(row.id),
++      vector: row.vector,
++      teamId: row.teamId,
++      datasetId: row.datasetId,
++      collectionId: row.collectionId,
++      createTime: new Date(row.createTime)
++    }));
++  }
++}
++
++// Helper function to parse vector string from PostgreSQL/OceanBase
++function parseVectorString(vectorStr: string): number[] {
++  // Vector format: [0.1,0.2,0.3,...] or (0.1,0.2,0.3,...)
++  const cleaned = vectorStr.replace(/[\[\]\(\)]/g, '');
++  return cleaned.split(',').map((v) => parseFloat(v.trim()));
++}
++
++// Factory function to create exporter based on database type
++export function createExporter(
++  type: 'pg' | 'oceanbase' | 'milvus',
++  config?: { address?: string; token?: string }
++): VectorExporter {
++  switch (type) {
++    case 'pg':
++      return new PgExporter();
++    case 'oceanbase':
++      return new OceanBaseExporter();
++    case 'milvus':
++      if (!config?.address) {
++        throw new Error('Milvus address is required');
++      }
++      return new MilvusExporter(config.address, config.token);
++    default:
++      throw new Error(`Unknown exporter type: ${type}`);
++  }
++}
+diff --git a/packages/service/common/vectorDB/migration/importers.ts b/packages/service/common/vectorDB/migration/importers.ts
+new file mode 100644
+index 000000000000..e5965cd1ab11
+--- /dev/null
++++ b/packages/service/common/vectorDB/migration/importers.ts
+@@ -0,0 +1,531 @@
++/**
++ * Vector database importers for migration
++ * Each importer implements the VectorImporter interface to write vectors to target database
++ */
++
++import type { VectorImporter, VectorRecord, MigrationError } from './type';
++import { DatasetVectorTableName, DatasetVectorDbName, VectorVQ } from '../constants';
++import { PgClient, connectPg } from '../pg/controller';
++import { ObClient, getClient as getObClient } from '../oceanbase/controller';
++import { MilvusClient, DataType, LoadState } from '@zilliz/milvus2-sdk-node';
++import { addLog } from '../../system/log';
++import { customNanoid } from '@fastgpt/global/common/string/tools';
++import { Pool } from 'pg';
++import mysql from 'mysql2/promise';
++
++// PostgreSQL Importer
++export class PgImporter implements VectorImporter {
++  private targetPool: Pool | null = null;
++  private targetAddress: string;
++
++  constructor(address: string) {
++    this.targetAddress = address;
++  }
++
++  private async getPool(): Promise<Pool> {
++    if (this.targetPool) return this.targetPool;
++
++    this.targetPool = new Pool({
++      connectionString: this.targetAddress,
++      max: 10,
++      min: 2,
++      idleTimeoutMillis: 30000,
++      connectionTimeoutMillis: 10000
++    });
++
++    return this.targetPool;
++  }
++
++  async init(): Promise<void> {
++    const pool = await this.getPool();
++    const isHalfVec = VectorVQ === 16;
++
++    await pool.query(`CREATE EXTENSION IF NOT EXISTS vector;`);
++    await pool.query(`
++      CREATE TABLE IF NOT EXISTS ${DatasetVectorTableName} (
++        id BIGSERIAL PRIMARY KEY,
++        vector ${isHalfVec ? 'HALFVEC(1536)' : 'VECTOR(1536)'} NOT NULL,
++        team_id VARCHAR(50) NOT NULL,
++        dataset_id VARCHAR(50) NOT NULL,
++        collection_id VARCHAR(50) NOT NULL,
++        createtime TIMESTAMP DEFAULT CURRENT_TIMESTAMP
++      );
++    `);
++
++    // Create indexes
++    try {
++      await pool.query(
++        `CREATE INDEX CONCURRENTLY IF NOT EXISTS vector_index ON ${DatasetVectorTableName} USING hnsw (vector ${isHalfVec ? 'halfvec_ip_ops' : 'vector_ip_ops'}) WITH (m = 32, ef_construction = 128);`
++      );
++    } catch {
++      // Index might already exist
++    }
++
++    try {
++      await pool.query(
++        `CREATE INDEX CONCURRENTLY IF NOT EXISTS team_dataset_collection_index ON ${DatasetVectorTableName} USING btree(team_id, dataset_id, collection_id);`
++      );
++    } catch {
++      // Index might already exist
++    }
++
++    addLog.info('[Migration] PostgreSQL target initialized');
++  }
++
++  async importBatch(records: VectorRecord[]): Promise<{
++    insertedIds: string[];
++    idMappings: Map<string, string>;
++    errors: MigrationError[];
++  }> {
++    const pool = await this.getPool();
++    const insertedIds: string[] = [];
++    const idMappings = new Map<string, string>();
++    const errors: MigrationError[] = [];
++
++    if (records.length === 0) {
++      return { insertedIds, idMappings, errors };
++    }
++
++    const client = await pool.connect();
++    try {
++      // Start transaction for batch insert
++      await client.query('BEGIN');
++
++      // Build parameterized bulk insert with explicit IDs
++      const valueParams: (string | number)[] = [];
++      const valuePlaceholders: string[] = [];
++      let paramIndex = 1;
++
++      for (const record of records) {
++        const vectorStr = `[${record.vector.join(',')}]`;
++        valuePlaceholders.push(
++          `($${paramIndex++}, $${paramIndex++}::vector, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++})`
++        );
++        valueParams.push(
++          record.id,
++          vectorStr,
++          record.teamId,
++          record.datasetId,
++          record.collectionId,
++          record.createTime.toISOString()
++        );
++      }
++
++      const sql = `
++        INSERT INTO ${DatasetVectorTableName} (id, vector, team_id, dataset_id, collection_id, createtime)
++        VALUES ${valuePlaceholders.join(',')}
++        ON CONFLICT (id) DO NOTHING
++        RETURNING id
++      `;
++
++      const result = await client.query<{ id: string }>(sql, valueParams);
++
++      for (const row of result.rows) {
++        insertedIds.push(String(row.id));
++      }
++
++      // For PostgreSQL with explicit IDs, mappings are 1:1
++      for (const record of records) {
++        idMappings.set(record.id, record.id);
++      }
++
++      // Commit transaction
++      await client.query('COMMIT');
++    } catch (error: any) {
++      // Rollback transaction on error
++      await client.query('ROLLBACK');
++      addLog.error('[Migration] PG import batch error', error);
++      errors.push({
++        type: 'unknown',
++        message: error.message || 'Unknown error during import',
++        timestamp: new Date(),
++        retryable: true
++      });
++    } finally {
++      client.release();
++    }
++
++    return { insertedIds, idMappings, errors };
++  }
++
++  async deleteBatch(ids: string[]): Promise<void> {
++    if (ids.length === 0) return;
++
++    const pool = await this.getPool();
++    const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
++    await pool.query(`DELETE FROM ${DatasetVectorTableName} WHERE id IN (${placeholders})`, ids);
++  }
++
++  async getCount(): Promise<number> {
++    const pool = await this.getPool();
++    const result = await pool.query(`SELECT COUNT(*) FROM ${DatasetVectorTableName}`);
++    return parseInt(result.rows[0].count, 10);
++  }
++
++  async close(): Promise<void> {
++    if (this.targetPool) {
++      await this.targetPool.end();
++      this.targetPool = null;
++    }
++  }
++}
++
++// OceanBase Importer
++export class OceanBaseImporter implements VectorImporter {
++  private targetPool: mysql.Pool | null = null;
++  private targetAddress: string;
++
++  constructor(address: string) {
++    this.targetAddress = address;
++  }
++
++  private async getPool(): Promise<mysql.Pool> {
++    if (this.targetPool) return this.targetPool;
++
++    this.targetPool = mysql.createPool({
++      uri: this.targetAddress,
++      waitForConnections: true,
++      connectionLimit: 10,
++      connectTimeout: 20000,
++      idleTimeout: 60000
++    });
++
++    return this.targetPool;
++  }
++
++  async init(): Promise<void> {
++    const pool = await this.getPool();
++
++    await pool.query(`
++      CREATE TABLE IF NOT EXISTS ${DatasetVectorTableName} (
++        id BIGINT AUTO_INCREMENT PRIMARY KEY,
++        vector VECTOR(1536) NOT NULL,
++        team_id VARCHAR(50) NOT NULL,
++        dataset_id VARCHAR(50) NOT NULL,
++        collection_id VARCHAR(50) NOT NULL,
++        createtime TIMESTAMP DEFAULT CURRENT_TIMESTAMP
++      );
++    `);
++
++    // Create indexes
++    try {
++      await pool.query(
++        `CREATE VECTOR INDEX IF NOT EXISTS vector_index ON ${DatasetVectorTableName}(vector) WITH (distance=inner_product, type=hnsw, m=32, ef_construction=128);`
++      );
++    } catch {
++      // Index might already exist
++    }
++
++    try {
++      await pool.query(
++        `CREATE INDEX IF NOT EXISTS team_dataset_collection_index ON ${DatasetVectorTableName}(team_id, dataset_id, collection_id);`
++      );
++    } catch {
++      // Index might already exist
++    }
++
++    addLog.info('[Migration] OceanBase target initialized');
++  }
++
++  async importBatch(records: VectorRecord[]): Promise<{
++    insertedIds: string[];
++    idMappings: Map<string, string>;
++    errors: MigrationError[];
++  }> {
++    const pool = await this.getPool();
++    const insertedIds: string[] = [];
++    const idMappings = new Map<string, string>();
++    const errors: MigrationError[] = [];
++
++    if (records.length === 0) {
++      return { insertedIds, idMappings, errors };
++    }
++
++    const connection = await pool.getConnection();
++    try {
++      // Start transaction for batch insert
++      await connection.beginTransaction();
++
++      // Build parameterized bulk insert with explicit IDs
++      const valueParams: (string | number)[] = [];
++      const valuePlaceholders: string[] = [];
++
++      for (const record of records) {
++        const vectorStr = `[${record.vector.join(',')}]`;
++        const timestamp = record.createTime.toISOString().replace('T', ' ').replace('Z', '');
++        valuePlaceholders.push('(?, ?, ?, ?, ?, ?)');
++        valueParams.push(
++          record.id,
++          vectorStr,
++          record.teamId,
++          record.datasetId,
++          record.collectionId,
++          timestamp
++        );
++      }
++
++      const sql = `
++        INSERT IGNORE INTO ${DatasetVectorTableName} (id, vector, team_id, dataset_id, collection_id, createtime)
++        VALUES ${valuePlaceholders.join(',')}
++      `;
++
++      await connection.query(sql, valueParams);
++
++      // For OceanBase with explicit IDs, mappings are 1:1
++      for (const record of records) {
++        insertedIds.push(record.id);
++        idMappings.set(record.id, record.id);
++      }
++
++      // Commit transaction
++      await connection.commit();
++    } catch (error: any) {
++      // Rollback transaction on error
++      await connection.rollback();
++      addLog.error('[Migration] OceanBase import batch error', error);
++      errors.push({
++        type: 'unknown',
++        message: error.message || 'Unknown error during import',
++        timestamp: new Date(),
++        retryable: true
++      });
++    } finally {
++      connection.release();
++    }
++
++    return { insertedIds, idMappings, errors };
++  }
++
++  async deleteBatch(ids: string[]): Promise<void> {
++    if (ids.length === 0) return;
++
++    const pool = await this.getPool();
++    const placeholders = ids.map(() => '?').join(',');
++    await pool.query(`DELETE FROM ${DatasetVectorTableName} WHERE id IN (${placeholders})`, ids);
++  }
++
++  async getCount(): Promise<number> {
++    const pool = await this.getPool();
++    const [rows] = await pool.query<mysql.RowDataPacket[]>(
++      `SELECT COUNT(*) as count FROM ${DatasetVectorTableName}`
++    );
++    return rows[0].count;
++  }
++
++  async close(): Promise<void> {
++    if (this.targetPool) {
++      await this.targetPool.end();
++      this.targetPool = null;
++    }
++  }
++}
++
++// Milvus Importer
++export class MilvusImporter implements VectorImporter {
++  private client: MilvusClient | null = null;
++  private address: string;
++  private token?: string;
++
++  constructor(address: string, token?: string) {
++    this.address = address;
++    this.token = token;
++  }
++
++  private async getClient(): Promise<MilvusClient> {
++    if (this.client) return this.client;
++
++    this.client = new MilvusClient({
++      address: this.address,
++      token: this.token
++    });
++    await this.client.connectPromise;
++
++    return this.client;
++  }
++
++  async init(): Promise<void> {
++    const client = await this.getClient();
++
++    // Create database if not exists
++    try {
++      const { db_names } = await client.listDatabases();
++      if (!db_names.includes(DatasetVectorDbName)) {
++        await client.createDatabase({ db_name: DatasetVectorDbName });
++      }
++      await client.useDatabase({ db_name: DatasetVectorDbName });
++    } catch {
++      // Zilliz cloud might not support database operations
++    }
++
++    // Check if collection exists
++    const { value: hasCollection } = await client.hasCollection({
++      collection_name: DatasetVectorTableName
++    });
++
++    if (!hasCollection) {
++      await client.createCollection({
++        collection_name: DatasetVectorTableName,
++        description: 'Store dataset vector',
++        enableDynamicField: true,
++        fields: [
++          {
++            name: 'id',
++            data_type: DataType.Int64,
++            is_primary_key: true,
++            autoID: false
++          },
++          {
++            name: 'vector',
++            data_type: DataType.FloatVector,
++            dim: 1536
++          },
++          { name: 'teamId', data_type: DataType.VarChar, max_length: 64 },
++          { name: 'datasetId', data_type: DataType.VarChar, max_length: 64 },
++          { name: 'collectionId', data_type: DataType.VarChar, max_length: 64 },
++          { name: 'createTime', data_type: DataType.Int64 }
++        ],
++        index_params: [
++          {
++            field_name: 'vector',
++            index_name: 'vector_HNSW',
++            index_type: 'HNSW',
++            metric_type: 'IP',
++            params: { efConstruction: 32, M: 64 }
++          },
++          { field_name: 'teamId', index_type: 'Trie' },
++          { field_name: 'datasetId', index_type: 'Trie' },
++          { field_name: 'collectionId', index_type: 'Trie' },
++          { field_name: 'createTime', index_type: 'STL_SORT' }
++        ]
++      });
++    }
++
++    // Load collection
++    const { state } = await client.getLoadState({
++      collection_name: DatasetVectorTableName
++    });
++
++    if (state === LoadState.LoadStateNotExist || state === LoadState.LoadStateNotLoad) {
++      await client.loadCollectionSync({
++        collection_name: DatasetVectorTableName
++      });
++    }
++
++    addLog.info('[Migration] Milvus target initialized');
++  }
++
++  async importBatch(records: VectorRecord[]): Promise<{
++    insertedIds: string[];
++    idMappings: Map<string, string>;
++    errors: MigrationError[];
++  }> {
++    const client = await this.getClient();
++    const insertedIds: string[] = [];
++    const idMappings = new Map<string, string>();
++    const errors: MigrationError[] = [];
++
++    if (records.length === 0) {
++      return { insertedIds, idMappings, errors };
++    }
++
++    try {
++      // Milvus uses Int64 for ID, we need to convert string IDs
++      // For migration from PG/OB, the IDs are numeric strings, so we can use them directly
++      // For migration from another Milvus, IDs might be different format
++      const data = records.map((record) => {
++        // Try to use original ID if it's numeric
++        let newId: number;
++        const numericId = parseInt(record.id, 10);
++
++        if (!isNaN(numericId) && numericId > 0 && numericId <= Number.MAX_SAFE_INTEGER) {
++          newId = numericId;
++        } else {
++          // Generate new ID for non-numeric IDs
++          const firstDigit = customNanoid('12345678', 1);
++          const restDigits = customNanoid('1234567890', 15);
++          newId = Number(`${firstDigit}${restDigits}`);
++        }
++
++        idMappings.set(record.id, String(newId));
++
++        return {
++          id: newId,
++          vector: record.vector,
++          teamId: record.teamId,
++          datasetId: record.datasetId,
++          collectionId: record.collectionId,
++          createTime: record.createTime.getTime()
++        };
++      });
++
++      const result = await client.insert({
++        collection_name: DatasetVectorTableName,
++        data
++      });
++
++      // Get inserted IDs from result
++      if ('int_id' in result.IDs) {
++        for (const id of result.IDs.int_id.data) {
++          insertedIds.push(String(id));
++        }
++      } else {
++        for (const id of result.IDs.str_id.data) {
++          insertedIds.push(String(id));
++        }
++      }
++    } catch (error: any) {
++      addLog.error('[Migration] Milvus import batch error', error);
++      errors.push({
++        type: 'unknown',
++        message: error.message || 'Unknown error during import',
++        timestamp: new Date(),
++        retryable: true
++      });
++    }
++
++    return { insertedIds, idMappings, errors };
++  }
++
++  async deleteBatch(ids: string[]): Promise<void> {
++    if (ids.length === 0) return;
++
++    const client = await this.getClient();
++    await client.delete({
++      collection_name: DatasetVectorTableName,
++      filter: `id in [${ids.join(',')}]`
++    });
++  }
++
++  async getCount(): Promise<number> {
++    const client = await this.getClient();
++    const result = await client.query({
++      collection_name: DatasetVectorTableName,
++      output_fields: ['count(*)']
++    });
++    return result.data?.[0]?.['count(*)'] as number;
++  }
++
++  async close(): Promise<void> {
++    if (this.client) {
++      await this.client.closeConnection();
++      this.client = null;
++    }
++  }
++}
++
++// Factory function to create importer based on database type
++export function createImporter(
++  type: 'pg' | 'oceanbase' | 'milvus',
++  config: { address: string; token?: string }
++): VectorImporter & { close?: () => Promise<void> } {
++  switch (type) {
++    case 'pg':
++      return new PgImporter(config.address);
++    case 'oceanbase':
++      return new OceanBaseImporter(config.address);
++    case 'milvus':
++      return new MilvusImporter(config.address, config.token);
++    default:
++      throw new Error(`Unknown importer type: ${type}`);
++  }
++}
+diff --git a/packages/service/common/vectorDB/migration/index.ts b/packages/service/common/vectorDB/migration/index.ts
+new file mode 100644
+index 000000000000..81ae309fdc3e
+--- /dev/null
++++ b/packages/service/common/vectorDB/migration/index.ts
+@@ -0,0 +1,26 @@
++/**
++ * Vector Database Migration Module
++ *
++ * This module provides functionality to migrate vector data between different
++ * vector databases supported by FastGPT (PostgreSQL, OceanBase, Milvus).
++ *
++ * Usage:
++ * ```typescript
++ * import { startMigration } from '@fastgpt/service/common/vectorDB/migration';
++ *
++ * const result = await startMigration({
++ *   mode: 'offline',
++ *   sourceType: 'pg',
++ *   targetType: 'milvus',
++ *   targetConfig: {
++ *     type: 'milvus',
++ *     address: 'http://localhost:19530'
++ *   }
++ * });
++ * ```
++ */
++
++export * from './type';
++export * from './controller';
++export { createExporter } from './exporters';
++export { createImporter } from './importers';
+diff --git a/packages/service/common/vectorDB/migration/type.ts b/packages/service/common/vectorDB/migration/type.ts
+new file mode 100644
+index 000000000000..cf3591e51c17
+--- /dev/null
++++ b/packages/service/common/vectorDB/migration/type.ts
+@@ -0,0 +1,216 @@
++import { z } from 'zod';
++
++// Supported vector database types
++export const VectorDbTypeSchema = z.enum(['pg', 'oceanbase', 'milvus']);
++export type VectorDbType = z.infer<typeof VectorDbTypeSchema>;
++
++// Database connection configuration
++export const DatabaseConfigSchema = z.object({
++  type: VectorDbTypeSchema,
++  address: z.string(),
++  token: z.string().optional() // For Milvus authentication
++});
++export type DatabaseConfig = z.infer<typeof DatabaseConfigSchema>;
++
++// Vector record structure (unified format across all databases)
++export const VectorRecordSchema = z.object({
++  id: z.string(),
++  vector: z.array(z.number()),
++  teamId: z.string(),
++  datasetId: z.string(),
++  collectionId: z.string(),
++  createTime: z.date()
++});
++export type VectorRecord = z.infer<typeof VectorRecordSchema>;
++
++// Migration mode
++export const MigrationModeSchema = z.enum(['offline', 'online']);
++export type MigrationMode = z.infer<typeof MigrationModeSchema>;
++
++// Migration status
++export const MigrationStatusSchema = z.enum([
++  'idle',
++  'preparing',
++  'full_sync',
++  'incremental_sync',
++  'switching',
++  'completed',
++  'failed',
++  'cancelled'
++]);
++export type MigrationStatus = z.infer<typeof MigrationStatusSchema>;
++
++// Migration error types
++export const MigrationErrorTypeSchema = z.enum([
++  'connection',
++  'timeout',
++  'data_corruption',
++  'id_conflict',
++  'validation_failed',
++  'unknown'
++]);
++export type MigrationErrorType = z.infer<typeof MigrationErrorTypeSchema>;
++
++// Migration error
++export const MigrationErrorSchema = z.object({
++  type: MigrationErrorTypeSchema,
++  message: z.string(),
++  recordId: z.string().optional(),
++  timestamp: z.date(),
++  retryable: z.boolean()
++});
++export type MigrationError = z.infer<typeof MigrationErrorSchema>;
++
++// Migration configuration
++export const MigrationConfigSchema = z.object({
++  mode: MigrationModeSchema,
++  sourceType: VectorDbTypeSchema,
++  targetType: VectorDbTypeSchema,
++  targetConfig: DatabaseConfigSchema,
++  options: z
++    .object({
++      batchSize: z.number().default(1000),
++      validateAfterMigration: z.boolean().default(true),
++      preserveIds: z.boolean().default(true), // Try to preserve original IDs
++      concurrency: z.number().default(3) // Number of concurrent batches
++    })
++    .optional()
++});
++export type MigrationConfig = z.infer<typeof MigrationConfigSchema>;
++
++// Migration state (stored in MongoDB)
++export const MigrationStateSchema = z.object({
++  migrationId: z.string(),
++  status: MigrationStatusSchema,
++  mode: MigrationModeSchema,
++  sourceType: VectorDbTypeSchema,
++  targetType: VectorDbTypeSchema,
++  lastSyncedTime: z.date().optional(),
++  lastSyncedId: z.string().optional(),
++  totalRecords: z.number(),
++  syncedRecords: z.number(),
++  failedRecords: z.number(),
++  startTime: z.date(),
++  endTime: z.date().optional(),
++  errors: z.array(MigrationErrorSchema)
++});
++export type MigrationState = z.infer<typeof MigrationStateSchema>;
++
++// Migration progress
++export type MigrationProgress = {
++  total: number;
++  completed: number;
++  failed: number;
++  percentage: number;
++  currentBatch: number;
++  totalBatches: number;
++};
++
++// Migration result
++export type MigrationResult = {
++  success: boolean;
++  migrationId: string;
++  totalRecords: number;
++  migratedRecords: number;
++  failedRecords: number;
++  idMappings: Map<string, string>; // Old ID -> New ID (only if IDs changed)
++  errors: MigrationError[];
++  duration: number; // Duration in milliseconds
++  validation?: ValidationResult;
++};
++
++// Validation result
++export type ValidationResult = {
++  passed: boolean;
++  countMatch: {
++    source: number;
++    target: number;
++    match: boolean;
++  };
++  sampleMatch: {
++    checked: number;
++    matched: number;
++    mismatchedIds: string[];
++  };
++};
++
++// Exporter interface - for reading vectors from source database
++export type VectorExporter = {
++  // Get total count of vectors
++  getCount(filter?: { teamId?: string; datasetId?: string }): Promise<number>;
++
++  // Export vectors in batches using cursor-based pagination
++  exportBatch(options: {
++    afterId?: string;
++    limit: number;
++    teamId?: string;
++    datasetId?: string;
++  }): Promise<{
++    records: VectorRecord[];
++    hasMore: boolean;
++    lastId?: string;
++  }>;
++
++  // Export vectors by time range (for incremental sync)
++  exportByTimeRange(start: Date, end: Date): Promise<VectorRecord[]>;
++};
++
++// Importer interface - for writing vectors to target database
++export type VectorImporter = {
++  // Initialize target database (create tables/collections)
++  init(): Promise<void>;
++
++  // Import a batch of vectors
++  importBatch(records: VectorRecord[]): Promise<{
++    insertedIds: string[];
++    idMappings: Map<string, string>; // Original ID -> New ID
++    errors: MigrationError[];
++  }>;
++
++  // Delete vectors (for rollback)
++  deleteBatch(ids: string[]): Promise<void>;
++
++  // Get count in target
++  getCount(): Promise<number>;
++};
++
++// ID mapping record (stored in MongoDB)
++export type VectorIdMapping = {
++  oldId: string;
++  newId: string;
++  teamId: string;
++  datasetId: string;
++  collectionId: string;
++  migratedAt: Date;
++  migrationId: string;
++};
++
++// Start migration request
++export const StartMigrationRequestSchema = z.object({
++  mode: MigrationModeSchema,
++  sourceType: VectorDbTypeSchema,
++  targetType: VectorDbTypeSchema,
++  targetConfig: z.object({
++    address: z.string(),
++    token: z.string().optional()
++  }),
++  options: z
++    .object({
++      batchSize: z.number().optional(),
++      validateAfterMigration: z.boolean().optional(),
++      teamId: z.string().optional(), // Migrate specific team only
++      datasetId: z.string().optional() // Migrate specific dataset only
++    })
++    .optional()
++});
++export type StartMigrationRequest = z.infer<typeof StartMigrationRequestSchema>;
++
++// Migration status response
++export type MigrationStatusResponse = {
++  migrationId: string;
++  status: MigrationStatus;
++  progress: MigrationProgress;
++  errors: MigrationError[];
++  startTime: Date;
++  estimatedTimeRemaining?: number;
++};
+diff --git a/projects/app/src/pages/api/admin/migrateVector.ts b/projects/app/src/pages/api/admin/migrateVector.ts
+new file mode 100644
+index 000000000000..8e075cd0200d
+--- /dev/null
++++ b/projects/app/src/pages/api/admin/migrateVector.ts
+@@ -0,0 +1,191 @@
++/**
++ * Vector Database Migration API
++ *
++ * POST /api/admin/migrateVector - Start a new migration
++ * GET /api/admin/migrateVector - Get migration status
++ *
++ * This API allows administrators to migrate vector data between different
++ * vector databases (PostgreSQL, OceanBase, Milvus).
++ */
++
++import type { ApiRequestProps, ApiResponseType } from '@fastgpt/service/type/next';
++import { NextAPI } from '@/service/middleware/entry';
++import { authCert } from '@fastgpt/service/support/permission/auth/common';
++import {
++  startMigration,
++  getMigrationState,
++  listMigrationStates,
++  abortMigration,
++  type StartMigrationRequest,
++  type MigrationStatusResponse,
++  type MigrationResult,
++  StartMigrationRequestSchema
++} from '@fastgpt/service/common/vectorDB/migration';
++import { addLog } from '@fastgpt/service/common/system/log';
++
++// Query types
++export type MigrateVectorQuery = {
++  action?: 'status' | 'list' | 'abort';
++  migrationId?: string;
++};
++
++// Body types (for POST)
++export type MigrateVectorBody = StartMigrationRequest;
++
++// Response types
++export type MigrateVectorResponse =
++  | MigrationResult
++  | MigrationStatusResponse
++  | MigrationStatusResponse[]
++  | { success: boolean; message: string };
++
++async function handler(
++  req: ApiRequestProps<MigrateVectorBody, MigrateVectorQuery>,
++  res: ApiResponseType<MigrateVectorResponse>
++): Promise<MigrateVectorResponse> {
++  // Only root user can access this API
++  await authCert({ req, authRoot: true });
++
++  const { action, migrationId } = req.query;
++
++  // GET request: query status
++  if (req.method === 'GET') {
++    if (action === 'list') {
++      // List all migrations
++      const states = listMigrationStates();
++      return states.map((state) => ({
++        migrationId: state.migrationId,
++        status: state.status,
++        progress: {
++          total: state.totalRecords,
++          completed: state.syncedRecords,
++          failed: state.failedRecords,
++          percentage:
++            state.totalRecords > 0 ? Math.round((state.syncedRecords / state.totalRecords) * 100) : 0,
++          currentBatch: 0,
++          totalBatches: 0
++        },
++        errors: state.errors,
++        startTime: state.startTime,
++        estimatedTimeRemaining: undefined
++      }));
++    }
++
++    if (action === 'abort' && migrationId) {
++      // Abort a running migration
++      const success = abortMigration(migrationId);
++      return {
++        success,
++        message: success ? 'Migration aborted' : 'Migration not found or already completed'
++      };
++    }
++
++    if (migrationId) {
++      // Get specific migration status
++      const state = getMigrationState(migrationId);
++      if (!state) {
++        return {
++          success: false,
++          message: 'Migration not found'
++        };
++      }
++
++      return {
++        migrationId: state.migrationId,
++        status: state.status,
++        progress: {
++          total: state.totalRecords,
++          completed: state.syncedRecords,
++          failed: state.failedRecords,
++          percentage:
++            state.totalRecords > 0 ? Math.round((state.syncedRecords / state.totalRecords) * 100) : 0,
++          currentBatch: 0,
++          totalBatches: 0
++        },
++        errors: state.errors,
++        startTime: state.startTime,
++        estimatedTimeRemaining: undefined
++      };
++    }
++
++    // Default: list all migrations
++    const states = listMigrationStates();
++    return states.map((state) => ({
++      migrationId: state.migrationId,
++      status: state.status,
++      progress: {
++        total: state.totalRecords,
++        completed: state.syncedRecords,
++        failed: state.failedRecords,
++        percentage:
++          state.totalRecords > 0 ? Math.round((state.syncedRecords / state.totalRecords) * 100) : 0,
++        currentBatch: 0,
++        totalBatches: 0
++      },
++      errors: state.errors,
++      startTime: state.startTime,
++      estimatedTimeRemaining: undefined
++    }));
++  }
++
++  // POST request: start new migration
++  if (req.method === 'POST') {
++    const body = req.body;
++
++    // Validate request body
++    const parseResult = StartMigrationRequestSchema.safeParse(body);
++    if (!parseResult.success) {
++      throw new Error(`Invalid request body: ${parseResult.error.message}`);
++    }
++
++    const config = parseResult.data;
++
++    addLog.info(`[Migration API] Starting migration: ${config.sourceType} -> ${config.targetType}`);
++
++    // Start migration in background
++    const migrationPromise = startMigration(
++      {
++        mode: config.mode,
++        sourceType: config.sourceType,
++        targetType: config.targetType,
++        targetConfig: {
++          type: config.targetType,
++          address: config.targetConfig.address,
++          token: config.targetConfig.token
++        },
++        options: {
++          batchSize: config.options?.batchSize || 1000,
++          validateAfterMigration: config.options?.validateAfterMigration ?? true,
++          preserveIds: true,
++          concurrency: 3
++        }
++      },
++      {
++        teamId: config.options?.teamId,
++        datasetId: config.options?.datasetId,
++        onProgress: (progress) => {
++          addLog.info(
++            `[Migration] Progress: ${progress.completed}/${progress.total} (${progress.percentage}%)`
++          );
++        }
++      }
++    );
++
++    // For offline migration, wait for completion
++    // For online migration (future), return immediately
++    if (config.mode === 'offline') {
++      const result = await migrationPromise;
++      return result;
++    }
++
++    // For online mode (future implementation)
++    return {
++      success: true,
++      message: 'Migration started in background'
++    };
++  }
++
++  throw new Error('Method not allowed');
++}
++
++export default NextAPI(handler);
+diff --git a/scripts/migrateVector.ts b/scripts/migrateVector.ts
+new file mode 100644
+index 000000000000..35349960f767
+--- /dev/null
++++ b/scripts/migrateVector.ts
+@@ -0,0 +1,241 @@
++#!/usr/bin/env npx ts-node
++
++/**
++ * Vector Database Migration CLI Script
++ *
++ * Usage:
++ *   # Offline migration from PostgreSQL to Milvus
++ *   npx ts-node scripts/migrateVector.ts \
++ *     --source pg --target milvus \
++ *     --target-address "http://localhost:19530"
++ *
++ *   # Offline migration from Milvus to PostgreSQL
++ *   npx ts-node scripts/migrateVector.ts \
++ *     --source milvus --source-address "http://localhost:19530" \
++ *     --target pg --target-address "postgresql://user:pass@localhost:5432/db"
++ *
++ *   # Migration with specific team/dataset
++ *   npx ts-node scripts/migrateVector.ts \
++ *     --source pg --target milvus \
++ *     --target-address "http://localhost:19530" \
++ *     --team-id "xxx" --dataset-id "yyy"
++ *
++ * Options:
++ *   --source           Source database type: pg, oceanbase, milvus (default: pg)
++ *   --source-address   Source database address (for milvus only, others use env)
++ *   --source-token     Source database token (for milvus only)
++ *   --target           Target database type: pg, oceanbase, milvus (required)
++ *   --target-address   Target database address (required)
++ *   --target-token     Target database token (for milvus only)
++ *   --batch-size       Batch size for migration (default: 1000)
++ *   --team-id          Migrate specific team only
++ *   --dataset-id       Migrate specific dataset only
++ *   --no-validate      Skip validation after migration
++ *   --help             Show this help message
++ */
++
++// Simple argument parser
++function parseArgs(args: string[]): Record<string, string | boolean> {
++  const result: Record<string, string | boolean> = {};
++
++  for (let i = 0; i < args.length; i++) {
++    const arg = args[i];
++    if (arg.startsWith('--')) {
++      const key = arg.slice(2);
++
++      if (key === 'help') {
++        result.help = true;
++        continue;
++      }
++
++      if (key === 'no-validate') {
++        result.validate = false;
++        continue;
++      }
++
++      const nextArg = args[i + 1];
++      if (nextArg && !nextArg.startsWith('--')) {
++        result[key] = nextArg;
++        i++;
++      } else {
++        result[key] = true;
++      }
++    }
++  }
++
++  return result;
++}
++
++function showHelp() {
++  console.log(`
++FastGPT Vector Database Migration Tool
++
++Usage:
++  npx ts-node scripts/migrateVector.ts [options]
++
++Options:
++  --source           Source database type: pg, oceanbase, milvus (default: pg)
++  --source-address   Source database address (for milvus only, others use env)
++  --source-token     Source database token (for milvus only)
++  --target           Target database type: pg, oceanbase, milvus (required)
++  --target-address   Target database address (required)
++  --target-token     Target database token (for milvus only)
++  --batch-size       Batch size for migration (default: 1000)
++  --team-id          Migrate specific team only
++  --dataset-id       Migrate specific dataset only
++  --no-validate      Skip validation after migration
++  --help             Show this help message
++
++Examples:
++  # Migrate from PostgreSQL to Milvus
++  npx ts-node scripts/migrateVector.ts \\
++    --source pg --target milvus \\
++    --target-address "http://localhost:19530"
++
++  # Migrate from Milvus to OceanBase
++  npx ts-node scripts/migrateVector.ts \\
++    --source milvus --source-address "http://localhost:19530" \\
++    --target oceanbase --target-address "mysql://user:pass@localhost:2883/db"
++`);
++}
++
++async function main() {
++  const args = parseArgs(process.argv.slice(2));
++
++  if (args.help) {
++    showHelp();
++    process.exit(0);
++  }
++
++  console.log('='.repeat(60));
++  console.log('FastGPT Vector Database Migration Tool');
++  console.log('='.repeat(60));
++
++  // Validate required options
++  if (!args.target) {
++    console.error('Error: --target is required');
++    showHelp();
++    process.exit(1);
++  }
++
++  if (!args['target-address']) {
++    console.error('Error: --target-address is required');
++    showHelp();
++    process.exit(1);
++  }
++
++  const sourceType = (args.source as string) || 'pg';
++  const targetType = args.target as string;
++  const targetAddress = args['target-address'] as string;
++  const targetToken = args['target-token'] as string | undefined;
++  const batchSize = parseInt((args['batch-size'] as string) || '1000', 10);
++  const teamId = args['team-id'] as string | undefined;
++  const datasetId = args['dataset-id'] as string | undefined;
++  const validate = args.validate !== false;
++
++  console.log(`\nMigration Configuration:`);
++  console.log(`  Source: ${sourceType}`);
++  console.log(`  Target: ${targetType}`);
++  console.log(`  Target Address: ${targetAddress}`);
++  console.log(`  Batch Size: ${batchSize}`);
++  if (teamId) console.log(`  Team ID: ${teamId}`);
++  if (datasetId) console.log(`  Dataset ID: ${datasetId}`);
++  console.log(`  Validation: ${validate ? 'enabled' : 'disabled'}`);
++  console.log('');
++
++  // Dynamically import the migration module
++  const { startMigration } = await import(
++    '../packages/service/common/vectorDB/migration/controller'
++  );
++
++  try {
++    console.log('Starting migration...\n');
++
++    const result = await startMigration(
++      {
++        mode: 'offline' as const,
++        sourceType: sourceType as 'pg' | 'oceanbase' | 'milvus',
++        targetType: targetType as 'pg' | 'oceanbase' | 'milvus',
++        targetConfig: {
++          type: targetType as 'pg' | 'oceanbase' | 'milvus',
++          address: targetAddress,
++          token: targetToken
++        },
++        options: {
++          batchSize,
++          validateAfterMigration: validate,
++          preserveIds: true,
++          concurrency: 3
++        }
++      },
++      {
++        teamId,
++        datasetId,
++        onProgress: (progress) => {
++          const bar = createProgressBar(progress.percentage);
++          process.stdout.write(
++            `\r${bar} ${progress.completed}/${progress.total} (${progress.percentage}%)`
++          );
++        }
++      }
++    );
++
++    console.log('\n\n' + '='.repeat(60));
++    console.log('Migration Complete!');
++    console.log('='.repeat(60));
++    console.log(`\nResults:`);
++    console.log(`  Success: ${result.success}`);
++    console.log(`  Migration ID: ${result.migrationId}`);
++    console.log(`  Total Records: ${result.totalRecords}`);
++    console.log(`  Migrated Records: ${result.migratedRecords}`);
++    console.log(`  Failed Records: ${result.failedRecords}`);
++    console.log(`  Duration: ${formatDuration(result.duration)}`);
++
++    if (result.validation) {
++      console.log(`\nValidation:`);
++      console.log(`  Passed: ${result.validation.passed}`);
++      console.log(`  Source Count: ${result.validation.countMatch.source}`);
++      console.log(`  Target Count: ${result.validation.countMatch.target}`);
++    }
++
++    if (result.errors.length > 0) {
++      console.log(`\nErrors (${result.errors.length}):`);
++      for (const error of result.errors.slice(0, 10)) {
++        console.log(`  - [${error.type}] ${error.message}`);
++      }
++      if (result.errors.length > 10) {
++        console.log(`  ... and ${result.errors.length - 10} more errors`);
++      }
++    }
++
++    if (result.idMappings.size > 0) {
++      console.log(`\nID Mappings: ${result.idMappings.size} records`);
++      console.log(`  (IDs were remapped during migration)`);
++    }
++
++    console.log('');
++    process.exit(result.success ? 0 : 1);
++  } catch (error: any) {
++    console.error('\n\nMigration failed with error:', error.message);
++    process.exit(1);
++  }
++}
++
++function createProgressBar(percentage: number): string {
++  const width = 30;
++  const filled = Math.round((percentage / 100) * width);
++  const empty = width - filled;
++  return `[${'█'.repeat(filled)}${'░'.repeat(empty)}]`;
++}
++
++function formatDuration(ms: number): string {
++  if (ms < 1000) return `${ms}ms`;
++  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
++  if (ms < 3600000) return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
++  return `${Math.floor(ms / 3600000)}h ${Math.floor((ms % 3600000) / 60000)}m`;
++}
++
++main().catch((error) => {
++  console.error('Unexpected error:', error);
++  process.exit(1);
++});

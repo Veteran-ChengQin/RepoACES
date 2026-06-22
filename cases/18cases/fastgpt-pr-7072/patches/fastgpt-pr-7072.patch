@@ -1,0 +1,4893 @@
+diff --git a/document/content/self-host/upgrading/4-15/41504.mdx b/document/content/self-host/upgrading/4-15/41504.mdx
+index 5241e79be06f..7d650a716a5d 100644
+--- a/document/content/self-host/upgrading/4-15/41504.mdx
++++ b/document/content/self-host/upgrading/4-15/41504.mdx
+@@ -53,8 +53,10 @@ fastgpt-plugin:
+ 
+ 1. 模型获取多模态文件链接异常。
+ 2. 修复 training 接口存在的潜在越权风险。
++3. HTTP tool parse 的 SSRF 风险。
+ 
+ ## 🛠️ 代码优化
+ 
+ 1. 插件服务从旧 `runtime` 结构调整为 pnpm workspace monorepo，拆分为 HTTP 服务入口、领域模型、用例、API adapter、基础设施、SDK 和 CLI。
+ 2. 将 app API 接口全部用 zod schema 编写并生成文档。
++3. 及时处理 worker 内图片，不再存留 base64，降低内存消耗。
+diff --git a/document/data/doc-last-modified.json b/document/data/doc-last-modified.json
+index 051fe2284c41..ec84d6a1edb9 100644
+--- a/document/data/doc-last-modified.json
++++ b/document/data/doc-last-modified.json
+@@ -274,8 +274,8 @@
+   "content/self-host/upgrading/4-15/41502.mdx": "2026-05-25T11:21:30+08:00",
+   "content/self-host/upgrading/4-15/41503.en.mdx": "2026-05-28T16:21:09+08:00",
+   "content/self-host/upgrading/4-15/41503.mdx": "2026-05-28T16:21:09+08:00",
+-  "content/self-host/upgrading/4-15/41504.en.mdx": "2026-06-01T17:19:55+08:00",
+-  "content/self-host/upgrading/4-15/41504.mdx": "2026-06-05T18:12:32+08:00",
++  "content/self-host/upgrading/4-15/41504.en.mdx": "2026-06-07T17:54:48+08:00",
++  "content/self-host/upgrading/4-15/41504.mdx": "2026-06-07T17:54:48+08:00",
+   "content/self-host/upgrading/outdated/40.en.mdx": "2026-04-26T21:08:47+08:00",
+   "content/self-host/upgrading/outdated/40.mdx": "2026-04-26T21:08:47+08:00",
+   "content/self-host/upgrading/outdated/41.en.mdx": "2026-04-26T21:08:47+08:00",
+diff --git a/packages/global/common/string/markdown.ts b/packages/global/common/string/markdown.ts
+index bfaab2f36a3c..0bc9b97b26ce 100644
+--- a/packages/global/common/string/markdown.ts
++++ b/packages/global/common/string/markdown.ts
+@@ -1,6 +1,5 @@
+ import { batchRun } from '../system/utils';
+-import { getNanoid, simpleText } from './tools';
+-import type { ImageType } from '../../../service/worker/readFile/type';
++import { simpleText } from './tools';
+ 
+ /* Delete redundant text in markdown */
+ export const simpleMarkdownText = (rawText: string) => {
+@@ -27,7 +26,7 @@ export const simpleMarkdownText = (rawText: string) => {
+   rawText = rawText.replace(/\\\\n/g, '\\n');
+ 
+   // Remove headings and code blocks front spaces
+-  ['####', '###', '##', '#', '```', '~~~'].forEach((item, i) => {
++  ['####', '###', '##', '#', '```', '~~~'].forEach((item) => {
+     const reg = new RegExp(`\\n\\s*${item}`, 'g');
+     if (reg.test(rawText)) {
+       rawText = rawText.replace(new RegExp(`(\\n)( *)(${item})`, 'g'), '$1$3');
+@@ -46,7 +45,7 @@ export const htmlTable2Md = (content: string): string => {
+       if (!rows) return htmlTable;
+ 
+       // Parse table data
+-      let tableData: string[][] = [];
++      const tableData: string[][] = [];
+       let maxColumns = 0;
+ 
+       // Try to convert to markdown table
+@@ -109,92 +108,224 @@ export const htmlTable2Md = (content: string): string => {
+       });
+ 
+       return chunks.join('\n');
+-    } catch (error) {
++    } catch {
+       return htmlTable;
+     }
+   });
+ };
+ 
+-/**
+- * format markdown
+- * 1. upload base64
+- * 2. replace \
+- */
+-export const uploadMarkdownBase64 = async ({
+-  rawText,
+-  uploadImgController
+-}: {
+-  rawText: string;
+-  uploadImgController?: (base64: string) => Promise<string>;
+-}) => {
+-  if (uploadImgController) {
+-    // match base64, upload and replace it
+-    const base64Regex = /data:image\/.*;base64,([^\)]+)/g;
+-    const base64Arr = rawText.match(base64Regex) || [];
+-
+-    // upload base64 and replace it
+-    await batchRun(
+-      base64Arr,
+-      async (base64Img) => {
+-        try {
+-          const str = await uploadImgController(base64Img);
+-          rawText = rawText.replace(base64Img, str);
+-        } catch (error) {
+-          rawText = rawText.replace(base64Img, '');
+-          rawText = rawText.replace(/!\[.*\]\(\)/g, '');
+-        }
+-      },
+-      20
+-    );
+-  }
++export type MatchedImageUploadResult = {
++  key: string;
++  previewUrl?: string;
++};
++
++type MarkdownImageBase = {
++  altText: string;
++  url: string;
++  fullMatch: string;
++  index: number;
++};
+ 
+-  // Remove white space on both sides of the picture
+-  // const trimReg = /(!\[.*\]\(.*\))\s*/g;
+-  // if (trimReg.test(rawText)) {
+-  //   rawText = rawText.replace(trimReg, '$1');
+-  // }
++export type MarkdownImage = MarkdownImageBase &
++  (
++    | {
++        type: 'base64';
++        dataUrl: string;
++        mime: string;
++        base64: string;
++      }
++    | {
++        type: 'http';
++      }
++  );
+ 
+-  return rawText;
++type MarkdownImageUploadController = (image: MarkdownImage) => Promise<MatchedImageUploadResult>;
++
++export type MarkdownImageParseOptions = {
++  parseBase64?: boolean;
++  parseHttp?: boolean;
++  controller?: MarkdownImageUploadController;
++  controler?: MarkdownImageUploadController;
+ };
+ 
+-export const markdownProcess = async ({
+-  rawText,
+-  uploadImgController
+-}: {
+-  rawText: string;
+-  uploadImgController?: (base64: string) => Promise<string>;
+-}) => {
+-  const imageProcess = await uploadMarkdownBase64({
+-    rawText,
+-    uploadImgController
+-  });
++const mdBase64ImageSrcRegex = /^data:image\/([^;]+);base64,([A-Za-z0-9+/=]+)$/;
++const mdHttpImageSrcRegex = /^https?:\/\/.+/;
++const markdownImageUploadConcurrency = 5;
++const unescapeMarkdownUrl = (url: string) => url.replace(/\\([\\()])/g, '$1');
++
++const findClosingBracket = (text: string, startIndex: number) => {
++  for (let i = startIndex; i < text.length; i++) {
++    if (text[i] === '\\') {
++      i++;
++      continue;
++    }
+ 
+-  return simpleMarkdownText(imageProcess);
++    if (text[i] === ']') return i;
++  }
++
++  return -1;
+ };
+ 
+-export const matchMdImg = (text: string) => {
+-  // 优化后的正则:
+-  // 1. 使用 [^\]]* 匹配 alt 文本(更精确)
+-  // 2. 使用 [A-Za-z0-9+/=]+ 匹配 base64 数据(避免回溯)
+-  // 3. 明确匹配 data:image/ 前缀
+-  const base64Regex = /!\[([^\]]*)\]\((data:image\/([^;]+);base64,([A-Za-z0-9+/=]+))\)/g;
+-  const imageList: ImageType[] = [];
+-
+-  text = text.replace(base64Regex, (_match, altText, _fullDataUrl, mime, base64Data) => {
+-    const uuid = `IMAGE_${getNanoid(12)}_IMAGE`;
+-
+-    imageList.push({
+-      uuid,
+-      base64: base64Data,
+-      mime: `image/${mime}`
++const findMarkdownImageUrlEnd = (text: string, startIndex: number) => {
++  let depth = 0;
++
++  for (let i = startIndex; i < text.length; i++) {
++    const char = text[i];
++
++    if (char === '\\') {
++      i++;
++      continue;
++    }
++
++    if (char === '(') {
++      depth++;
++      continue;
++    }
++
++    if (char === ')') {
++      if (depth === 0) return i;
++      depth--;
++    }
++  }
++
++  return -1;
++};
++
++/**
++ * 扫描 markdown 图片节点，支持 URL 中包含未转义括号或转义右括号的场景。
++ *
++ * 普通正则 `!\[...\]\(([^)]+)\)` 会在 `https://a.com/img(1).png` 的第一个 `)` 截断，
++ * 导致 http 图片转存失败；这里用轻量扫描保留完整节点范围。
++ */
++const matchMarkdownImages = (text: string) => {
++  const matches: MarkdownImageBase[] = [];
++  let start = 0;
++
++  while (start < text.length) {
++    const imageStart = text.indexOf('![', start);
++    if (imageStart === -1) break;
++
++    const altStart = imageStart + 2;
++    const altEnd = findClosingBracket(text, altStart);
++    if (altEnd === -1 || text[altEnd + 1] !== '(') {
++      start = imageStart + 2;
++      continue;
++    }
++
++    const urlStart = altEnd + 2;
++    const urlEnd = findMarkdownImageUrlEnd(text, urlStart);
++    if (urlEnd === -1) {
++      start = imageStart + 2;
++      continue;
++    }
++
++    const fullMatch = text.slice(imageStart, urlEnd + 1);
++    matches.push({
++      altText: text.slice(altStart, altEnd),
++      url: text.slice(urlStart, urlEnd),
++      fullMatch,
++      index: imageStart
+     });
+ 
+-    // 保持原有的 alt 文本，只替换 base64 部分
+-    return `![${altText}](${uuid})`;
++    start = urlEnd + 1;
++  }
++
++  return matches;
++};
++
++/**
++ * 处理 markdown 图片语法中的图片，并统一执行 markdown 文本清理。
++ *
++ * base64 图片默认会被解析：传入上传回调时替换成对象存储 key，不传回调或上传失败时删除，
++ * 避免大体积 base64 继续在解析链路中流转。http 图片默认不处理，开启后可复用同一个
++ * 上传回调转存；没有回调或转存失败时保留原 URL。
++ */
++export const parseMarkdownBase64Images = async (
++  text: string,
++  imageOptions: MarkdownImageParseOptions = {}
++) => {
++  const {
++    parseBase64 = true,
++    parseHttp = false,
++    controller = imageOptions.controler
++  } = imageOptions;
++  const images = matchMarkdownImages(text).flatMap<MarkdownImage>((match) => {
++    const { fullMatch, altText, url: rawUrl, index } = match;
++    const url = unescapeMarkdownUrl(rawUrl);
++    const base64Match = url.match(mdBase64ImageSrcRegex);
++
++    if (parseBase64 && base64Match) {
++      const [, mime, base64] = base64Match;
++
++      return [
++        {
++          type: 'base64',
++          altText,
++          url,
++          dataUrl: url,
++          mime: `image/${mime}`,
++          base64,
++          fullMatch,
++          index
++        }
++      ];
++    }
++
++    if (parseHttp && mdHttpImageSrcRegex.test(url)) {
++      return [
++        {
++          type: 'http',
++          altText,
++          url,
++          fullMatch,
++          index
++        }
++      ];
++    }
++
++    return [];
+   });
+ 
+-  return {
+-    text,
+-    imageList
++  if (images.length === 0) return simpleMarkdownText(text);
++
++  const preservedMarkdownImages = new Map<string, string>();
++  const preserveMarkdownImage = (image: MarkdownImage, index: number) => {
++    const token = `__FASTGPT_MARKDOWN_IMAGE_${index}_PLACEHOLDER__`;
++    preservedMarkdownImages.set(token, image.fullMatch);
++    return token;
+   };
++
++  const uploadResults = controller
++    ? await batchRun(
++        images,
++        async (image, index) => {
++          try {
++            // 上传回调返回的是对象存储 key，markdown 中先保留 key，后续业务层再决定是否签名成 URL。
++            const { key } = await controller(image);
++            return key ? `![${image.altText}](${key})` : '';
++          } catch {
++            return image.type === 'http' ? preserveMarkdownImage(image, index) : '';
++          }
++        },
++        markdownImageUploadConcurrency
++      )
++    : images.map((image, index) =>
++        image.type === 'http' ? preserveMarkdownImage(image, index) : ''
++      );
++
++  let result = '';
++  let lastIndex = 0;
++
++  for (const [index, image] of images.entries()) {
++    result += text.slice(lastIndex, image.index);
++    result += uploadResults[index];
++    lastIndex = image.index + image.fullMatch.length;
++  }
++
++  const cleanedText = simpleMarkdownText(result + text.slice(lastIndex));
++
++  return Array.from(preservedMarkdownImages.entries()).reduce(
++    (text, [token, rawMarkdown]) => text.replaceAll(token, rawMarkdown),
++    cleanedText
++  );
+ };
+diff --git a/packages/global/test/common/string/markdown.test.ts b/packages/global/test/common/string/markdown.test.ts
+index b25f4ec78644..84d606cfd2ee 100644
+--- a/packages/global/test/common/string/markdown.test.ts
++++ b/packages/global/test/common/string/markdown.test.ts
+@@ -2,9 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
+ import {
+   simpleMarkdownText,
+   htmlTable2Md,
+-  uploadMarkdownBase64,
+-  markdownProcess,
+-  matchMdImg
++  parseMarkdownBase64Images
+ } from '@fastgpt/global/common/string/markdown';
+ 
+ describe('markdown 字符串处理函数测试', () => {
+@@ -185,12 +183,12 @@ describe('markdown 字符串处理函数测试', () => {
+     });
+   });
+ 
+-  describe('uploadMarkdownBase64', () => {
+-    it('应该在没有 uploadImgController 时返回原文本', async () => {
++  describe('parseMarkdownBase64Images', () => {
++    it('应该在没有 uploadImgController 时移除 base64 图片', async () => {
+       const rawText = '![image](data:image/png;base64,ABC123)';
+-      const result = await uploadMarkdownBase64({ rawText });
++      const result = await parseMarkdownBase64Images(rawText);
+ 
+-      expect(result).toBe(rawText);
++      expect(result).toBe('');
+     });
+ 
+     it('应该上传 base64 图片并替换 URL', async () => {
+@@ -198,11 +196,13 @@ describe('markdown 字符串处理函数测试', () => {
+       const rawText = `![test](${base64Img})`;
+       const uploadedUrl = 'https://cdn.example.com/image.png';
+ 
+-      const mockUpload = vi.fn().mockResolvedValue(uploadedUrl);
++      const mockUpload = vi.fn().mockResolvedValue({ key: uploadedUrl });
+ 
+-      const result = await uploadMarkdownBase64({
+-        rawText,
+-        uploadImgController: mockUpload
++      const result = await parseMarkdownBase64Images(rawText, {
++        controller: (image) => {
++          expect(image.type).toBe('base64');
++          return mockUpload(image.url);
++        }
+       });
+ 
+       expect(mockUpload).toHaveBeenCalledWith(base64Img);
+@@ -210,23 +210,23 @@ describe('markdown 字符串处理函数测试', () => {
+     });
+ 
+     it('应该处理多个 base64 图片', async () => {
+-      // 注意: uploadMarkdownBase64 的正则 [^\)]+ 是贪婪匹配
+-      // 多个图片在同一行会被匹配为一个,所以用换行分隔
+       const base64Img1 = 'data:image/png;base64,ABC=';
+       const base64Img2 = 'data:image/jpeg;base64,DEF=';
+       const rawText = `![img1](${base64Img1})\n![img2](${base64Img2})`;
+ 
+       const mockUpload = vi
+         .fn()
+-        .mockResolvedValueOnce('https://cdn.example.com/img1.png')
+-        .mockResolvedValueOnce('https://cdn.example.com/img2.jpg');
+-
+-      const result = await uploadMarkdownBase64({
+-        rawText,
+-        uploadImgController: mockUpload
++        .mockResolvedValueOnce({ key: 'https://cdn.example.com/img1.png' })
++        .mockResolvedValueOnce({ key: 'https://cdn.example.com/img2.jpg' });
++
++      const result = await parseMarkdownBase64Images(rawText, {
++        controller: (image) => {
++          expect(image.type).toBe('base64');
++          return mockUpload(image.url);
++        }
+       });
+ 
+-      // batchRun 会调用所有匹配到的图片
++      // 按匹配顺序逐张上传所有 markdown base64 图片
+       expect(mockUpload).toHaveBeenCalled();
+       expect(result).toContain('https://cdn.example.com/img1.png');
+       expect(result).toContain('https://cdn.example.com/img2.jpg');
+@@ -238,9 +238,11 @@ describe('markdown 字符串处理函数测试', () => {
+ 
+       const mockUpload = vi.fn().mockRejectedValue(new Error('Upload failed'));
+ 
+-      const result = await uploadMarkdownBase64({
+-        rawText,
+-        uploadImgController: mockUpload
++      const result = await parseMarkdownBase64Images(rawText, {
++        controller: (image) => {
++          expect(image.type).toBe('base64');
++          return mockUpload(image.url);
++        }
+       });
+ 
+       // 上传失败时应该移除图片
+@@ -248,20 +250,20 @@ describe('markdown 字符串处理函数测试', () => {
+     });
+ 
+     it('应该处理部分上传失败', async () => {
+-      // 注意: uploadMarkdownBase64 的正则 [^\)]+ 是贪婪匹配
+-      // 多个图片在同一行会被匹配为一个,所以用换行分隔
+       const base64Img1 = 'data:image/png;base64,OK=';
+       const base64Img2 = 'data:image/jpeg;base64,FAIL=';
+       const rawText = `![img1](${base64Img1})\n![img2](${base64Img2})`;
+ 
+       const mockUpload = vi
+         .fn()
+-        .mockResolvedValueOnce('https://cdn.example.com/img1.png')
++        .mockResolvedValueOnce({ key: 'https://cdn.example.com/img1.png' })
+         .mockRejectedValueOnce(new Error('Failed'));
+ 
+-      const result = await uploadMarkdownBase64({
+-        rawText,
+-        uploadImgController: mockUpload
++      const result = await parseMarkdownBase64Images(rawText, {
++        controller: (image) => {
++          expect(image.type).toBe('base64');
++          return mockUpload(image.url);
++        }
+       });
+ 
+       expect(result).toContain('https://cdn.example.com/img1.png');
+@@ -278,11 +280,13 @@ describe('markdown 字符串处理函数测试', () => {
+         ## Footer
+       `;
+ 
+-      const mockUpload = vi.fn().mockResolvedValue('https://cdn.example.com/image.png');
++      const mockUpload = vi.fn().mockResolvedValue({ key: 'https://cdn.example.com/image.png' });
+ 
+-      const result = await uploadMarkdownBase64({
+-        rawText,
+-        uploadImgController: mockUpload
++      const result = await parseMarkdownBase64Images(rawText, {
++        controller: (image) => {
++          expect(image.type).toBe('base64');
++          return mockUpload(image.url);
++        }
+       });
+ 
+       expect(result).toContain('# Header');
+@@ -293,10 +297,10 @@ describe('markdown 字符串处理函数测试', () => {
+     });
+   });
+ 
+-  describe('markdownProcess', () => {
++  describe('parseMarkdownBase64Images markdown 清理', () => {
+     it('应该处理不带上传控制器的 Markdown', async () => {
+       const rawText = '# Title\n\nSome text\n\n';
+-      const result = await markdownProcess({ rawText });
++      const result = await parseMarkdownBase64Images(rawText);
+ 
+       expect(result).toContain('# Title');
+       expect(result).toContain('Some text');
+@@ -306,11 +310,13 @@ describe('markdown 字符串处理函数测试', () => {
+       const base64Img = 'data:image/png;base64,TEST=';
+       const rawText = `# Title\n\n![image](${base64Img})\n\nMore text`;
+ 
+-      const mockUpload = vi.fn().mockResolvedValue('https://cdn.example.com/image.png');
++      const mockUpload = vi.fn().mockResolvedValue({ key: 'https://cdn.example.com/image.png' });
+ 
+-      const result = await markdownProcess({
+-        rawText,
+-        uploadImgController: mockUpload
++      const result = await parseMarkdownBase64Images(rawText, {
++        controller: (image) => {
++          expect(image.type).toBe('base64');
++          return mockUpload(image.url);
++        }
+       });
+ 
+       expect(result).toContain('# Title');
+@@ -320,7 +326,7 @@ describe('markdown 字符串处理函数测试', () => {
+ 
+     it('应该移除多余的转义字符', async () => {
+       const rawText = '\\# Title\n\\* Item 1\n\\* Item 2';
+-      const result = await markdownProcess({ rawText });
++      const result = await parseMarkdownBase64Images(rawText);
+ 
+       expect(result).toContain('# Title');
+       expect(result).toContain('* Item 1');
+@@ -328,7 +334,7 @@ describe('markdown 字符串处理函数测试', () => {
+     });
+ 
+     it('应该处理空文本', async () => {
+-      const result = await markdownProcess({ rawText: '' });
++      const result = await parseMarkdownBase64Images('');
+ 
+       expect(result).toBe('');
+     });
+@@ -347,11 +353,13 @@ describe('markdown 字符串处理函数测试', () => {
+         \`\`\`
+       `;
+ 
+-      const mockUpload = vi.fn().mockResolvedValue('https://cdn.example.com/img.png');
++      const mockUpload = vi.fn().mockResolvedValue({ key: 'https://cdn.example.com/img.png' });
+ 
+-      const result = await markdownProcess({
+-        rawText,
+-        uploadImgController: mockUpload
++      const result = await parseMarkdownBase64Images(rawText, {
++        controller: (image) => {
++          expect(image.type).toBe('base64');
++          return mockUpload(image.url);
++        }
+       });
+ 
+       expect(result).toContain('# Heading');
+@@ -361,153 +369,182 @@ describe('markdown 字符串处理函数测试', () => {
+     });
+   });
+ 
+-  describe('matchMdImg', () => {
+-    it('应该提取单个 base64 图片', () => {
+-      const base64Data =
+-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+-      const text = `![test](data:image/png;base64,${base64Data})`;
+-      const result = matchMdImg(text);
+-
+-      expect(result.imageList).toHaveLength(1);
+-      expect(result.imageList[0].base64).toBe(base64Data);
+-      expect(result.imageList[0].mime).toBe('image/png');
+-      expect(result.imageList[0].uuid).toMatch(/^IMAGE_[a-zA-Z0-9]+_IMAGE$/);
+-      expect(result.text).toContain('IMAGE_');
+-      expect(result.text).not.toContain('data:image');
+-    });
+-
+-    it('应该保留 alt 文本', () => {
++  describe('parseMarkdownBase64Images', () => {
++    it('应该在没有上传回调时删除 markdown base64 图片', async () => {
+       const base64Data = 'ABC123==';
+-      const text = `![My Image](data:image/png;base64,${base64Data})`;
+-      const result = matchMdImg(text);
++      const text = `before ![alt](data:image/png;base64,${base64Data}) after`;
++      const result = await parseMarkdownBase64Images(text);
+ 
+-      expect(result.text).toContain('![My Image]');
+-      expect(result.imageList[0].uuid).toBeTruthy();
++      expect(result).toBe('before  after');
++      expect(result).not.toContain('data:image/png;base64');
+     });
+ 
+-    it('应该处理空 alt 文本', () => {
++    it('应该在传入上传回调时逐张替换为 image key', async () => {
+       const base64Data = 'ABC123==';
+-      const text = `![](data:image/png;base64,${base64Data})`;
+-      const result = matchMdImg(text);
++      const text = `![alt](data:image/png;base64,${base64Data})`;
++      const upload = vi.fn().mockResolvedValue({ key: 'dataset/file-parsed/image.png' });
++
++      const result = await parseMarkdownBase64Images(text, {
++        controller: upload
++      });
+ 
+-      expect(result.text).toContain('![]');
+-      expect(result.imageList).toHaveLength(1);
++      expect(upload).toHaveBeenCalledWith(
++        expect.objectContaining({
++          altText: 'alt',
++          dataUrl: `data:image/png;base64,${base64Data}`,
++          mime: 'image/png',
++          base64: base64Data
++        })
++      );
++      expect(result).toBe('![alt](dataset/file-parsed/image.png)');
+     });
+ 
+-    it('应该提取多个 base64 图片', () => {
+-      const base64Data1 = 'DATA1==';
+-      const base64Data2 = 'DATA2==';
+-      const text = `
+-        ![img1](data:image/png;base64,${base64Data1})
+-        Some text
+-        ![img2](data:image/jpeg;base64,${base64Data2})
+-      `;
+-      const result = matchMdImg(text);
++    it('应该保留普通 URL 图片和普通文本', async () => {
++      const base64Data = 'BASE64==';
++      const text = `# Title\n![base64](data:image/png;base64,${base64Data})\n![url](https://example.com/image.jpg)`;
++      const result = await parseMarkdownBase64Images(text);
+ 
+-      expect(result.imageList).toHaveLength(2);
+-      expect(result.imageList[0].base64).toBe(base64Data1);
+-      expect(result.imageList[0].mime).toBe('image/png');
+-      expect(result.imageList[1].base64).toBe(base64Data2);
+-      expect(result.imageList[1].mime).toBe('image/jpeg');
++      expect(result).toContain('# Title');
++      expect(result).toContain('![url](https://example.com/image.jpg)');
++      expect(result).not.toContain('data:image/png');
+     });
+ 
+-    it('应该处理不同的图片格式', () => {
+-      const formats = ['png', 'jpeg', 'gif', 'webp'];
+-      let text = '';
++    it('上传失败时应该移除失败图片并继续处理后续图片', async () => {
++      const text = [
++        '![img1](data:image/png;base64,OK=)',
++        'middle',
++        '![img2](data:image/jpeg;base64,FAIL=)'
++      ].join('\n');
++      const upload = vi
++        .fn()
++        .mockResolvedValueOnce({ key: 'dataset/file-parsed/image.png' })
++        .mockRejectedValueOnce(new Error('upload failed'));
+ 
+-      formats.forEach((fmt, i) => {
+-        text += `![img${i}](data:image/${fmt};base64,DATA${i}==)\n`;
++      const result = await parseMarkdownBase64Images(text, {
++        controller: upload
+       });
+ 
+-      const result = matchMdImg(text);
+-
+-      expect(result.imageList).toHaveLength(formats.length);
+-      formats.forEach((fmt, i) => {
+-        expect(result.imageList[i].mime).toBe(`image/${fmt}`);
++      expect(result).toContain('![img1](dataset/file-parsed/image.png)');
++      expect(result).toContain('middle');
++      expect(result).not.toContain('data:image/jpeg');
++    });
++
++    it('并发上传完成顺序不一致时应该保留原始图片顺序', async () => {
++      const text = [
++        'start',
++        '![img1](data:image/png;base64,ONE=)',
++        'middle',
++        '![img2](data:image/png;base64,TWO=)',
++        'end'
++      ].join('\n');
++      const upload = vi.fn(async (image) => {
++        if (image.type === 'base64' && image.base64 === 'ONE=') {
++          await new Promise((resolve) => setTimeout(resolve, 30));
++          return { key: 'key-1' };
++        }
++
++        return { key: 'key-2' };
+       });
+-    });
+ 
+-    it('应该处理简单的 alt 文本', () => {
+-      const base64Data = 'TEST==';
+-      const text = `![Alt text](data:image/png;base64,${base64Data})`;
+-      const result = matchMdImg(text);
++      const result = await parseMarkdownBase64Images(text, {
++        controller: upload
++      });
+ 
+-      expect(result.imageList).toHaveLength(1);
+-      expect(result.text).toContain('![Alt text]');
++      expect(result).toBe(
++        ['start', '![img1](key-1)', 'middle', '![img2](key-2)', 'end'].join('\n')
++      );
+     });
+ 
+-    it('应该处理不包含 base64 图片的文本', () => {
+-      const text = `
+-        # Title
+-        ![normal image](https://example.com/image.png)
+-        Some text
+-      `;
+-      const result = matchMdImg(text);
++    it('parseHttp 开启时应该转存普通 http 图片', async () => {
++      const text = 'hello ![img](https://img.example.com/a.png)';
++      const upload = vi.fn().mockResolvedValue({ key: 'dataset/file-parsed/a.png' });
+ 
+-      expect(result.imageList).toHaveLength(0);
+-      expect(result.text).toBe(text);
++      const result = await parseMarkdownBase64Images(text, {
++        parseHttp: true,
++        controller: upload
++      });
++
++      expect(upload).toHaveBeenCalledWith(
++        expect.objectContaining({
++          type: 'http',
++          altText: 'img',
++          url: 'https://img.example.com/a.png'
++        })
++      );
++      expect(result).toBe('hello ![img](dataset/file-parsed/a.png)');
+     });
+ 
+-    it('应该处理混合的图片类型', () => {
+-      const base64Data = 'BASE64==';
+-      const text = `
+-        ![base64](data:image/png;base64,${base64Data})
+-        ![url](https://example.com/image.jpg)
+-      `;
+-      const result = matchMdImg(text);
++    it('parseHttp 开启时应该正确处理 URL 中的括号', async () => {
++      const text = 'hello ![img](https://img.example.com/a(1).png)';
++      const upload = vi.fn().mockResolvedValue({ key: 'dataset/file-parsed/a.png' });
+ 
+-      expect(result.imageList).toHaveLength(1);
+-      expect(result.text).toContain('https://example.com/image.jpg');
+-      expect(result.text).not.toContain('data:image/png');
++      const result = await parseMarkdownBase64Images(text, {
++        parseHttp: true,
++        controller: upload
++      });
++
++      expect(upload).toHaveBeenCalledWith(
++        expect.objectContaining({
++          type: 'http',
++          url: 'https://img.example.com/a(1).png'
++        })
++      );
++      expect(result).toBe('hello ![img](dataset/file-parsed/a.png)');
+     });
+ 
+-    it('应该处理空文本', () => {
+-      const result = matchMdImg('');
++    it('parseHttp 开启时应该正确处理 URL 中转义的右括号', async () => {
++      const text = String.raw`hello ![img](https://img.example.com/a\).png)`;
++      const upload = vi.fn().mockResolvedValue({ key: 'dataset/file-parsed/a.png' });
++
++      const result = await parseMarkdownBase64Images(text, {
++        parseHttp: true,
++        controller: upload
++      });
+ 
+-      expect(result.imageList).toHaveLength(0);
+-      expect(result.text).toBe('');
++      expect(upload).toHaveBeenCalledWith(
++        expect.objectContaining({
++          type: 'http',
++          url: 'https://img.example.com/a).png'
++        })
++      );
++      expect(result).toBe('hello ![img](dataset/file-parsed/a.png)');
+     });
+ 
+-    it('应该处理大型 base64 图片', () => {
+-      // 生成约 100KB 的 base64 数据
+-      const largeBase64 = 'A'.repeat(100 * 1024);
+-      const text = `![large](data:image/png;base64,${largeBase64})`;
+-      const result = matchMdImg(text);
++    it('http 图片转存失败时应该用原始 markdown 节点回退', async () => {
++      const text = String.raw`hello ![img](https://img.example.com/a\).png)`;
+ 
+-      expect(result.imageList).toHaveLength(1);
+-      expect(result.imageList[0].base64).toBe(largeBase64);
+-      expect(result.imageList[0].base64.length).toBe(100 * 1024);
++      const result = await parseMarkdownBase64Images(text, {
++        parseHttp: true,
++        controller: vi.fn().mockRejectedValue(new Error('failed'))
++      });
++
++      expect(result).toBe(text);
+     });
+ 
+-    it('应该为每个图片生成唯一的 UUID', () => {
+-      const base64Data = 'SAME==';
+-      const text = `
+-        ![img1](data:image/png;base64,${base64Data})
+-        ![img2](data:image/png;base64,${base64Data})
+-      `;
+-      const result = matchMdImg(text);
++    it('parseHttp 开启但未传上传回调时应该保留普通 http 图片', async () => {
++      const text = 'hello ![img](https://img.example.com/a.png)';
+ 
+-      expect(result.imageList).toHaveLength(2);
+-      expect(result.imageList[0].uuid).not.toBe(result.imageList[1].uuid);
+-    });
++      const result = await parseMarkdownBase64Images(text, {
++        parseHttp: true
++      });
+ 
+-    it('应该处理 base64 填充字符', () => {
+-      const testCases = ['ABC=', 'ABCD==', 'ABCDEF'];
++      expect(result).toBe(text);
++    });
+ 
+-      testCases.forEach((base64Data) => {
+-        const text = `![test](data:image/png;base64,${base64Data})`;
+-        const result = matchMdImg(text);
++    it('http 图片转存失败时应该保留原 URL', async () => {
++      const text = 'hello ![img](https://img.example.com/a.png)';
+ 
+-        expect(result.imageList).toHaveLength(1);
+-        expect(result.imageList[0].base64).toBe(base64Data);
++      const result = await parseMarkdownBase64Images(text, {
++        parseHttp: true,
++        controller: vi.fn().mockRejectedValue(new Error('failed'))
+       });
++
++      expect(result).toBe(text);
+     });
+   });
+ 
+   describe('性能测试', () => {
+-    it('uploadMarkdownBase64 应该处理多个图片', async () => {
+-      // 注意: uploadMarkdownBase64 的正则 [^\)]+ 是贪婪匹配
+-      // 多个图片在同一行会被匹配为一个,所以用换行分隔
++    it('parseMarkdownBase64Images 应该处理多个图片', async () => {
+       const imageCount = 5;
+       let text = '';
+ 
+@@ -517,18 +554,20 @@ describe('markdown 字符串处理函数测试', () => {
+ 
+       const mockUpload = vi.fn().mockImplementation(async (img) => {
+         await new Promise((resolve) => setTimeout(resolve, 10)); // 模拟异步上传
+-        return `https://cdn.example.com/${img.split('DATA')[1].split('=')[0]}.png`;
++        return { key: `https://cdn.example.com/${img.split('DATA')[1].split('=')[0]}.png` };
+       });
+ 
+-      await uploadMarkdownBase64({
+-        rawText: text,
+-        uploadImgController: mockUpload
++      await parseMarkdownBase64Images(text, {
++        controller: (image) => {
++          expect(image.type).toBe('base64');
++          return mockUpload(image.url);
++        }
+       });
+ 
+       expect(mockUpload).toHaveBeenCalledTimes(imageCount);
+     });
+ 
+-    it('matchMdImg 应该快速处理大文档', () => {
++    it('parseMarkdownBase64Images 应该快速处理大文档并删除 base64', async () => {
+       // 生成包含 100 个 base64 图片的文档
+       let text = '';
+       for (let i = 0; i < 100; i++) {
+@@ -536,10 +575,10 @@ describe('markdown 字符串处理函数测试', () => {
+       }
+ 
+       const start = performance.now();
+-      const result = matchMdImg(text);
++      const result = await parseMarkdownBase64Images(text);
+       const duration = performance.now() - start;
+ 
+-      expect(result.imageList).toHaveLength(100);
++      expect(result).not.toContain('data:image/png;base64');
+       expect(duration).toBeLessThan(1000); // 应该在 1 秒内完成
+     });
+   });
+diff --git a/packages/service/common/file/image/utils.ts b/packages/service/common/file/image/utils.ts
+index 5271d8611f1d..799e1bc0072f 100644
+--- a/packages/service/common/file/image/utils.ts
++++ b/packages/service/common/file/image/utils.ts
+@@ -1,7 +1,6 @@
+ import { axios } from '../../api/axios';
+ import { serverRequestBaseUrl } from '../../api/serverRequest';
+-import { retryFn } from '@fastgpt/global/common/system/utils';
+-import { getAxiosContentType } from '@fastgpt/global/common/axios/utils';
++import { getAxiosContentType, getAxiosHeaderValue } from '@fastgpt/global/common/axios/utils';
+ import { getLogger, LogCategories } from '../../logger';
+ import { serviceEnv } from '../../../env';
+ 
+@@ -62,6 +61,25 @@ const BASE64_PREFIX_MAP: Record<string, string> = {
+ };
+ 
+ const DEFAULT_IMAGE_TYPE = 'image/jpeg';
++const DEFAULT_IMAGE_DOWNLOAD_TIMEOUT_MS = 180 * 1000;
++const DEFAULT_IMAGE_DOWNLOAD_MAX_SIZE = 10 * 1024 * 1024;
++const DEFAULT_IMAGE_BASE64_MAX_BUFFER_SIZE = DEFAULT_IMAGE_DOWNLOAD_MAX_SIZE;
++
++export class ImageDownloadTooLargeError extends Error {
++  constructor(size: number, maxSize: number) {
++    super(`Image download too large. Size: ${size} bytes, maximum allowed: ${maxSize} bytes`);
++    this.name = 'ImageDownloadTooLargeError';
++  }
++}
++
++export class ImageBase64TooLargeError extends Error {
++  constructor(size: number, maxSize: number) {
++    super(
++      `Image buffer too large to convert to base64. Size: ${size} bytes, maximum allowed: ${maxSize} bytes`
++    );
++    this.name = 'ImageBase64TooLargeError';
++  }
++}
+ 
+ export const isValidImageContentType = (contentType: string): boolean => {
+   if (!contentType) return false;
+@@ -97,19 +115,60 @@ export const guessBase64ImageType = (str: string): string => {
+   return BASE64_PREFIX_MAP[str.charAt(0)] || DEFAULT_IMAGE_TYPE;
+ };
+ 
+-export const getImageBase64 = async (url: string) => {
+-  logger.debug('Load image to base64', { url });
++/**
++ * 下载远程图片并返回 Buffer。
++ *
++ * 该函数用于文档解析链路中转存 markdown http 图片，因此默认限制为 180 秒和 10MB：
++ * 先用 Content-Length 快速拒绝明显超限的资源，下载过程中再按累计字节数中断，避免
++ * 第三方图片拖住解析任务或把大响应一次性读进内存。
++ */
++export const getImageBuffer = async (
++  url: string,
++  options: {
++    timeoutMs?: number;
++    maxSize?: number;
++  } = {}
++) => {
++  logger.debug('Load image to buffer', { url });
+ 
+   try {
+-    const response = await retryFn(() =>
+-      axios.get(url, {
+-        baseURL: serverRequestBaseUrl,
+-        responseType: 'arraybuffer'
+-      })
+-    );
++    const timeoutMs = options.timeoutMs ?? DEFAULT_IMAGE_DOWNLOAD_TIMEOUT_MS;
++    const maxSize = options.maxSize ?? DEFAULT_IMAGE_DOWNLOAD_MAX_SIZE;
++    const response = await axios.get(url, {
++      baseURL: serverRequestBaseUrl,
++      responseType: 'stream',
++      timeout: timeoutMs,
++      maxContentLength: maxSize
++    });
++
++    const contentLength = Number(getAxiosHeaderValue(response?.headers?.['content-length']) || 0);
++    if (contentLength > maxSize) {
++      response.data?.destroy?.();
++      throw new ImageDownloadTooLargeError(contentLength, maxSize);
++    }
++
++    const chunks: Buffer[] = [];
++    let totalLength = 0;
++
++    const buffer = await new Promise<Buffer>((resolve, reject) => {
++      response.data.on('data', (chunk: Buffer) => {
++        totalLength += chunk.length;
++
++        if (totalLength > maxSize) {
++          response.data.destroy();
++          return reject(new ImageDownloadTooLargeError(totalLength, maxSize));
++        }
++
++        chunks.push(chunk);
++      });
++
++      response.data.on('end', () => {
++        resolve(Buffer.concat(chunks as unknown as Uint8Array[]));
++      });
++
++      response.data.on('error', reject);
++    });
+ 
+-    const buffer = Buffer.from(response.data);
+-    const base64 = buffer.toString('base64');
+     const headerContentType = getAxiosContentType(response?.headers?.['content-type']);
+ 
+     // 检测图片类型的优先级策略
+@@ -126,14 +185,48 @@ export const getImageBase64 = async (url: string) => {
+       }
+ 
+       // 3. 回退到 base64 推断
++      const base64 = buffer.toString('base64');
+       return guessBase64ImageType(base64);
+     })();
+ 
+     return {
+-      completeBase64: `data:${imageType};base64,${base64}`,
+-      base64,
++      buffer,
+       mime: imageType
+     };
++  } catch (error) {
++    logger.warn('Load image to buffer failed', { url, error });
++    return Promise.reject(error);
++  }
++};
++
++export const getImageBase64 = async (
++  url: string,
++  options: {
++    timeoutMs?: number;
++    maxSize?: number;
++    maxBase64BufferSize?: number;
++  } = {}
++) => {
++  logger.debug('Load image to base64', { url });
++
++  try {
++    const { buffer, mime } = await getImageBuffer(url, {
++      timeoutMs: options.timeoutMs,
++      maxSize: options.maxSize
++    });
++    const maxBase64BufferSize = options.maxBase64BufferSize ?? DEFAULT_IMAGE_BASE64_MAX_BUFFER_SIZE;
++
++    if (buffer.length > maxBase64BufferSize) {
++      throw new ImageBase64TooLargeError(buffer.length, maxBase64BufferSize);
++    }
++
++    const base64 = buffer.toString('base64');
++
++    return {
++      completeBase64: `data:${mime};base64,${base64}`,
++      base64,
++      mime
++    };
+   } catch (error) {
+     logger.warn('Load image to base64 failed', { url, error });
+     return Promise.reject(error);
+diff --git a/packages/service/common/file/read/image.ts b/packages/service/common/file/read/image.ts
+new file mode 100644
+index 000000000000..5481229f809b
+--- /dev/null
++++ b/packages/service/common/file/read/image.ts
+@@ -0,0 +1,58 @@
++import { uploadImage2S3Bucket } from '../../s3/utils';
++import { normalizeMimeType, resolveMimeExtension, resolveMimeType } from '../../s3/utils/mime';
++
++export type ParsedPdfImageUploadParams =
++  | {
++      type: 'base64';
++      mime: string;
++      dataUrl: string;
++    }
++  | {
++      type: 'http';
++      mime: string;
++      buffer: Buffer;
++    };
++
++export type ParsedPdfImageKeyOptions = {
++  prefix: string;
++  expiredTime?: Date;
++};
++
++/**
++ * 将 PDF 解析过程中得到的图片统一写入文件解析图片目录。
++ *
++ * base64 图片直接使用 dataUrl 上传；http 图片由上游先下载成 buffer 后上传。返回值保持
++ * worker/provider 图片处理回调的统一契约，便于 markdown 中直接替换成对象存储 key。
++ */
++export const uploadParsedPdfImage = async (
++  image: ParsedPdfImageUploadParams,
++  imageKeyOptions?: ParsedPdfImageKeyOptions
++) => {
++  if (!imageKeyOptions?.prefix) return { key: '' };
++
++  const { prefix, expiredTime } = imageKeyOptions;
++  const mimetype = normalizeMimeType(image.mime);
++  const ext = resolveMimeExtension(mimetype);
++  const filename = `${crypto.randomUUID()}${ext}`;
++  const commonParams = {
++    uploadKey: `${prefix}/${filename}`,
++    mimetype: resolveMimeType([filename], mimetype),
++    filename,
++    expiredTime
++  };
++
++  const key = await uploadImage2S3Bucket(
++    'private',
++    image.type === 'base64'
++      ? {
++          ...commonParams,
++          base64Img: image.dataUrl
++        }
++      : {
++          ...commonParams,
++          buffer: image.buffer
++        }
++  );
++
++  return { key };
++};
+diff --git a/packages/service/common/file/read/utils.ts b/packages/service/common/file/read/utils.ts
+index a8213d265208..be37ab6767eb 100644
+--- a/packages/service/common/file/read/utils.ts
++++ b/packages/service/common/file/read/utils.ts
+@@ -2,15 +2,14 @@ import FormData from 'form-data';
+ import fs from 'fs';
+ import type { ReadFileResponse } from '../../../worker/readFile/type';
+ import { axios } from '../../api/axios';
+-import { batchRun } from '@fastgpt/global/common/system/utils';
+-import { matchMdImg } from '@fastgpt/global/common/string/markdown';
++import { parseMarkdownBase64Images } from '@fastgpt/global/common/string/markdown';
+ import { createPdfParseUsage } from '../../../support/wallet/usage/controller';
+ import { useDoc2xServer } from '../../../thirdProvider/doc2x';
+ import { useTextinServer } from '../../../thirdProvider/textin';
+ import { readRawContentFromBuffer } from '../../../worker/function';
+-import { uploadImage2S3Bucket } from '../../s3/utils';
+-import { normalizeMimeType, resolveMimeExtension, resolveMimeType } from '../../s3/utils/mime';
+ import { getLogger, LogCategories } from '../../logger';
++import { getImageBuffer } from '../image/utils';
++import { uploadParsedPdfImage } from './image';
+ 
+ const logger = getLogger(LogCategories.MODULE.DATASET.FILE);
+ 
+@@ -75,11 +74,42 @@ export const readFileContentByBuffer = async ({
+ }): Promise<{
+   rawText: string;
+ }> => {
++  const parseMarkdownImages = (rawText: string) =>
++    parseMarkdownBase64Images(rawText, {
++      parseBase64: true,
++      parseHttp: true,
++      controller: imageKeyOptions?.prefix
++        ? async (image) => {
++            if (image.type === 'base64') {
++              return uploadParsedPdfImage(
++                {
++                  type: 'base64',
++                  mime: image.mime,
++                  dataUrl: image.dataUrl
++                },
++                imageKeyOptions
++              );
++            }
++
++            const { buffer, mime } = await getImageBuffer(image.url);
++            return uploadParsedPdfImage(
++              {
++                type: 'http',
++                mime,
++                buffer
++              },
++              imageKeyOptions
++            );
++          }
++        : undefined
++    });
++
+   const systemParse = () =>
+     readRawContentFromBuffer({
+       extension,
+       encoding,
+-      buffer
++      buffer,
++      imageKeyOptions
+     });
+   const parsePdfFromCustomService = async (): Promise<ReadFileResponse> => {
+     const url = global.systemEnv.customPdfParse?.url;
+@@ -114,8 +144,7 @@ export const readFileContentByBuffer = async ({
+       durationMs: Date.now() - start
+     });
+ 
+-    const rawText = response.markdown;
+-    const { text, imageList } = matchMdImg(rawText);
++    const text = await parseMarkdownImages(response.markdown);
+ 
+     createPdfParseUsage({
+       teamId,
+@@ -126,8 +155,7 @@ export const readFileContentByBuffer = async ({
+ 
+     return {
+       rawText: text,
+-      formatText: text,
+-      imageList
++      formatText: text
+     };
+   };
+   // Textin api
+@@ -136,10 +164,28 @@ export const readFileContentByBuffer = async ({
+     const secretCode = global.systemEnv.customPdfParse?.textinSecretCode;
+     if (!appId || !secretCode) return systemParse();
+ 
+-    const { pages, text, imageList } = await useTextinServer({
++    const { pages, text } = await useTextinServer({
+       appId,
+       secretCode
+-    }).parsePDF(buffer);
++    }).parsePDF(buffer, {
++      uploadImage: imageKeyOptions?.prefix
++        ? async (image) =>
++            uploadParsedPdfImage(
++              image.type === 'base64'
++                ? {
++                    type: 'base64',
++                    mime: image.mime,
++                    dataUrl: image.dataUrl
++                  }
++                : {
++                    type: 'http',
++                    mime: image.mime,
++                    buffer: image.buffer
++                  },
++              imageKeyOptions
++            )
++        : undefined
++    });
+ 
+     createPdfParseUsage({
+       teamId,
+@@ -150,8 +196,7 @@ export const readFileContentByBuffer = async ({
+ 
+     return {
+       rawText: text,
+-      formatText: text,
+-      imageList
++      formatText: text
+     };
+   };
+   // Doc2x api
+@@ -159,7 +204,25 @@ export const readFileContentByBuffer = async ({
+     const doc2xKey = global.systemEnv.customPdfParse?.doc2xKey;
+     if (!doc2xKey) return systemParse();
+ 
+-    const { pages, text, imageList } = await useDoc2xServer({ apiKey: doc2xKey }).parsePDF(buffer);
++    const { pages, text } = await useDoc2xServer({ apiKey: doc2xKey }).parsePDF(buffer, {
++      uploadImage: imageKeyOptions?.prefix
++        ? async (image) =>
++            uploadParsedPdfImage(
++              image.type === 'base64'
++                ? {
++                    type: 'base64',
++                    mime: image.mime,
++                    dataUrl: image.dataUrl
++                  }
++                : {
++                    type: 'http',
++                    mime: image.mime,
++                    buffer: image.buffer
++                  },
++              imageKeyOptions
++            )
++        : undefined
++    });
+ 
+     createPdfParseUsage({
+       teamId,
+@@ -170,8 +233,7 @@ export const readFileContentByBuffer = async ({
+ 
+     return {
+       rawText: text,
+-      formatText: text,
+-      imageList
++      formatText: text
+     };
+   };
+   // Custom read file service
+@@ -187,56 +249,15 @@ export const readFileContentByBuffer = async ({
+   const start = Date.now();
+   logger.debug('Start parsing file', { extension });
+ 
+-  const parsedFile = await (async () => {
++  const { rawText, formatText } = await (async () => {
+     if (extension === 'pdf') {
+       return await pdfParseFn();
+     }
+     return await systemParse();
+   })();
+-  const { imageList } = parsedFile;
+-  let { rawText, formatText } = parsedFile;
+ 
+   logger.debug('File parsing completed', { extension, durationMs: Date.now() - start });
+ 
+-  // markdown data format
+-  if (imageList && imageList.length > 0) {
+-    logger.debug('Processing parsed document images', {
+-      extension,
+-      imageCount: imageList.length
+-    });
+-
+-    await batchRun(imageList, async (item) => {
+-      const src = await (async () => {
+-        if (!imageKeyOptions) return '';
+-        try {
+-          const { prefix, expiredTime } = imageKeyOptions;
+-          const mimetype = normalizeMimeType(item.mime);
+-          const ext = resolveMimeExtension(mimetype);
+-          const filename = `${item.uuid}${ext}`;
+-
+-          return await uploadImage2S3Bucket('private', {
+-            base64Img: `data:${mimetype};base64,${item.base64}`,
+-            uploadKey: `${prefix}/${filename}`,
+-            mimetype: resolveMimeType([filename], mimetype),
+-            filename,
+-            expiredTime
+-          });
+-        } catch (error) {
+-          logger.warn('Failed to upload parsed image to S3', {
+-            extension,
+-            imageUuid: item.uuid,
+-            error
+-          });
+-          return `[Image Upload Failed: ${item.uuid}]`;
+-        }
+-      })();
+-      rawText = rawText.replace(item.uuid, src);
+-      if (formatText) {
+-        formatText = formatText.replace(item.uuid, src);
+-      }
+-    });
+-  }
+-
+   return {
+     rawText: getFormatText ? formatText || rawText : rawText
+   };
+diff --git a/packages/service/common/s3/contracts/type.ts b/packages/service/common/s3/contracts/type.ts
+index d45bb9d12440..827499dbfb3b 100644
+--- a/packages/service/common/s3/contracts/type.ts
++++ b/packages/service/common/s3/contracts/type.ts
+@@ -70,13 +70,18 @@ export const CreateGetPresignedUrlParamsSchema = z.object({
+ });
+ export type createPreviewUrlParams = z.infer<typeof CreateGetPresignedUrlParamsSchema>;
+ 
+-export const UploadImage2S3BucketParamsSchema = z.object({
+-  base64Img: z.string().nonempty(),
+-  uploadKey: z.string().nonempty(),
+-  mimetype: z.string().nonempty(),
+-  filename: z.string().nonempty(),
+-  expiredTime: z.coerce.date().optional()
+-});
++export const UploadImage2S3BucketParamsSchema = z
++  .object({
++    base64Img: z.string().nonempty().optional(),
++    buffer: z.instanceof(Buffer).optional(),
++    uploadKey: z.string().nonempty(),
++    mimetype: z.string().nonempty(),
++    filename: z.string().nonempty(),
++    expiredTime: z.coerce.date().optional()
++  })
++  .refine((value) => value.base64Img || value.buffer, {
++    message: 'base64Img or buffer is required'
++  });
+ export type UploadImage2S3BucketParams = z.infer<typeof UploadImage2S3BucketParamsSchema>;
+ 
+ export const UploadFileByBodySchema = z.object({
+diff --git a/packages/service/common/s3/utils.ts b/packages/service/common/s3/utils.ts
+index 8287c0fa49f8..af1976efc243 100644
+--- a/packages/service/common/s3/utils.ts
++++ b/packages/service/common/s3/utils.ts
+@@ -87,12 +87,18 @@ export async function uploadImage2S3Bucket(
+   bucketName: keyof typeof S3Buckets,
+   params: UploadImage2S3BucketParams
+ ) {
+-  const { base64Img, filename, mimetype, uploadKey, expiredTime } = params;
++  const { base64Img, buffer: inputBuffer, filename, mimetype, uploadKey, expiredTime } = params;
+ 
+   const bucket = bucketName === 'private' ? new S3PrivateBucket() : new S3PublicBucket();
+ 
+-  const base64Data = base64Img.split(',')[1] || base64Img;
+-  const buffer = Buffer.from(base64Data, 'base64');
++  const buffer = (() => {
++    if (inputBuffer) return inputBuffer;
++    const base64Data = base64Img?.split(',')[1] || base64Img;
++    if (!base64Data) {
++      throw new Error('base64Img or buffer is required');
++    }
++    return Buffer.from(base64Data, 'base64');
++  })();
+ 
+   await bucket.client.uploadObject({
+     key: uploadKey,
+diff --git a/packages/service/common/string/utils.ts b/packages/service/common/string/utils.ts
+index abbd608b5046..65f764144dca 100644
+--- a/packages/service/common/string/utils.ts
++++ b/packages/service/common/string/utils.ts
+@@ -1,6 +1,5 @@
+ import { serviceEnv } from '../../env';
+ import { WorkerNameEnum, getWorkerController } from '../../worker/utils';
+-import { type ImageType } from '../../worker/readFile/type';
+ import { getLogger, LogCategories } from '../logger';
+ 
+ const logger = getLogger(LogCategories.INFRA.WORKER);
+@@ -16,7 +15,6 @@ export const htmlToMarkdown = async (html?: string | null) => {
+     { html: string },
+     {
+       rawText: string;
+-      imageList: ImageType[];
+     }
+   >({
+     name: WorkerNameEnum.htmlStr2Md,
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/sub/file/index.ts b/packages/service/core/workflow/dispatch/ai/agent/sub/file/index.ts
+index 96865ab8555e..b74205aaf6d1 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/sub/file/index.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/sub/file/index.ts
+@@ -1,17 +1,8 @@
+-import { isInternalAddress, PRIVATE_URL_TEXT } from '../../../../../../../common/system/utils';
+-import { pickOutboundAxios } from '../../../../../../../common/api/axios';
+-import { parseFileExtensionFromUrl } from '@fastgpt/global/common/string/tools';
+-import {
+-  detectFileEncoding,
+-  parseContentDispositionFilename
+-} from '@fastgpt/global/common/file/tools';
+ import { getErrText } from '@fastgpt/global/common/error/utils';
+-import { getS3RawTextSource } from '../../../../../../../common/s3/sources/rawText/index';
+-import { readFileContentByBuffer } from '../../../../../../../common/file/read/utils';
+ import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
+ import { i18nT } from '@fastgpt/global/common/i18n/utils';
+-import { getAxiosHeaderValue } from '@fastgpt/global/common/axios/utils';
+ import type { DispatchSubAppResponse } from '../../type';
++import { getFileContentByUrl } from '../../../../../utils/file';
+ 
+ type FileReadParams = {
+   files: { id: string; url: string }[];
+@@ -30,78 +21,18 @@ export const dispatchFileRead = async ({
+   try {
+     const readFilesResult = await Promise.all(
+       files.map(async ({ id, url }) => {
+-        // Get from buffer
+-        const fileBuffer = await getS3RawTextSource().getRawTextBuffer({
+-          sourceId: url,
+-          customPdfParse
+-        });
+-        if (fileBuffer) {
+-          return {
+-            id,
+-            name: fileBuffer.filename,
+-            content: fileBuffer.text
+-          };
+-        }
+-
+         try {
+-          if (await isInternalAddress(url)) {
+-            return {
+-              id,
+-              name: '',
+-              content: PRIVATE_URL_TEXT
+-            };
+-          }
+-          const response = await pickOutboundAxios(url).get(url, {
+-            responseType: 'arraybuffer'
+-          });
+-
+-          const buffer = Buffer.from(response.data, 'binary');
+-
+-          // Get file name
+-          const filename = (() => {
+-            const contentDisposition = getAxiosHeaderValue(response.headers['content-disposition']);
+-            return parseContentDispositionFilename(contentDisposition) || url;
+-          })();
+-          // Extension
+-          const extension = parseFileExtensionFromUrl(filename);
+-
+-          // Get encoding
+-          const encoding = (() => {
+-            const contentType = getAxiosHeaderValue(response.headers['content-type']);
+-            if (contentType) {
+-              const charsetRegex = /charset=([^;]*)/;
+-              const matches = charsetRegex.exec(contentType);
+-              if (matches != null && matches[1]) {
+-                return matches[1];
+-              }
+-            }
+-
+-            return detectFileEncoding(buffer);
+-          })();
+-
+-          // Read file
+-          const { rawText } = await readFileContentByBuffer({
+-            extension,
++          const { name, content } = await getFileContentByUrl({
++            url,
+             teamId,
+             tmbId,
+-            buffer,
+-            encoding,
+-            customPdfParse,
+-            getFormatText: true
+-          });
+-
+-          // Add to buffer
+-          getS3RawTextSource().addRawTextBuffer({
+-            sourceId: url,
+-            sourceName: filename,
+-            text: rawText,
+             customPdfParse
+           });
+ 
+           return {
+             id,
+-            name: filename,
+-            content: rawText
++            name,
++            content
+           };
+         } catch (error) {
+           return {
+diff --git a/packages/service/test/common/file/image/utils.test.ts b/packages/service/test/common/file/image/utils.test.ts
+index b104dee36b27..22342b6fe8c6 100644
+--- a/packages/service/test/common/file/image/utils.test.ts
++++ b/packages/service/test/common/file/image/utils.test.ts
+@@ -1,8 +1,10 @@
+ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
++import { Readable } from 'node:stream';
+ import {
+   isValidImageContentType,
+   detectImageTypeFromBuffer,
+   guessBase64ImageType,
++  getImageBuffer,
+   getImageBase64
+ } from '@fastgpt/service/common/file/image/utils';
+ 
+@@ -23,6 +25,11 @@ const loadUtilsModule = async () => {
+   return import('@fastgpt/service/common/file/image/utils');
+ };
+ 
++const mockImageResponse = (buffer: Buffer, headers: Record<string, string> = {}) => ({
++  data: Readable.from([buffer]),
++  headers
++});
++
+ describe('isValidImageContentType', () => {
+   it('should return true for valid image MIME types', () => {
+     expect(isValidImageContentType('image/jpeg')).toBe(true);
+@@ -211,18 +218,29 @@ describe('getImageBase64', () => {
+     mockAxiosGet.mockReset();
+   });
+ 
+-  it('should return base64 with correct mime when header has valid image content-type', async () => {
++  it('should return image buffer without base64 encoding', async () => {
+     const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+-    mockAxiosGet.mockResolvedValue({
+-      data: pngBytes,
+-      headers: { 'content-type': 'image/png' }
++    mockAxiosGet.mockResolvedValue(mockImageResponse(pngBytes, { 'content-type': 'image/png' }));
++
++    const result = await getImageBuffer('/api/system/img/test.png');
++
++    expect(result).toEqual({
++      buffer: pngBytes,
++      mime: 'image/png'
+     });
++  });
++
++  it('should return base64 with correct mime when header has valid image content-type', async () => {
++    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
++    mockAxiosGet.mockResolvedValue(mockImageResponse(pngBytes, { 'content-type': 'image/png' }));
+ 
+     const result = await getImageBase64('/api/system/img/test.png');
+ 
+     expect(mockAxiosGet).toHaveBeenCalledWith('/api/system/img/test.png', {
+       baseURL: 'http://localhost:3000',
+-      responseType: 'arraybuffer'
++      responseType: 'stream',
++      timeout: 180000,
++      maxContentLength: 10 * 1024 * 1024
+     });
+     expect(result.mime).toBe('image/png');
+     expect(result.base64).toBe(pngBytes.toString('base64'));
+@@ -231,10 +249,9 @@ describe('getImageBase64', () => {
+ 
+   it('should detect type from buffer when header content-type is not a valid image type', async () => {
+     const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+-    mockAxiosGet.mockResolvedValue({
+-      data: jpegBytes,
+-      headers: { 'content-type': 'application/octet-stream' }
+-    });
++    mockAxiosGet.mockResolvedValue(
++      mockImageResponse(jpegBytes, { 'content-type': 'application/octet-stream' })
++    );
+ 
+     const result = await getImageBase64('/img/photo.jpg');
+ 
+@@ -244,10 +261,7 @@ describe('getImageBase64', () => {
+ 
+   it('should detect type from buffer when header content-type is missing', async () => {
+     const gifBytes = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+-    mockAxiosGet.mockResolvedValue({
+-      data: gifBytes,
+-      headers: {}
+-    });
++    mockAxiosGet.mockResolvedValue(mockImageResponse(gifBytes));
+ 
+     const result = await getImageBase64('/img/anim.gif');
+ 
+@@ -257,10 +271,9 @@ describe('getImageBase64', () => {
+   it('should fallback to guessBase64ImageType when buffer detection fails', async () => {
+     // Unknown magic bytes that do not match any signature
+     const unknownBytes = Buffer.from([0xaa, 0xbb, 0xcc, 0xdd]);
+-    mockAxiosGet.mockResolvedValue({
+-      data: unknownBytes,
+-      headers: { 'content-type': 'text/html' }
+-    });
++    mockAxiosGet.mockResolvedValue(
++      mockImageResponse(unknownBytes, { 'content-type': 'text/html' })
++    );
+ 
+     const result = await getImageBase64('/img/unknown.dat');
+ 
+@@ -273,10 +286,9 @@ describe('getImageBase64', () => {
+ 
+   it('should handle content-type header with charset parameter', async () => {
+     const svgBytes = Buffer.from([0x3c, 0x73, 0x76, 0x67, 0x20, 0x78, 0x6d, 0x6c]);
+-    mockAxiosGet.mockResolvedValue({
+-      data: svgBytes,
+-      headers: { 'content-type': 'image/svg+xml; charset=utf-8' }
+-    });
++    mockAxiosGet.mockResolvedValue(
++      mockImageResponse(svgBytes, { 'content-type': 'image/svg+xml; charset=utf-8' })
++    );
+ 
+     const result = await getImageBase64('/img/icon.svg');
+ 
+@@ -300,10 +312,7 @@ describe('getImageBase64', () => {
+ 
+   it('should handle empty arraybuffer response', async () => {
+     const emptyBuffer = Buffer.from([]);
+-    mockAxiosGet.mockResolvedValue({
+-      data: emptyBuffer,
+-      headers: { 'content-type': 'image/png' }
+-    });
++    mockAxiosGet.mockResolvedValue(mockImageResponse(emptyBuffer, { 'content-type': 'image/png' }));
+ 
+     const result = await getImageBase64('/img/empty.png');
+ 
+@@ -315,10 +324,7 @@ describe('getImageBase64', () => {
+   it('should prefer header content-type over buffer detection when header is valid', async () => {
+     // JPEG magic bytes but header says image/webp
+     const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+-    mockAxiosGet.mockResolvedValue({
+-      data: jpegBytes,
+-      headers: { 'content-type': 'image/webp' }
+-    });
++    mockAxiosGet.mockResolvedValue(mockImageResponse(jpegBytes, { 'content-type': 'image/webp' }));
+ 
+     const result = await getImageBase64('/img/test.webp');
+ 
+@@ -328,15 +334,53 @@ describe('getImageBase64', () => {
+ 
+   it('should construct completeBase64 in correct data URI format', async () => {
+     const bmpBytes = Buffer.from([0x42, 0x4d, 0x00, 0x00, 0x00, 0x00]);
+-    mockAxiosGet.mockResolvedValue({
+-      data: bmpBytes,
+-      headers: { 'content-type': 'image/bmp' }
+-    });
++    mockAxiosGet.mockResolvedValue(mockImageResponse(bmpBytes, { 'content-type': 'image/bmp' }));
+ 
+     const result = await getImageBase64('/img/test.bmp');
+ 
+     expect(result.completeBase64).toMatch(/^data:image\/bmp;base64,[A-Za-z0-9+/=]+$/);
+   });
++
++  it('should reject before reading when content-length exceeds maxSize', async () => {
++    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
++    mockAxiosGet.mockResolvedValue(
++      mockImageResponse(pngBytes, {
++        'content-type': 'image/png',
++        'content-length': '11'
++      })
++    );
++
++    await expect(getImageBuffer('/img/too-large.png', { maxSize: 10 })).rejects.toThrow(
++      'Image download too large'
++    );
++  });
++
++  it('should reject while streaming when image exceeds maxSize', async () => {
++    mockAxiosGet.mockResolvedValue(
++      mockImageResponse(Buffer.from('12345678901'), {
++        'content-type': 'image/png'
++      })
++    );
++
++    await expect(getImageBuffer('/img/stream-too-large.png', { maxSize: 10 })).rejects.toThrow(
++      'Image download too large'
++    );
++  });
++
++  it('should reject before converting to base64 when buffer exceeds base64 limit', async () => {
++    mockAxiosGet.mockResolvedValue(
++      mockImageResponse(Buffer.from('12345678901'), {
++        'content-type': 'image/png'
++      })
++    );
++
++    await expect(
++      getImageBase64('/img/base64-too-large.png', {
++        maxSize: 20,
++        maxBase64BufferSize: 10
++      })
++    ).rejects.toThrow('Image buffer too large to convert to base64');
++  });
+ });
+ 
+ describe('addEndpointToImageUrl', () => {
+diff --git a/packages/service/test/common/file/read/utils.test.ts b/packages/service/test/common/file/read/utils.test.ts
+index 48c5ca6c2462..53aa3763001e 100644
+--- a/packages/service/test/common/file/read/utils.test.ts
++++ b/packages/service/test/common/file/read/utils.test.ts
+@@ -9,34 +9,35 @@ const {
+   mockAxiosPost,
+   mockDoc2xParsePDF,
+   mockTextinParsePDF,
+-  mockUploadImage2S3Bucket
++  mockUploadImage2S3Bucket,
++  mockGetImageBuffer
+ } = vi.hoisted(() => ({
+   mockReadRawContentFromBuffer: vi.fn(async ({ extension, buffer, encoding }: any) => {
+     if (extension === 'txt') {
+       return {
+         rawText: buffer.toString(encoding || 'utf-8'),
+-        formatText: buffer.toString(encoding || 'utf-8'),
+-        imageList: []
++        formatText: buffer.toString(encoding || 'utf-8')
+       };
+     }
+     return {
+       rawText: `parsed-${extension}-content`,
+-      formatText: `parsed-${extension}-content`,
+-      imageList: []
++      formatText: `parsed-${extension}-content`
+     };
+   }),
+   mockAxiosPost: vi.fn(),
+   mockDoc2xParsePDF: vi.fn().mockResolvedValue({
+     pages: 1,
+-    text: 'doc2x-parsed-text',
+-    imageList: []
++    text: 'doc2x-parsed-text'
+   }),
+   mockTextinParsePDF: vi.fn().mockResolvedValue({
+     pages: 1,
+-    text: 'textin-parsed-text',
+-    imageList: []
++    text: 'textin-parsed-text'
+   }),
+-  mockUploadImage2S3Bucket: vi.fn().mockResolvedValue('https://s3.example.com/uploaded-image.png')
++  mockUploadImage2S3Bucket: vi.fn().mockResolvedValue('https://s3.example.com/uploaded-image.png'),
++  mockGetImageBuffer: vi.fn().mockResolvedValue({
++    buffer: Buffer.from('image-bytes'),
++    mime: 'image/png'
++  })
+ }));
+ 
+ vi.mock('@fastgpt/service/worker/function', () => ({
+@@ -74,6 +75,10 @@ vi.mock('@fastgpt/service/common/s3/utils', async (importOriginal) => {
+   };
+ });
+ 
++vi.mock('@fastgpt/service/common/file/image/utils', () => ({
++  getImageBuffer: mockGetImageBuffer
++}));
++
+ import {
+   readRawTextByLocalFile,
+   readFileContentByBuffer
+@@ -249,6 +254,64 @@ describe('readFileContentByBuffer', () => {
+     expect(result.rawText).toBe('custom-service-parsed-text');
+   });
+ 
++  it('should upload custom URL service base64 and http markdown images with shared handler', async () => {
++    global.systemEnv = {
++      customPdfParse: { url: 'http://custom-pdf-service.com/parse', key: 'test-key' }
++    } as any;
++    const expiredTime = new Date('2030-01-01T00:00:00.000Z');
++    mockAxiosPost.mockResolvedValueOnce({
++      data: {
++        pages: 3,
++        markdown: [
++          'base64 ![b](data:image/png;base64,iVBORw0KGgo=)',
++          'http ![h](https://img.example.com/h.png)'
++        ].join('\n')
++      }
++    });
++    mockUploadImage2S3Bucket
++      .mockResolvedValueOnce('dataset/ds1/file-parsed/base64.png')
++      .mockResolvedValueOnce('dataset/ds1/file-parsed/http.png');
++
++    const result = await readFileContentByBuffer({
++      teamId,
++      tmbId,
++      extension: 'pdf',
++      buffer: Buffer.from('pdf content'),
++      encoding: 'utf-8',
++      customPdfParse: true,
++      imageKeyOptions: {
++        prefix: 'dataset/ds1/file-parsed',
++        expiredTime
++      }
++    });
++
++    expect(mockGetImageBuffer).toHaveBeenCalledWith('https://img.example.com/h.png');
++    expect(mockUploadImage2S3Bucket).toHaveBeenNthCalledWith(
++      1,
++      'private',
++      expect.objectContaining({
++        base64Img: 'data:image/png;base64,iVBORw0KGgo=',
++        uploadKey: expect.stringMatching(/^dataset\/ds1\/file-parsed\/.+\.png$/),
++        mimetype: 'image/png',
++        filename: expect.stringMatching(/\.png$/),
++        expiredTime
++      })
++    );
++    expect(mockUploadImage2S3Bucket).toHaveBeenNthCalledWith(
++      2,
++      'private',
++      expect.objectContaining({
++        buffer: Buffer.from('image-bytes'),
++        uploadKey: expect.stringMatching(/^dataset\/ds1\/file-parsed\/.+\.png$/),
++        mimetype: 'image/png',
++        filename: expect.stringMatching(/\.png$/),
++        expiredTime
++      })
++    );
++    expect(result.rawText).toContain('![b](dataset/ds1/file-parsed/base64.png)');
++    expect(result.rawText).toContain('![h](dataset/ds1/file-parsed/http.png)');
++  });
++
+   it('should use textin service for pdf when textinAppId is configured', async () => {
+     global.systemEnv = {
+       customPdfParse: { textinAppId: 'app-id', textinSecretCode: 'secret' }
+@@ -268,6 +331,66 @@ describe('readFileContentByBuffer', () => {
+     expect(result.rawText).toBe('textin-parsed-text');
+   });
+ 
++  it('should pass Textin image upload handler when imageKeyOptions is provided', async () => {
++    global.systemEnv = {
++      customPdfParse: { textinAppId: 'app-id', textinSecretCode: 'secret' }
++    } as any;
++    const expiredTime = new Date('2030-01-01T00:00:00.000Z');
++
++    await readFileContentByBuffer({
++      teamId,
++      tmbId,
++      extension: 'pdf',
++      buffer: Buffer.from('pdf content'),
++      encoding: 'utf-8',
++      customPdfParse: true,
++      imageKeyOptions: {
++        prefix: 'dataset/ds1/file-parsed',
++        expiredTime
++      }
++    });
++
++    const [, options] = mockTextinParsePDF.mock.calls.at(-1)!;
++    expect(options.uploadImage).toBeInstanceOf(Function);
++
++    const uploadResult = await options.uploadImage({
++      type: 'base64',
++      mime: 'image/png',
++      base64: 'iVBORw0KGgo=',
++      dataUrl: 'data:image/png;base64,iVBORw0KGgo='
++    });
++
++    expect(uploadResult).toEqual({
++      key: 'https://s3.example.com/uploaded-image.png'
++    });
++    expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith('private', {
++      base64Img: 'data:image/png;base64,iVBORw0KGgo=',
++      uploadKey: expect.stringMatching(/^dataset\/ds1\/file-parsed\/.+\.png$/),
++      mimetype: 'image/png',
++      filename: expect.stringMatching(/\.png$/),
++      expiredTime
++    });
++
++    mockUploadImage2S3Bucket.mockClear();
++    const httpUploadResult = await options.uploadImage({
++      type: 'http',
++      url: 'https://textin.example.com/image.png',
++      mime: 'image/png',
++      buffer: Buffer.from('image-bytes')
++    });
++
++    expect(httpUploadResult).toEqual({
++      key: 'https://s3.example.com/uploaded-image.png'
++    });
++    expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith('private', {
++      buffer: Buffer.from('image-bytes'),
++      uploadKey: expect.stringMatching(/^dataset\/ds1\/file-parsed\/.+\.png$/),
++      mimetype: 'image/png',
++      filename: expect.stringMatching(/\.png$/),
++      expiredTime
++    });
++  });
++
+   it('should use doc2x service for pdf when doc2xKey is configured', async () => {
+     global.systemEnv = {
+       customPdfParse: { doc2xKey: 'doc2x-api-key' }
+@@ -287,6 +410,66 @@ describe('readFileContentByBuffer', () => {
+     expect(result.rawText).toBe('doc2x-parsed-text');
+   });
+ 
++  it('should pass Doc2x image upload handler when imageKeyOptions is provided', async () => {
++    global.systemEnv = {
++      customPdfParse: { doc2xKey: 'doc2x-api-key' }
++    } as any;
++    const expiredTime = new Date('2030-01-01T00:00:00.000Z');
++
++    await readFileContentByBuffer({
++      teamId,
++      tmbId,
++      extension: 'pdf',
++      buffer: Buffer.from('pdf content'),
++      encoding: 'utf-8',
++      customPdfParse: true,
++      imageKeyOptions: {
++        prefix: 'dataset/ds1/file-parsed',
++        expiredTime
++      }
++    });
++
++    const [, options] = mockDoc2xParsePDF.mock.calls.at(-1)!;
++    expect(options.uploadImage).toBeInstanceOf(Function);
++
++    const uploadResult = await options.uploadImage({
++      type: 'http',
++      url: 'https://doc2x.example.com/image.png',
++      mime: 'image/png',
++      buffer: Buffer.from('image-bytes')
++    });
++
++    expect(uploadResult).toEqual({
++      key: 'https://s3.example.com/uploaded-image.png'
++    });
++    expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith('private', {
++      buffer: Buffer.from('image-bytes'),
++      uploadKey: expect.stringMatching(/^dataset\/ds1\/file-parsed\/.+\.png$/),
++      mimetype: 'image/png',
++      filename: expect.stringMatching(/\.png$/),
++      expiredTime
++    });
++
++    mockUploadImage2S3Bucket.mockClear();
++    const base64UploadResult = await options.uploadImage({
++      type: 'base64',
++      mime: 'image/png',
++      base64: 'iVBORw0KGgo=',
++      dataUrl: 'data:image/png;base64,iVBORw0KGgo='
++    });
++
++    expect(base64UploadResult).toEqual({
++      key: 'https://s3.example.com/uploaded-image.png'
++    });
++    expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith('private', {
++      base64Img: 'data:image/png;base64,iVBORw0KGgo=',
++      uploadKey: expect.stringMatching(/^dataset\/ds1\/file-parsed\/.+\.png$/),
++      mimetype: 'image/png',
++      filename: expect.stringMatching(/\.png$/),
++      expiredTime
++    });
++  });
++
+   it('should reject when custom URL service returns error', async () => {
+     global.systemEnv = {
+       customPdfParse: { url: 'http://custom-pdf-service.com/parse' }
+@@ -333,60 +516,63 @@ describe('readFileContentByBuffer', () => {
+     expect(result.rawText).toBe('parsed-pdf-content');
+   });
+ 
+-  it('should process images from parsed document with imageKeyOptions', async () => {
+-    mockReadRawContentFromBuffer.mockResolvedValueOnce({
+-      rawText: 'text with ![img](IMAGE_abc123_IMAGE)',
+-      formatText: 'text with ![img](IMAGE_abc123_IMAGE)',
+-      imageList: [
+-        {
+-          uuid: 'IMAGE_abc123_IMAGE',
+-          base64: 'iVBORw0KGgo=',
+-          mime: 'image/png'
+-        }
+-      ]
++  it('should upload custom service markdown base64 images when imageKeyOptions is provided', async () => {
++    global.systemEnv = {
++      customPdfParse: { url: 'http://custom-pdf-service.com/parse' }
++    } as any;
++    mockAxiosPost.mockResolvedValueOnce({
++      data: {
++        pages: 1,
++        markdown: 'text with ![img](data:image/png;base64,iVBORw0KGgo=)'
++      }
+     });
+ 
+-    const buffer = Buffer.from('content with images');
+-
+     const result = await readFileContentByBuffer({
+       teamId,
+       tmbId,
+-      extension: 'md',
+-      buffer,
++      extension: 'pdf',
++      buffer: Buffer.from('pdf content'),
+       encoding: 'utf-8',
++      customPdfParse: true,
+       imageKeyOptions: {
+         prefix: 'test/prefix'
+       }
+     });
+ 
+     expect(result.rawText).toContain('https://s3.example.com/uploaded-image.png');
+-    expect(result.rawText).not.toContain('IMAGE_abc123_IMAGE');
++    expect(result.rawText).not.toContain('data:image/png;base64');
++    expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith(
++      'private',
++      expect.objectContaining({
++        base64Img: 'data:image/png;base64,iVBORw0KGgo=',
++        uploadKey: expect.stringMatching(/^test\/prefix\/.+\.png$/),
++        mimetype: 'image/png',
++        filename: expect.stringMatching(/\.png$/)
++      })
++    );
+   });
+ 
+-  it('should skip image upload when imageKeyOptions is not provided', async () => {
+-    mockReadRawContentFromBuffer.mockResolvedValueOnce({
+-      rawText: 'text with ![img](IMAGE_abc123_IMAGE)',
+-      formatText: 'text with ![img](IMAGE_abc123_IMAGE)',
+-      imageList: [
+-        {
+-          uuid: 'IMAGE_abc123_IMAGE',
+-          base64: 'iVBORw0KGgo=',
+-          mime: 'image/png'
+-        }
+-      ]
++  it('should remove custom service markdown base64 images when imageKeyOptions is not provided', async () => {
++    global.systemEnv = {
++      customPdfParse: { url: 'http://custom-pdf-service.com/parse' }
++    } as any;
++    mockAxiosPost.mockResolvedValueOnce({
++      data: {
++        pages: 1,
++        markdown: 'text with ![img](data:image/png;base64,iVBORw0KGgo=)'
++      }
+     });
+ 
+-    const buffer = Buffer.from('content with images');
+-
+     const result = await readFileContentByBuffer({
+       teamId,
+       tmbId,
+-      extension: 'md',
+-      buffer,
+-      encoding: 'utf-8'
++      extension: 'pdf',
++      buffer: Buffer.from('pdf content'),
++      encoding: 'utf-8',
++      customPdfParse: true
+     });
+ 
+-    // Without imageKeyOptions, images get empty string replacement
+-    expect(result.rawText).not.toContain('IMAGE_abc123_IMAGE');
++    expect(result.rawText).toBe('text with');
++    expect(result.rawText).not.toContain('data:image/png;base64');
+   });
+ });
+diff --git a/packages/service/test/core/workflow/dispatch/ai/agent/sub/file.test.ts b/packages/service/test/core/workflow/dispatch/ai/agent/sub/file.test.ts
+index 584fd87352f0..f5f8a08643fe 100644
+--- a/packages/service/test/core/workflow/dispatch/ai/agent/sub/file.test.ts
++++ b/packages/service/test/core/workflow/dispatch/ai/agent/sub/file.test.ts
+@@ -1,41 +1,48 @@
+ import { beforeEach, describe, expect, it, vi } from 'vitest';
+ import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
+ 
+-const { getRawTextBufferMock } = vi.hoisted(() => ({
+-  getRawTextBufferMock: vi.fn()
++const { getFileContentByUrlMock } = vi.hoisted(() => ({
++  getFileContentByUrlMock: vi.fn()
+ }));
+ 
+-vi.mock('@fastgpt/service/common/s3/sources/rawText/index', () => ({
+-  getS3RawTextSource: () => ({
+-    getRawTextBuffer: getRawTextBufferMock,
+-    addRawTextBuffer: vi.fn()
+-  })
+-}));
++vi.mock('@fastgpt/service/core/workflow/utils/file', async (importOriginal) => {
++  const mod = await importOriginal<typeof import('@fastgpt/service/core/workflow/utils/file')>();
++  return {
++    ...mod,
++    getFileContentByUrl: getFileContentByUrlMock
++  };
++});
+ 
+ import { dispatchFileRead } from '@fastgpt/service/core/workflow/dispatch/ai/agent/sub/file';
+ 
+ describe('dispatchFileRead', () => {
+   beforeEach(() => {
+     vi.clearAllMocks();
+-  });
+-
+-  it('returns raw file content and leaves compression to tool response compression', async () => {
+-    getRawTextBufferMock.mockResolvedValue({
+-      filename: 'doc.txt',
+-      text: 'large file content'
++    getFileContentByUrlMock.mockResolvedValue({
++      name: 'doc.txt',
++      content: 'large file content'
+     });
++  });
+ 
++  it('复用 readFiles 的文件读取逻辑，并保留 agent 返回格式', async () => {
+     const result = await dispatchFileRead({
+       files: [
+         {
+           id: 'file_0',
+-          url: 'file_raw_text_id'
++          url: 'https://example.com/doc.txt'
+         }
+       ],
+       teamId: 'team_1',
+-      tmbId: 'tmb_1'
++      tmbId: 'tmb_1',
++      customPdfParse: true
+     });
+ 
++    expect(getFileContentByUrlMock).toHaveBeenCalledWith({
++      url: 'https://example.com/doc.txt',
++      teamId: 'team_1',
++      tmbId: 'tmb_1',
++      customPdfParse: true
++    });
+     expect(result.response).toBe(
+       JSON.stringify([
+         {
+@@ -51,4 +58,29 @@ describe('dispatchFileRead', () => {
+       moduleName: 'chat:read_file'
+     });
+   });
++
++  it('读取失败时返回对应文件的错误内容', async () => {
++    getFileContentByUrlMock.mockRejectedValue(new Error('download failed'));
++
++    const result = await dispatchFileRead({
++      files: [
++        {
++          id: 'file_1',
++          url: 'https://example.com/error.docx'
++        }
++      ],
++      teamId: 'team_1',
++      tmbId: 'tmb_1'
++    });
++
++    expect(result.response).toBe(
++      JSON.stringify([
++        {
++          id: 'file_1',
++          name: '',
++          content: 'download failed'
++        }
++      ])
++    );
++  });
+ });
+diff --git a/packages/service/test/thirdProvider/doc2x.test.ts b/packages/service/test/thirdProvider/doc2x.test.ts
+new file mode 100644
+index 000000000000..d3f69f18e666
+--- /dev/null
++++ b/packages/service/test/thirdProvider/doc2x.test.ts
+@@ -0,0 +1,156 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++
++const { requestMock, axiosPutMock, getImageBufferMock } = vi.hoisted(() => ({
++  requestMock: vi.fn(),
++  axiosPutMock: vi.fn(),
++  getImageBufferMock: vi.fn()
++}));
++
++vi.mock('@fastgpt/service/common/api/axios', () => ({
++  axios: {
++    put: axiosPutMock
++  },
++  createProxyAxios: vi.fn(() => ({
++    request: requestMock
++  }))
++}));
++
++vi.mock('@fastgpt/service/common/file/image/utils', () => ({
++  getImageBuffer: getImageBufferMock
++}));
++
++const { useDoc2xServer } = await import('@fastgpt/service/thirdProvider/doc2x');
++
++const mockDoc2xSuccess = (md: string) => {
++  requestMock
++    .mockResolvedValueOnce({
++      data: {
++        code: 'ok',
++        data: {
++          uid: 'uid-1',
++          url: 'https://upload.example.com/file'
++        }
++      }
++    })
++    .mockResolvedValueOnce({
++      data: {
++        code: 'ok',
++        data: {
++          status: 'success',
++          result: {
++            pages: [
++              {
++                md
++              }
++            ]
++          }
++        }
++      }
++    });
++};
++
++describe('useDoc2xServer', () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++    vi.useFakeTimers();
++    axiosPutMock.mockResolvedValue({
++      status: 200,
++      statusText: 'OK'
++    });
++    mockDoc2xSuccess('hello ![](https://img.example.com/a.png)');
++    getImageBufferMock.mockResolvedValue({
++      buffer: Buffer.from('image-bytes'),
++      mime: 'image/png'
++    });
++  });
++
++  afterEach(() => {
++    vi.useRealTimers();
++  });
++
++  it('转存 Doc2x 图片 URL 到 S3 key，不再返回 imageList', async () => {
++    const uploadImage = vi.fn().mockResolvedValue({ key: 'dataset/ds1/file-parsed/image.png' });
++
++    const resultPromise = useDoc2xServer({ apiKey: 'api-key' }).parsePDF(Buffer.from('pdf'), {
++      uploadImage
++    });
++    await vi.runAllTimersAsync();
++    const result = await resultPromise;
++
++    expect(getImageBufferMock).toHaveBeenCalledWith('https://img.example.com/a.png');
++    expect(uploadImage).toHaveBeenCalledWith({
++      type: 'http',
++      url: 'https://img.example.com/a.png',
++      mime: 'image/png',
++      buffer: Buffer.from('image-bytes')
++    });
++    expect(result).toEqual({
++      pages: 1,
++      text: 'hello ![](dataset/ds1/file-parsed/image.png)'
++    });
++  });
++
++  it('按匹配顺序逐张转存 Doc2x 图片，不预先收集 imageList', async () => {
++    requestMock.mockReset();
++    mockDoc2xSuccess('a ![](https://img.example.com/a.png) b ![](https://img.example.com/b.png)');
++    const uploadImage = vi
++      .fn()
++      .mockResolvedValueOnce({ key: 'dataset/ds1/file-parsed/a.png' })
++      .mockResolvedValueOnce({ key: 'dataset/ds1/file-parsed/b.png' });
++
++    const resultPromise = useDoc2xServer({ apiKey: 'api-key' }).parsePDF(Buffer.from('pdf'), {
++      uploadImage
++    });
++    await vi.runAllTimersAsync();
++    const result = await resultPromise;
++
++    expect(getImageBufferMock).toHaveBeenNthCalledWith(1, 'https://img.example.com/a.png');
++    expect(getImageBufferMock).toHaveBeenNthCalledWith(2, 'https://img.example.com/b.png');
++    expect(uploadImage).toHaveBeenCalledTimes(2);
++    expect(result.text).toBe(
++      'a ![](dataset/ds1/file-parsed/a.png) b ![](dataset/ds1/file-parsed/b.png)'
++    );
++  });
++
++  it('兜底处理 Doc2x markdown base64 图片并替换成上传返回 key', async () => {
++    requestMock.mockReset();
++    mockDoc2xSuccess('hello ![img](data:image/png;base64,iVBORw0KGgo=)');
++    const uploadImage = vi.fn().mockResolvedValue({ key: 'dataset/ds1/file-parsed/base64.png' });
++
++    const resultPromise = useDoc2xServer({ apiKey: 'api-key' }).parsePDF(Buffer.from('pdf'), {
++      uploadImage
++    });
++    await vi.runAllTimersAsync();
++    const result = await resultPromise;
++
++    expect(getImageBufferMock).not.toHaveBeenCalled();
++    expect(uploadImage).toHaveBeenCalledWith({
++      type: 'base64',
++      mime: 'image/png',
++      base64: 'iVBORw0KGgo=',
++      dataUrl: 'data:image/png;base64,iVBORw0KGgo='
++    });
++    expect(result.text).toBe('hello ![img](dataset/ds1/file-parsed/base64.png)');
++  });
++
++  it('未传 uploadImage 时删除 Doc2x markdown base64 图片', async () => {
++    requestMock.mockReset();
++    mockDoc2xSuccess('hello ![img](data:image/png;base64,iVBORw0KGgo=)');
++
++    const resultPromise = useDoc2xServer({ apiKey: 'api-key' }).parsePDF(Buffer.from('pdf'));
++    await vi.runAllTimersAsync();
++    const result = await resultPromise;
++
++    expect(getImageBufferMock).not.toHaveBeenCalled();
++    expect(result.text).toBe('hello');
++  });
++
++  it('未传 uploadImage 时保留 Doc2x 图片 URL 且不下载图片', async () => {
++    const resultPromise = useDoc2xServer({ apiKey: 'api-key' }).parsePDF(Buffer.from('pdf'));
++    await vi.runAllTimersAsync();
++    const result = await resultPromise;
++
++    expect(getImageBufferMock).not.toHaveBeenCalled();
++    expect(result.text).toBe('hello ![](https://img.example.com/a.png)');
++  });
++});
+diff --git a/packages/service/test/thirdProvider/textin.test.ts b/packages/service/test/thirdProvider/textin.test.ts
+new file mode 100644
+index 000000000000..f35be1598cad
+--- /dev/null
++++ b/packages/service/test/thirdProvider/textin.test.ts
+@@ -0,0 +1,127 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++
++const { postMock, getImageBufferMock } = vi.hoisted(() => ({
++  postMock: vi.fn(),
++  getImageBufferMock: vi.fn()
++}));
++
++vi.mock('@fastgpt/service/common/api/axios', () => ({
++  createProxyAxios: vi.fn(() => ({
++    post: postMock
++  }))
++}));
++
++vi.mock('@fastgpt/service/common/file/image/utils', () => ({
++  getImageBuffer: getImageBufferMock
++}));
++
++const { useTextinServer } = await import('@fastgpt/service/thirdProvider/textin');
++
++const mockTextinSuccess = (markdown: string) => {
++  postMock.mockResolvedValueOnce({
++    data: {
++      code: 200,
++      result: {
++        markdown,
++        total_page_number: 1
++      }
++    }
++  });
++};
++
++describe('useTextinServer', () => {
++  beforeEach(() => {
++    vi.clearAllMocks();
++    getImageBufferMock.mockResolvedValue({
++      buffer: Buffer.from('image-bytes'),
++      mime: 'image/png'
++    });
++  });
++
++  it('解析 Textin markdown base64 图片并替换成上传返回 key', async () => {
++    const markdown = 'hello ![img](data:image/png;base64,iVBORw0KGgo=)';
++    mockTextinSuccess(markdown);
++    const uploadImage = vi.fn().mockResolvedValue({ key: 'dataset/ds1/file-parsed/image.png' });
++
++    const result = await useTextinServer({
++      appId: 'app-id',
++      secretCode: 'secret-code'
++    }).parsePDF(Buffer.from('pdf'), {
++      uploadImage
++    });
++
++    expect(postMock).toHaveBeenCalledWith(
++      '/pdf_to_markdown',
++      expect.any(Buffer),
++      expect.objectContaining({
++        params: expect.objectContaining({
++          get_image: 'objects',
++          image_output_type: 'default'
++        })
++      })
++    );
++    expect(uploadImage).toHaveBeenCalledWith({
++      type: 'base64',
++      mime: 'image/png',
++      base64: 'iVBORw0KGgo=',
++      dataUrl: 'data:image/png;base64,iVBORw0KGgo='
++    });
++    expect(result).toEqual({
++      pages: 1,
++      text: 'hello ![img](dataset/ds1/file-parsed/image.png)'
++    });
++  });
++
++  it('解析 Textin markdown http 图片并替换成上传返回 key', async () => {
++    mockTextinSuccess('hello ![img](https://textin.example.com/image.png)');
++    const uploadImage = vi.fn().mockResolvedValue({ key: 'dataset/ds1/file-parsed/http.png' });
++
++    const result = await useTextinServer({
++      appId: 'app-id',
++      secretCode: 'secret-code'
++    }).parsePDF(Buffer.from('pdf'), {
++      uploadImage
++    });
++
++    expect(getImageBufferMock).toHaveBeenCalledWith('https://textin.example.com/image.png');
++    expect(uploadImage).toHaveBeenCalledWith({
++      type: 'http',
++      url: 'https://textin.example.com/image.png',
++      mime: 'image/png',
++      buffer: Buffer.from('image-bytes')
++    });
++    expect(result).toEqual({
++      pages: 1,
++      text: 'hello ![img](dataset/ds1/file-parsed/http.png)'
++    });
++  });
++
++  it('未传 uploadImage 时删除 Textin markdown base64 图片', async () => {
++    mockTextinSuccess('hello ![img](data:image/png;base64,iVBORw0KGgo=)');
++
++    const result = await useTextinServer({
++      appId: 'app-id',
++      secretCode: 'secret-code'
++    }).parsePDF(Buffer.from('pdf'));
++
++    expect(result).toEqual({
++      pages: 1,
++      text: 'hello'
++    });
++  });
++
++  it('未传 uploadImage 时保留 Textin markdown http 图片且不下载', async () => {
++    mockTextinSuccess('hello ![img](https://textin.example.com/image.png)');
++
++    const result = await useTextinServer({
++      appId: 'app-id',
++      secretCode: 'secret-code'
++    }).parsePDF(Buffer.from('pdf'));
++
++    expect(getImageBufferMock).not.toHaveBeenCalled();
++    expect(result).toEqual({
++      pages: 1,
++      text: 'hello ![img](https://textin.example.com/image.png)'
++    });
++  });
++});
+diff --git a/packages/service/test/worker/function.test.ts b/packages/service/test/worker/function.test.ts
+index c3c1453964dc..535531d0eb23 100644
+--- a/packages/service/test/worker/function.test.ts
++++ b/packages/service/test/worker/function.test.ts
+@@ -2,25 +2,27 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+ import { WorkerNameEnum } from '@fastgpt/service/worker/utils';
+ 
+ // hoisted: 这些 mock 必须在 vi.mock 工厂里可见
+-const { mockRun, mockGetWorkerController, mockRunWorker, mockEnv } = vi.hoisted(() => {
+-  const mockRun = vi.fn();
+-  return {
+-    mockRun,
+-    mockGetWorkerController: vi.fn(() => ({ run: mockRun })),
+-    mockRunWorker: vi.fn(),
+-    mockEnv: {
+-      PARSE_FILE_WORKERS: 10,
+-      HTML_TO_MARKDOWN_WORKERS: 10,
+-      TEXT_TO_CHUNKS_WORKERS: 10,
+-      PARSE_FILE_TIMEOUT_SECONDS: 300
+-    } as {
+-      PARSE_FILE_WORKERS: number;
+-      HTML_TO_MARKDOWN_WORKERS: number;
+-      TEXT_TO_CHUNKS_WORKERS: number;
+-      PARSE_FILE_TIMEOUT_SECONDS: number;
+-    }
+-  };
+-});
++const { mockRun, mockGetWorkerController, mockRunWorker, mockUploadImage2S3Bucket, mockEnv } =
++  vi.hoisted(() => {
++    const mockRun = vi.fn();
++    return {
++      mockRun,
++      mockGetWorkerController: vi.fn(() => ({ run: mockRun })),
++      mockRunWorker: vi.fn(),
++      mockUploadImage2S3Bucket: vi.fn(),
++      mockEnv: {
++        PARSE_FILE_WORKERS: 10,
++        HTML_TO_MARKDOWN_WORKERS: 10,
++        TEXT_TO_CHUNKS_WORKERS: 10,
++        PARSE_FILE_TIMEOUT_SECONDS: 300
++      } as {
++        PARSE_FILE_WORKERS: number;
++        HTML_TO_MARKDOWN_WORKERS: number;
++        TEXT_TO_CHUNKS_WORKERS: number;
++        PARSE_FILE_TIMEOUT_SECONDS: number;
++      }
++    };
++  });
+ 
+ // 拦截 getWorkerController / runWorker，保留 WorkerNameEnum 等枚举
+ vi.mock('@fastgpt/service/worker/utils', async (importOriginal) => {
+@@ -37,6 +39,14 @@ vi.mock('@fastgpt/service/env', () => ({
+   serviceEnv: mockEnv
+ }));
+ 
++vi.mock('@fastgpt/service/common/s3/utils', async (importOriginal) => {
++  const mod = await importOriginal<typeof import('@fastgpt/service/common/s3/utils')>();
++  return {
++    ...mod,
++    uploadImage2S3Bucket: mockUploadImage2S3Bucket
++  };
++});
++
+ // 必须在 vi.mock 之后再 import 被测模块
+ const { text2Chunks, readRawContentFromBuffer } = await import('@fastgpt/service/worker/function');
+ const { htmlToMarkdown } = await import('@fastgpt/service/common/string/utils');
+@@ -47,6 +57,7 @@ describe('worker/function', () => {
+     mockGetWorkerController.mockReset();
+     mockGetWorkerController.mockImplementation(() => ({ run: mockRun }));
+     mockRunWorker.mockReset();
++    mockUploadImage2S3Bucket.mockReset();
+   });
+ 
+   describe('text2Chunks', () => {
+@@ -206,6 +217,59 @@ describe('worker/function', () => {
+       ).rejects.toThrow('parse failed');
+     });
+ 
++    it('传入 imageKeyOptions 时为 readFile worker 注册通用 uploadFile handler', async () => {
++      const expected = { rawText: 'parsed docx' };
++      const expiredTime = new Date('2030-01-01T00:00:00.000Z');
++      mockRun.mockResolvedValueOnce(expected);
++      mockUploadImage2S3Bucket.mockResolvedValueOnce('dataset/ds1/file-parsed/image.png');
++
++      const result = await readRawContentFromBuffer({
++        extension: 'docx',
++        encoding: 'utf-8',
++        buffer: Buffer.from('docx'),
++        imageKeyOptions: {
++          prefix: 'dataset/ds1/file-parsed',
++          expiredTime
++        }
++      });
++
++      expect(result).toEqual(expected);
++
++      const runArg = mockRun.mock.calls[0][0];
++      expect(runArg.imageKeyOptions).toEqual({
++        prefix: 'dataset/ds1/file-parsed',
++        expiredTime
++      });
++
++      const handlers = mockRun.mock.calls[0][2];
++      expect(handlers?.uploadFile).toBeInstanceOf(Function);
++
++      const uploadResult = await handlers.uploadFile({
++        name: '../image.png',
++        mime: 'image/png',
++        buffer: new Uint8Array([1, 2, 3]).buffer
++      });
++
++      expect(uploadResult).toEqual({
++        key: 'dataset/ds1/file-parsed/image.png'
++      });
++      expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith('private', {
++        buffer: Buffer.from([1, 2, 3]),
++        uploadKey: 'dataset/ds1/file-parsed/image.png',
++        mimetype: 'image/png',
++        filename: 'image.png',
++        expiredTime
++      });
++
++      await expect(
++        handlers.uploadFile({
++          name: 'file.txt',
++          mime: 'text/plain',
++          buffer: new Uint8Array([1, 2, 3]).buffer
++        })
++      ).rejects.toThrow('Unsupported worker uploadFile mime type: text/plain');
++    });
++
+     it('并发文件解析直接交给 readFile worker pool，并发数由 PARSE_FILE_WORKERS 决定', async () => {
+       let activeCount = 0;
+       let maxActiveCount = 0;
+@@ -308,7 +372,7 @@ describe('worker/function', () => {
+     });
+ 
+     it('通过 htmlStr2Md worker pool 派发并返回 rawText', async () => {
+-      mockRun.mockResolvedValueOnce({ rawText: '# Title', imageList: [] });
++      mockRun.mockResolvedValueOnce({ rawText: '# Title' });
+ 
+       const result = await htmlToMarkdown('<h1>Title</h1>');
+ 
+@@ -326,7 +390,7 @@ describe('worker/function', () => {
+     });
+ 
+     it('空 html 统一传空字符串', async () => {
+-      mockRun.mockResolvedValueOnce({ rawText: '', imageList: [] });
++      mockRun.mockResolvedValueOnce({ rawText: '' });
+ 
+       const result = await htmlToMarkdown(null);
+ 
+@@ -336,7 +400,7 @@ describe('worker/function', () => {
+ 
+     it('HTML_TO_MARKDOWN_WORKERS 自定义值生效', async () => {
+       mockEnv.HTML_TO_MARKDOWN_WORKERS = 6;
+-      mockRun.mockResolvedValueOnce({ rawText: 'ok', imageList: [] });
++      mockRun.mockResolvedValueOnce({ rawText: 'ok' });
+ 
+       await htmlToMarkdown('<p>ok</p>');
+ 
+diff --git a/packages/service/test/worker/htmlStr2Md.test.ts b/packages/service/test/worker/htmlStr2Md.test.ts
+index 44908752b5c9..756681b896e3 100644
+--- a/packages/service/test/worker/htmlStr2Md.test.ts
++++ b/packages/service/test/worker/htmlStr2Md.test.ts
+@@ -1,4 +1,4 @@
+-import { describe, it, expect } from 'vitest';
++import { describe, it, expect, vi } from 'vitest';
+ import { html2md } from '@fastgpt/service/worker/htmlStr2Md/utils';
+ 
+ describe('html2md 性能和功能测试', () => {
+@@ -10,117 +10,140 @@ describe('html2md 性能和功能测试', () => {
+   };
+ 
+   describe('功能正确性', () => {
+-    it('应该正确处理简单的 HTML', () => {
++    it('应该正确处理简单的 HTML', async () => {
+       const html = '<p>Hello <strong>World</strong></p>';
+-      const result = html2md(html);
++      const result = await html2md(html);
+ 
+       expect(result.rawText).toContain('Hello');
+       expect(result.rawText).toContain('**World**');
+-      expect(result.imageList).toHaveLength(0);
++      expect(result).not.toHaveProperty('imageList');
+     });
+ 
+-    it('应该正确提取 base64 图片', () => {
++    it('未传 uploadFile 时应该删除 base64 图片内容', async () => {
+       const base64Data =
+         'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+       const html = `<img src="data:image/png;base64,${base64Data}" alt="test">`;
+-      const result = html2md(html);
++      const result = await html2md(html);
+ 
+-      expect(result.imageList).toHaveLength(1);
+-      expect(result.imageList[0].base64).toBe(base64Data);
+-      expect(result.imageList[0].mime).toBe('image/png');
+-      expect(result.imageList[0].uuid).toMatch(/^IMAGE_[a-zA-Z0-9]+_IMAGE$/);
++      expect(result.rawText).not.toContain('data:image/png;base64');
++      expect(result).not.toHaveProperty('imageList');
+     });
+ 
+-    it('应该处理多个 base64 图片', () => {
++    it('传入 uploadFile 时应该实时上传 base64 图片并替换成 key', async () => {
++      const base64Data =
++        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
++      const uploadFile = vi.fn(async () => ({
++        key: 'dataset/file-parsed/html-image.png'
++      }));
++      const html = `
++        <img SRC = 'data:image/png;base64,${base64Data}' alt="single">
++        <img src="data:image/jpeg;base64,${base64Data}" alt="double">
++      `;
++
++      const result = await html2md(html, { uploadFile });
++
++      expect(uploadFile).toHaveBeenCalledTimes(2);
++      expect(uploadFile).toHaveBeenNthCalledWith(1, {
++        name: expect.stringMatching(/\.png$/),
++        mime: 'image/png',
++        buffer: expect.any(ArrayBuffer)
++      });
++      expect(uploadFile).toHaveBeenNthCalledWith(2, {
++        name: expect.stringMatching(/\.jpg$|\.jpeg$/),
++        mime: 'image/jpeg',
++        buffer: expect.any(ArrayBuffer)
++      });
++      expect(result.rawText).toContain('dataset/file-parsed/html-image.png');
++      expect(result.rawText).not.toContain('data:image/');
++      expect(result).not.toHaveProperty('imageList');
++    });
++
++    it('应该处理多个 base64 图片且不返回 imageList', async () => {
+       const base64Data = 'iVBORw0KGgo=';
+       const html = `
+         <img src="data:image/png;base64,${base64Data}">
+         <img src="data:image/jpeg;base64,${base64Data}">
+         <img src="data:image/gif;base64,${base64Data}">
+       `;
+-      const result = html2md(html);
+-
+-      expect(result.imageList).toHaveLength(3);
+-      expect(result.imageList.map((img) => img.mime)).toEqual([
+-        'image/png',
+-        'image/jpeg',
+-        'image/gif'
+-      ]);
++      const result = await html2md(html);
++
++      expect(result.rawText).not.toContain('data:image/');
++      expect(result).not.toHaveProperty('imageList');
+     });
+ 
+-    it('应该正确处理表格', () => {
++    it('应该正确处理表格', async () => {
+       const html = `
+         <table>
+           <tr><td>Cell 1</td><td>Cell 2</td></tr>
+           <tr><td>Cell 3</td><td>Cell 4</td></tr>
+         </table>
+       `;
+-      const result = html2md(html);
++      const result = await html2md(html);
+ 
+       expect(result.rawText).toContain('Cell 1');
+       expect(result.rawText).toContain('Cell 2');
+       expect(result.rawText).toContain('|'); // Markdown 表格语法
+     });
+ 
+-    it('应该移除 script 和 style 标签', () => {
++    it('应该移除 script 和 style 标签', async () => {
+       const html = `
+         <p>Visible content</p>
+         <script>alert('should be removed')</script>
+         <style>body { color: red; }</style>
+       `;
+-      const result = html2md(html);
++      const result = await html2md(html);
+ 
+       expect(result.rawText).toContain('Visible content');
+       expect(result.rawText).not.toContain('alert');
+       expect(result.rawText).not.toContain('color: red');
+     });
+ 
+-    it('应该处理视频标签', () => {
++    it('应该处理视频标签', async () => {
+       const html = `<video src="https://example.com/video.mp4"></video>`;
+-      const result = html2md(html);
++      const result = await html2md(html);
+ 
+       expect(result.rawText).toContain('https://example.com/video.mp4');
+     });
+   });
+ 
+   describe('性能测试', () => {
+-    it('小型 HTML 文档性能(~10KB)', () => {
++    it('小型 HTML 文档性能(~10KB)', async () => {
+       const html = '<p>' + 'Hello World '.repeat(1000) + '</p>';
+ 
+       const start = Date.now();
+-      const result = html2md(html);
++      const result = await html2md(html);
+       const duration = Date.now() - start;
+ 
+       expect(result.rawText).toContain('Hello World');
+       expect(duration).toBeLessThan(PERFORMANCE_THRESHOLDS.smallHtml);
+     });
+ 
+-    it('中等大小 HTML 文档性能(~50KB)', () => {
++    it('中等大小 HTML 文档性能(~50KB)', async () => {
+       const html = '<div>' + '<p>Content </p>'.repeat(5000) + '</div>';
+ 
+       const start = Date.now();
+-      const result = html2md(html);
++      const result = await html2md(html);
+       const duration = Date.now() - start;
+ 
+       expect(result.rawText).toContain('Content');
+       expect(duration).toBeLessThan(PERFORMANCE_THRESHOLDS.mediumHtml);
+     });
+ 
+-    it('大型 base64 图片性能(~1MB)', () => {
++    it('大型 base64 图片性能(~1MB)', async () => {
+       // 生成约 1MB 的 base64 数据
+       const base64Data = 'A'.repeat(1000000);
+       const html = `<img src="data:image/png;base64,${base64Data}">`;
+ 
+       const start = Date.now();
+-      const result = html2md(html);
++      const result = await html2md(html);
+       const duration = Date.now() - start;
+ 
+-      expect(result.imageList).toHaveLength(1);
+-      expect(result.imageList[0].base64).toBe(base64Data);
++      expect(result.rawText).not.toContain(base64Data);
++      expect(result).not.toHaveProperty('imageList');
+       expect(duration).toBeLessThan(PERFORMANCE_THRESHOLDS.largeBase64);
+     });
+ 
+-    it('多个大型 base64 图片性能', () => {
++    it('多个大型 base64 图片性能', async () => {
+       // 3 个约 500KB 的 base64 图片
+       const base64Data = 'B'.repeat(500 * 1024);
+       const html = `
+@@ -130,14 +153,15 @@ describe('html2md 性能和功能测试', () => {
+       `;
+ 
+       const start = Date.now();
+-      const result = html2md(html);
++      const result = await html2md(html);
+       const duration = Date.now() - start;
+ 
+-      expect(result.imageList).toHaveLength(3);
++      expect(result.rawText).not.toContain(base64Data);
++      expect(result).not.toHaveProperty('imageList');
+       expect(duration).toBeLessThan(PERFORMANCE_THRESHOLDS.largeBase64 * 2);
+     });
+ 
+-    it('深度嵌套 HTML 性能', () => {
++    it('深度嵌套 HTML 性能', async () => {
+       // 创建深度嵌套的 HTML 结构
+       let html = '';
+       const depth = 50;
+@@ -151,7 +175,7 @@ describe('html2md 性能和功能测试', () => {
+       }
+ 
+       const start = Date.now();
+-      const result = html2md(html);
++      const result = await html2md(html);
+       const duration = Date.now() - start;
+ 
+       expect(result.rawText).toContain('Deep content');
+@@ -160,41 +184,41 @@ describe('html2md 性能和功能测试', () => {
+   });
+ 
+   describe('防御性功能', () => {
+-    it('应该拒绝超大 HTML 文档(>1MB)', () => {
++    it('应该拒绝超大 HTML 文档(>1MB)', async () => {
+       const hugeHtml = 'x'.repeat(1000000 + 1);
+-      const result = html2md(hugeHtml);
++      const result = await html2md(hugeHtml);
+ 
+       expect(result.rawText).toBe(hugeHtml);
+-      expect(result.imageList).toHaveLength(0);
++      expect(result).not.toHaveProperty('imageList');
+     });
+ 
+-    it('应该正常处理大型 HTML 文档(<1MB)', () => {
++    it('应该正常处理大型 HTML 文档(<1MB)', async () => {
+       const largeHtml = 'x'.repeat(1000000 - 1);
+-      const result = html2md(largeHtml);
++      const result = await html2md(largeHtml);
+ 
+       // 即使很大，但在限制内，应该正常处理
+       expect(result.rawText).toBeTruthy();
+       expect(result.rawText.length).toBeGreaterThan(0);
+     });
+ 
+-    it('应该处理空 HTML', () => {
+-      const result = html2md('');
++    it('应该处理空 HTML', async () => {
++      const result = await html2md('');
+ 
+       expect(result.rawText).toBe('');
+-      expect(result.imageList).toHaveLength(0);
++      expect(result).not.toHaveProperty('imageList');
+     });
+ 
+-    it('应该处理无效的 HTML', () => {
++    it('应该处理无效的 HTML', async () => {
+       const invalidHtml = '<div><p>Unclosed tags';
+-      const result = html2md(invalidHtml);
++      const result = await html2md(invalidHtml);
+ 
+       // 应该不会崩溃,并尽可能提取内容
+       expect(result.rawText).toBeTruthy();
+     });
+ 
+-    it('应该处理包含特殊字符的 HTML', () => {
++    it('应该处理包含特殊字符的 HTML', async () => {
+       const html = '<p>&lt;script&gt;alert("xss")&lt;/script&gt;</p>';
+-      const result = html2md(html);
++      const result = await html2md(html);
+ 
+       expect(result.rawText).toContain('<script>');
+       expect(result.rawText).toContain('</script>');
+@@ -202,108 +226,119 @@ describe('html2md 性能和功能测试', () => {
+   });
+ 
+   describe('边界情况', () => {
+-    it('应该处理只包含空白的 HTML', () => {
++    it('应该处理只包含空白的 HTML', async () => {
+       const html = '   \n\n\t  ';
+-      const result = html2md(html);
++      const result = await html2md(html);
+ 
+       expect(result.rawText).toBe('');
+-      expect(result.imageList).toHaveLength(0);
++      expect(result).not.toHaveProperty('imageList');
+     });
+ 
+-    it('应该处理包含 Unicode 字符的 HTML', () => {
++    it('应该处理包含 Unicode 字符的 HTML', async () => {
+       const html = '<p>你好世界 🌍 مرحبا</p>';
+-      const result = html2md(html);
++      const result = await html2md(html);
+ 
+       expect(result.rawText).toContain('你好世界');
+       expect(result.rawText).toContain('🌍');
+       expect(result.rawText).toContain('مرحبا');
+     });
+ 
+-    it('应该正确处理混合的 base64 和普通图片', () => {
++    it('应该正确处理混合的 base64 和普通图片', async () => {
+       const base64Data = 'iVBORw0KGgo=';
+       const html = `
+         <img src="data:image/png;base64,${base64Data}">
+         <img src="https://example.com/image.jpg">
+       `;
+-      const result = html2md(html);
++      const result = await html2md(html);
+ 
+-      expect(result.imageList).toHaveLength(1); // 只有 base64 图片被提取
++      expect(result.rawText).not.toContain('data:image/png;base64');
+       expect(result.rawText).toContain('https://example.com/image.jpg'); // 普通 URL 保留在文本中
+     });
+ 
+-    it('应该去重重复的图片', () => {
++    it('应该去重重复的图片', async () => {
+       const base64Data = 'iVBORw0KGgo=';
+       const html = `
+         <img src="data:image/png;base64,${base64Data}">
+         <p>Some text</p>
+         <img src="data:image/png;base64,${base64Data}">
+       `;
+-      const result = html2md(html);
++      const result = await html2md(html);
+ 
+-      // 注意: 当前实现会为每个 base64 生成新的 UUID
+-      // 如果需要去重,需要额外的逻辑
+-      expect(result.imageList.length).toBeGreaterThanOrEqual(1);
++      expect(result.rawText).not.toContain('data:image/png;base64');
++      expect(result).not.toHaveProperty('imageList');
+     });
+   });
+ 
+   describe('正则表达式优化验证', () => {
+-    it('优化后的正则应该正确匹配合法的 base64', () => {
++    it('优化后的正则应该正确匹配合法的 base64', async () => {
+       const validBase64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+       const html = `<img src="data:image/png;base64,${validBase64}">`;
+-      const result = html2md(html);
+-
+-      expect(result.imageList).toHaveLength(1);
+-      expect(result.imageList[0].base64).toBe(validBase64);
++      const uploadFile = vi.fn(async () => ({
++        key: 'dataset/file-parsed/valid.png'
++      }));
++      const result = await html2md(html, { uploadFile });
++
++      expect(uploadFile).toHaveBeenCalledWith({
++        name: expect.stringMatching(/\.png$/),
++        mime: 'image/png',
++        buffer: expect.any(ArrayBuffer)
++      });
++      expect(result.rawText).toContain('dataset/file-parsed/valid.png');
+     });
+ 
+-    it('优化后的正则应该处理非法的 base64 字符', () => {
++    it('优化后的正则应该处理非法的 base64 字符', async () => {
+       // 包含非法字符 @ 和 #
+       const invalidBase64 = 'ABC@123#XYZ';
+       const html = `<img src="data:image/png;base64,${invalidBase64}">`;
+-      const result = html2md(html);
++      const result = await html2md(html);
+ 
+-      // 注意: matchMdImg 会在 Markdown 中提取这个图片
+-      // 因为它使用更宽松的正则 [^)]+
+       // 这个测试验证系统不会因为非法字符而崩溃
+-      expect(result.imageList.length).toBeGreaterThanOrEqual(0);
+       expect(result.rawText).toBeTruthy();
++      expect(result).not.toHaveProperty('imageList');
+     });
+ 
+-    it('应该处理 base64 末尾的填充字符', () => {
++    it('应该处理 base64 末尾的填充字符', async () => {
+       const base64WithPadding = 'iVBORw0KGgo==';
+       const html = `<img src="data:image/png;base64,${base64WithPadding}">`;
+-      const result = html2md(html);
+-
+-      expect(result.imageList).toHaveLength(1);
+-      expect(result.imageList[0].base64).toBe(base64WithPadding);
++      const uploadFile = vi.fn(async () => ({
++        key: 'dataset/file-parsed/padding.png'
++      }));
++      const result = await html2md(html, { uploadFile });
++
++      expect(uploadFile).toHaveBeenCalledWith({
++        name: expect.stringMatching(/\.png$/),
++        mime: 'image/png',
++        buffer: expect.any(ArrayBuffer)
++      });
++      expect(result.rawText).toContain('dataset/file-parsed/padding.png');
+     });
+   });
+ 
+   describe('实例复用验证', () => {
+-    it('多次调用应该使用相同的 TurndownService 实例', () => {
++    it('多次调用应该使用相同的 TurndownService 实例', async () => {
+       const html1 = '<p>Test 1</p>';
+       const html2 = '<p>Test 2</p>';
+ 
+-      const result1 = html2md(html1);
+-      const result2 = html2md(html2);
++      const result1 = await html2md(html1);
++      const result2 = await html2md(html2);
+ 
+       expect(result1.rawText).toContain('Test 1');
+       expect(result2.rawText).toContain('Test 2');
+       // 两次调用都应该成功,且性能稳定
+     });
+ 
+-    it('批量转换性能应该稳定', () => {
++    it('批量转换性能应该稳定', async () => {
+       const htmlTemplates = Array(10)
+         .fill(null)
+         .map((_, i) => `<p>Content ${i}</p>`);
+ 
+       const durations: number[] = [];
+ 
+-      htmlTemplates.forEach((html) => {
++      for (const html of htmlTemplates) {
+         const start = performance.now();
+-        html2md(html);
++        await html2md(html);
+         durations.push(performance.now() - start);
+-      });
++      }
+ 
+       // 计算平均耗时
+       const avgDuration = durations.reduce((a, b) => a + b, 0) / durations.length;
+diff --git a/packages/service/test/worker/readFile/extension/docx.test.ts b/packages/service/test/worker/readFile/extension/docx.test.ts
+new file mode 100644
+index 000000000000..f9ac56ef3367
+--- /dev/null
++++ b/packages/service/test/worker/readFile/extension/docx.test.ts
+@@ -0,0 +1,75 @@
++import { describe, it, expect, vi, beforeEach } from 'vitest';
++
++const { mockConvertToHtml } = vi.hoisted(() => ({
++  mockConvertToHtml: vi.fn()
++}));
++
++vi.mock('mammoth', () => ({
++  default: {
++    convertToHtml: mockConvertToHtml
++  },
++  images: {
++    imgElement: (handler: any) => handler
++  }
++}));
++
++const { readDocsFile } = await import('@fastgpt/service/worker/readFile/extension/docx');
++
++const createImage = () => ({
++  contentType: 'image/png',
++  read: vi.fn(async () => Buffer.from([1, 2, 3]))
++});
++
++describe('readDocsFile', () => {
++  beforeEach(() => {
++    mockConvertToHtml.mockReset();
++  });
++
++  it('docx 图片通过 uploadFile 回调上传，并把返回 key 写入 markdown', async () => {
++    const image = createImage();
++    mockConvertToHtml.mockImplementation(async (_input, options) => {
++      const { src } = await options.convertImage(image);
++      return {
++        value: `<p>hello</p><img src="${src}" />`
++      };
++    });
++    const uploadFile = vi.fn(async () => ({
++      key: 'dataset/file-parsed/image.png'
++    }));
++
++    const result = await readDocsFile(
++      {
++        buffer: Buffer.from('docx'),
++        encoding: 'utf-8',
++        extension: 'docx'
++      },
++      { uploadFile }
++    );
++
++    expect(uploadFile).toHaveBeenCalledWith({
++      name: expect.stringMatching(/\.png$/),
++      mime: 'image/png',
++      buffer: new Uint8Array([1, 2, 3]).buffer
++    });
++    expect(result.rawText).toContain('dataset/file-parsed/image.png');
++    expect(result).not.toHaveProperty('imageList');
++  });
++
++  it('docx 包含图片但没有 uploadFile 时在 worker 内报错', async () => {
++    const image = createImage();
++    mockConvertToHtml.mockImplementation(async (_input, options) => {
++      await options.convertImage(image);
++      return {
++        value: '<p>never</p>'
++      };
++    });
++
++    await expect(
++      readDocsFile({
++        buffer: Buffer.from('docx'),
++        encoding: 'utf-8',
++        extension: 'docx'
++      })
++    ).rejects.toBe('Can not read doc file, please convert to PDF');
++  });
++});
+diff --git a/packages/service/test/worker/readFile/extension/html.test.ts b/packages/service/test/worker/readFile/extension/html.test.ts
+new file mode 100644
+index 000000000000..38457ef6782c
+--- /dev/null
++++ b/packages/service/test/worker/readFile/extension/html.test.ts
+@@ -0,0 +1,30 @@
++import { describe, expect, it, vi } from 'vitest';
++import { readHtmlRawText } from '@fastgpt/service/worker/readFile/extension/html';
++
++describe('readHtmlRawText', () => {
++  it('uploads base64 html images in worker and replaces image src with key', async () => {
++    const base64Data =
++      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
++    const uploadFile = vi.fn(async () => ({
++      key: 'dataset/file-parsed/html-image.png'
++    }));
++
++    const result = await readHtmlRawText(
++      {
++        extension: 'html',
++        buffer: Buffer.from(`<p>hello</p><img src="data:image/png;base64,${base64Data}">`),
++        encoding: 'utf-8'
++      },
++      { uploadFile }
++    );
++
++    expect(uploadFile).toHaveBeenCalledWith({
++      name: expect.stringMatching(/\.png$/),
++      mime: 'image/png',
++      buffer: expect.any(ArrayBuffer)
++    });
++    expect(result.rawText).toContain('dataset/file-parsed/html-image.png');
++    expect(result.rawText).not.toContain('data:image/png;base64');
++    expect(result).not.toHaveProperty('imageList');
++  });
++});
+diff --git a/packages/service/test/worker/readFile/extension/rawText.test.ts b/packages/service/test/worker/readFile/extension/rawText.test.ts
+index daf64a1f4f25..57ccec9714c7 100644
+--- a/packages/service/test/worker/readFile/extension/rawText.test.ts
++++ b/packages/service/test/worker/readFile/extension/rawText.test.ts
+@@ -1,4 +1,4 @@
+-import { describe, expect, it } from 'vitest';
++import { describe, expect, it, vi } from 'vitest';
+ import { readFileRawText } from '@fastgpt/service/worker/readFile/extension/rawText';
+ import { detectFileEncoding } from '@fastgpt/global/common/file/tools';
+ 
+@@ -104,12 +104,78 @@ describe('readFileRawText performance', () => {
+     });
+     const duration = performance.now() - start;
+ 
+-    expect(result.rawText.length).toBe(text.length);
+-    expect(result.imageList ?? []).toHaveLength(0);
++    expect(result.rawText.length).toBe(text.trim().length);
++    expect(result).not.toHaveProperty('imageList');
+     expect(duration).toBeLessThan(PERFORMANCE_THRESHOLDS.largeUtf8Text);
+   });
+ 
+-  it('should extract 200 base64 images without pathological regex cost', async () => {
++  it('should upload base64 images in worker and replace markdown image src with key', async () => {
++    const base64Data =
++      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
++    const content = `段落\n\n![alt](data:image/png;base64,${base64Data})\n`;
++    const buffer = Buffer.from(content, 'utf8');
++    const uploadFile = vi.fn(async () => ({
++      key: 'dataset/file-parsed/image.png'
++    }));
++
++    const result = await readFileRawText(
++      {
++        extension: 'md',
++        buffer,
++        encoding: 'utf-8'
++      },
++      { uploadFile }
++    );
++
++    expect(uploadFile).toHaveBeenCalledWith({
++      name: expect.stringMatching(/\.png$/),
++      mime: 'image/png',
++      buffer: expect.any(ArrayBuffer)
++    });
++    expect(result.rawText).toContain('![alt](dataset/file-parsed/image.png)');
++    expect(result).not.toHaveProperty('imageList');
++  });
++
++  it('should remove base64 images when uploadFile handler is missing', async () => {
++    const base64Data =
++      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
++    const content = `段落\n\n![alt](data:image/png;base64,${base64Data})\n`;
++    const buffer = Buffer.from(content, 'utf8');
++
++    const result = await readFileRawText({
++      extension: 'md',
++      buffer,
++      encoding: 'utf-8'
++    });
++
++    expect(result.rawText).toContain('段落');
++    expect(result.rawText).not.toContain('data:image/png;base64');
++    expect(result.rawText).not.toContain('![alt]');
++    expect(result).not.toHaveProperty('imageList');
++  });
++
++  it('should reject oversized base64 image before upload', async () => {
++    const oversizedBase64 = 'A'.repeat(Math.ceil((40 * 1024 * 1024 + 1) / 3) * 4);
++    const content = `段落\n\n![alt](data:image/png;base64,${oversizedBase64})\n`;
++    const uploadFile = vi.fn(async () => ({
++      key: 'dataset/file-parsed/image.png'
++    }));
++
++    const result = await readFileRawText(
++      {
++        extension: 'md',
++        buffer: Buffer.from(content, 'utf8'),
++        encoding: 'utf-8'
++      },
++      { uploadFile }
++    );
++
++    expect(uploadFile).not.toHaveBeenCalled();
++    expect(result.rawText).toContain('段落');
++    expect(result.rawText).not.toContain('data:image/png;base64');
++  });
++
++  it('should process 200 base64 images without carrying imageList', async () => {
+     const base64Data =
+       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+     const imageCount = 200;
+@@ -118,19 +184,24 @@ describe('readFileRawText performance', () => {
+       (_, i) => `段落 ${i}\n\n![alt-${i}](data:image/png;base64,${base64Data})\n`
+     ).join('\n');
+     const buffer = Buffer.from(content, 'utf8');
++    const uploadFile = vi.fn(async ({ name }: { name: string }) => ({
++      key: `dataset/file-parsed/${name}`
++    }));
+ 
+     const start = performance.now();
+-    const result = await readFileRawText({
+-      extension: 'md',
+-      buffer,
+-      encoding: 'utf-8'
+-    });
++    const result = await readFileRawText(
++      {
++        extension: 'md',
++        buffer,
++        encoding: 'utf-8'
++      },
++      { uploadFile }
++    );
+     const duration = performance.now() - start;
+ 
+-    const imageList = result.imageList ?? [];
+-    expect(imageList).toHaveLength(imageCount);
+-    expect(imageList[0].base64).toBe(base64Data);
+-    expect(imageList[0].mime).toBe('image/png');
++    expect(uploadFile).toHaveBeenCalledTimes(imageCount);
++    expect(result).not.toHaveProperty('imageList');
++    expect(result.rawText).not.toContain('data:image/png;base64');
+     expect(duration).toBeLessThan(PERFORMANCE_THRESHOLDS.manyBase64Images);
+   });
+ });
+diff --git a/packages/service/test/worker/readFile/integration.test.ts b/packages/service/test/worker/readFile/integration.test.ts
+index a9f4cb669c5e..f4b5cc197682 100644
+--- a/packages/service/test/worker/readFile/integration.test.ts
++++ b/packages/service/test/worker/readFile/integration.test.ts
+@@ -1,6 +1,19 @@
+ import { describe, it, expect, beforeAll, afterEach, afterAll, vi } from 'vitest';
+ import path from 'path';
+ import { existsSync, readFileSync } from 'fs';
++import { JSZip } from '@fastgpt/service/core/ai/skill/package';
++
++const { mockUploadImage2S3Bucket } = vi.hoisted(() => ({
++  mockUploadImage2S3Bucket: vi.fn()
++}));
++
++vi.mock('@fastgpt/service/common/s3/utils', async (importOriginal) => {
++  const mod = await importOriginal<typeof import('@fastgpt/service/common/s3/utils')>();
++  return {
++    ...mod,
++    uploadImage2S3Bucket: mockUploadImage2S3Bucket
++  };
++});
+ 
+ /*
+  * 真实 spawn 测试：使用 projects/app/worker/readFile.js 构建产物，
+@@ -54,6 +67,73 @@ const getPositiveIntegerEnv = (name: string, defaultValue: number) => {
+   return Number.isInteger(value) && value > 0 ? value : defaultValue;
+ };
+ 
++const createDocxWithImage = async () => {
++  const zip = new JSZip();
++  const png = Buffer.from(
++    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
++    'base64'
++  );
++
++  zip.file(
++    '[Content_Types].xml',
++    `<?xml version="1.0" encoding="UTF-8"?>
++<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
++  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
++  <Default Extension="xml" ContentType="application/xml"/>
++  <Default Extension="png" ContentType="image/png"/>
++  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
++</Types>`
++  );
++  zip.file(
++    '_rels/.rels',
++    `<?xml version="1.0" encoding="UTF-8"?>
++<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
++  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
++</Relationships>`
++  );
++  zip.file(
++    'word/_rels/document.xml.rels',
++    `<?xml version="1.0" encoding="UTF-8"?>
++<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
++  <Relationship Id="rIdImage1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
++</Relationships>`
++  );
++  zip.file(
++    'word/document.xml',
++    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
++<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
++  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
++  xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
++  xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
++  xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
++  <w:body>
++    <w:p><w:r><w:t>hello docx image</w:t></w:r></w:p>
++    <w:p>
++      <w:r>
++        <w:drawing>
++          <wp:inline>
++            <wp:docPr id="1" name="Picture 1"/>
++            <a:graphic>
++              <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
++                <pic:pic>
++                  <pic:blipFill>
++                    <a:blip r:embed="rIdImage1"/>
++                  </pic:blipFill>
++                </pic:pic>
++              </a:graphicData>
++            </a:graphic>
++          </wp:inline>
++        </w:drawing>
++      </w:r>
++    </w:p>
++  </w:body>
++</w:document>`
++  );
++  zip.file('word/media/image1.png', png);
++
++  return zip.generateAsync({ type: 'nodebuffer' });
++};
++
+ const destroyReadFilePool = async () => {
+   const workerPoll = (global as any).workerPoll;
+   const pool = workerPoll?.[WorkerNameEnum.readFile];
+@@ -110,6 +190,34 @@ describeIfEnabled('readFile worker (real spawn integration)', () => {
+     expect(result.rawText).toContain('item 1');
+   });
+ 
++  it('解析带 base64 图片的 md 时通过主线程 uploadFile handler 上传图片', async () => {
++    mockUploadImage2S3Bucket.mockResolvedValueOnce('dataset/test/md-parsed/image.png');
++    const base64Data =
++      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
++
++    const result = await readRawContentFromBuffer({
++      extension: 'md',
++      encoding: 'utf-8',
++      buffer: Buffer.from(`hello\n\n![alt](data:image/png;base64,${base64Data})`, 'utf-8'),
++      imageKeyOptions: {
++        prefix: 'dataset/test/md-parsed'
++      }
++    });
++
++    expect(result.rawText).toContain('hello');
++    expect(result.rawText).toContain('![alt](dataset/test/md-parsed/image.png)');
++    expect(result).not.toHaveProperty('imageList');
++    expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith(
++      'private',
++      expect.objectContaining({
++        buffer: expect.any(Buffer),
++        uploadKey: expect.stringMatching(/^dataset\/test\/md-parsed\/.+\.png$/),
++        mimetype: 'image/png',
++        filename: expect.stringMatching(/\.png$/)
++      })
++    );
++  });
++
+   it('解析 csv', async () => {
+     const csv = 'name,age,city\nAlice,30,Beijing\nBob,25,Shanghai';
+     const result = await readRawContentFromBuffer({
+@@ -123,6 +231,31 @@ describeIfEnabled('readFile worker (real spawn integration)', () => {
+     expect(result.rawText).toContain('Shanghai');
+   });
+ 
++  it('解析带图片 docx 时通过主线程 uploadFile handler 上传图片', async () => {
++    mockUploadImage2S3Bucket.mockResolvedValueOnce('dataset/test/docx-parsed/image.png');
++
++    const result = await readRawContentFromBuffer({
++      extension: 'docx',
++      encoding: 'utf-8',
++      buffer: await createDocxWithImage(),
++      imageKeyOptions: {
++        prefix: 'dataset/test/docx-parsed'
++      }
++    });
++
++    expect(result.rawText).toContain('hello docx image');
++    expect(result.rawText).toContain('dataset/test/docx-parsed/image.png');
++    expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith(
++      'private',
++      expect.objectContaining({
++        buffer: expect.any(Buffer),
++        uploadKey: expect.stringMatching(/^dataset\/test\/docx-parsed\/.+\.png$/),
++        mimetype: 'image/png',
++        filename: expect.stringMatching(/\.png$/)
++      })
++    );
++  });
++
+   itIfPdfFixture(
+     '解析 pdf（真实 worker + LiteParse）',
+     async () => {
+diff --git a/packages/service/test/worker/utils.test.ts b/packages/service/test/worker/utils.test.ts
+new file mode 100644
+index 000000000000..0087487de8d3
+--- /dev/null
++++ b/packages/service/test/worker/utils.test.ts
+@@ -0,0 +1,94 @@
++import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
++import fs from 'fs';
++import os from 'os';
++import path from 'path';
++
++const { WorkerPool, WorkerNameEnum } = await import('@fastgpt/service/worker/utils');
++
++const workerScript = `
++const { parentPort } = require('worker_threads');
++
++parentPort.on('message', (message) => {
++  const { id } = message;
++
++  parentPort.once('message', (response) => {
++    if (response.type === 'uploadFileResult') {
++      parentPort.postMessage({
++        id,
++        type: 'success',
++        data: response.data
++      });
++      return;
++    }
++
++    parentPort.postMessage({
++      id,
++      type: 'error',
++      data: response.data
++    });
++  });
++
++  parentPort.postMessage({
++    id,
++    type: 'uploadFile',
++    requestId: 'upload-1',
++    data: {
++      name: 'image.png',
++      mime: 'image/png',
++      buffer: new Uint8Array([1, 2, 3]).buffer
++    }
++  });
++});
++`;
++
++describe('worker/utils WorkerPool', () => {
++  let tmpDir: string;
++  let cwdSpy: ReturnType<typeof vi.spyOn>;
++
++  beforeEach(() => {
++    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fastgpt-worker-test-'));
++    fs.mkdirSync(path.join(tmpDir, 'worker'), { recursive: true });
++    fs.writeFileSync(path.join(tmpDir, 'worker', 'readFile.js'), workerScript);
++    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmpDir);
++  });
++
++  afterEach(() => {
++    cwdSpy.mockRestore();
++    fs.rmSync(tmpDir, { recursive: true, force: true });
++  });
++
++  it('处理 worker 通用 uploadFile 中间事件，不提前结束任务', async () => {
++    const pool = new WorkerPool<{ payload: string }, { key: string }>({
++      name: WorkerNameEnum.readFile,
++      maxReservedThreads: 1
++    });
++    const uploadFile = vi.fn().mockResolvedValue({
++      key: 'parsed/image.png'
++    });
++
++    const result = await pool.run({ payload: 'run' }, undefined, { uploadFile });
++
++    expect(uploadFile).toHaveBeenCalledWith({
++      name: 'image.png',
++      mime: 'image/png',
++      buffer: expect.any(ArrayBuffer)
++    });
++    expect(result).toEqual({
++      key: 'parsed/image.png'
++    });
++    expect(pool.workerQueue[0].status).toBe('idle');
++  });
++
++  it('uploadFile handler 失败时把错误回传给 worker', async () => {
++    const pool = new WorkerPool<{ payload: string }, { key: string; src: string }>({
++      name: WorkerNameEnum.readFile,
++      maxReservedThreads: 1
++    });
++    const uploadError = new Error('upload failed');
++    const uploadFile = vi.fn().mockRejectedValue(uploadError);
++
++    await expect(pool.run({ payload: 'run' }, undefined, { uploadFile })).rejects.toEqual(
++      uploadError
++    );
++  });
++});
+diff --git a/packages/service/thirdProvider/doc2x/index.ts b/packages/service/thirdProvider/doc2x/index.ts
+index 6953375d9ff6..4360dde3ba1c 100644
+--- a/packages/service/thirdProvider/doc2x/index.ts
++++ b/packages/service/thirdProvider/doc2x/index.ts
+@@ -1,12 +1,11 @@
+-import { batchRun, delay } from '@fastgpt/global/common/system/utils';
+-import { htmlTable2Md } from '@fastgpt/global/common/string/markdown';
++import { delay } from '@fastgpt/global/common/system/utils';
++import { htmlTable2Md, parseMarkdownBase64Images } from '@fastgpt/global/common/string/markdown';
+ import { type Method } from 'axios';
+-import { getNanoid } from '@fastgpt/global/common/string/tools';
+ import { getErrText } from '@fastgpt/global/common/error/utils';
+-import { type ImageType } from '../../worker/readFile/type';
+-import { getImageBase64 } from '../../common/file/image/utils';
++import { getImageBuffer } from '../../common/file/image/utils';
+ import { createProxyAxios, axios } from '../../common/api/axios';
+ import { getLogger, LogCategories } from '../../common/logger';
++import { type UploadedFileResult } from '../../worker/readFile/type';
+ 
+ type ApiResponseDataType<T = any> = {
+   code: string;
+@@ -14,6 +13,22 @@ type ApiResponseDataType<T = any> = {
+   data: T;
+ };
+ 
++type Doc2xImageUploadHandler = (
++  params:
++    | {
++        type: 'http';
++        url: string;
++        mime: string;
++        buffer: Buffer;
++      }
++    | {
++        type: 'base64';
++        mime: string;
++        base64: string;
++        dataUrl: string;
++      }
++) => Promise<UploadedFileResult>;
++
+ export const useDoc2xServer = ({ apiKey }: { apiKey: string }) => {
+   const logger = getLogger(LogCategories.MODULE.DATASET.FILE);
+   // Init request
+@@ -72,7 +87,12 @@ export const useDoc2xServer = ({ apiKey }: { apiKey: string }) => {
+       .catch((err) => responseError(err));
+   };
+ 
+-  const parsePDF = async (fileBuffer: Buffer) => {
++  const parsePDF = async (
++    fileBuffer: Buffer,
++    options: {
++      uploadImage?: Doc2xImageUploadHandler;
++    } = {}
++  ) => {
+     logger.debug('Doc2x PDF parse started');
+     const startTime = Date.now();
+ 
+@@ -185,45 +205,35 @@ export const useDoc2xServer = ({ apiKey }: { apiKey: string }) => {
+ 
+     const { text, pages } = await checkResult();
+ 
+-    // ![](url) => ![](base64)
+-    const parseTextImage = async (text: string) => {
+-      // Extract image links and convert to base64
+-      const imageList: { id: string; url: string }[] = [];
+-      let processedText = text.replace(/!\[.*?\]\((http[^)]+)\)/g, (match, url) => {
+-        const id = `IMAGE_${getNanoid()}_IMAGE`;
+-        imageList.push({
+-          id,
+-          url
+-        });
+-        return `![](${id})`;
+-      });
++    const formatText = await parseMarkdownBase64Images(htmlTable2Md(text), {
++      parseBase64: true,
++      parseHttp: true,
++      controller: options.uploadImage
++        ? async (image) => {
++            if (image.type === 'base64') {
++              return options.uploadImage!({
++                type: 'base64',
++                mime: image.mime,
++                base64: image.base64,
++                dataUrl: image.dataUrl
++              });
++            }
+ 
+-      // Get base64 from image url
+-      const resultImageList: ImageType[] = [];
+-      await batchRun(
+-        imageList,
+-        async (item) => {
+-          try {
+-            const { base64, mime } = await getImageBase64(item.url);
+-            resultImageList.push({
+-              uuid: item.id,
+-              mime,
+-              base64
+-            });
+-          } catch (error) {
+-            processedText = processedText.replace(item.id, item.url);
+-            logger.warn('Doc2x image fetch failed', { url: item.url, error });
++            try {
++              const { buffer, mime } = await getImageBuffer(image.url);
++              return options.uploadImage!({
++                type: 'http',
++                url: image.url,
++                mime,
++                buffer
++              });
++            } catch (error) {
++              logger.warn('Doc2x image transfer failed', { url: image.url, error });
++              throw error;
++            }
+           }
+-        },
+-        5
+-      );
+-
+-      return {
+-        text: processedText,
+-        imageList: resultImageList
+-      };
+-    };
+-    const { text: formatText, imageList } = await parseTextImage(htmlTable2Md(text));
++        : undefined
++    });
+ 
+     logger.debug('Doc2x PDF parse finished', {
+       durationMs: Date.now() - startTime,
+@@ -232,8 +242,7 @@ export const useDoc2xServer = ({ apiKey }: { apiKey: string }) => {
+ 
+     return {
+       pages,
+-      text: formatText,
+-      imageList
++      text: formatText
+     };
+   };
+ 
+diff --git a/packages/service/thirdProvider/textin/index.ts b/packages/service/thirdProvider/textin/index.ts
+index ba54d85039af..023bf8f23927 100644
+--- a/packages/service/thirdProvider/textin/index.ts
++++ b/packages/service/thirdProvider/textin/index.ts
+@@ -1,7 +1,25 @@
+-import { matchMdImg } from '@fastgpt/global/common/string/markdown';
+ import { createProxyAxios } from '../../common/api/axios';
+ import { getErrText } from '@fastgpt/global/common/error/utils';
+ import { getLogger, LogCategories } from '../../common/logger';
++import { parseMarkdownBase64Images } from '@fastgpt/global/common/string/markdown';
++import { type UploadedFileResult } from '../../worker/readFile/type';
++import { getImageBuffer } from '../../common/file/image/utils';
++
++type TextinImageUploadHandler = (
++  params:
++    | {
++        type: 'http';
++        url: string;
++        mime: string;
++        buffer: Buffer;
++      }
++    | {
++        type: 'base64';
++        mime: string;
++        base64: string;
++        dataUrl: string;
++      }
++) => Promise<UploadedFileResult>;
+ 
+ export const useTextinServer = ({ appId, secretCode }: { appId: string; secretCode: string }) => {
+   const logger = getLogger(LogCategories.MODULE.DATASET.FILE);
+@@ -36,7 +54,12 @@ export const useTextinServer = ({ appId, secretCode }: { appId: string; secretCo
+     return Promise.reject({ message: `[Textin] ${getErrText(err)}` });
+   };
+ 
+-  const parsePDF = async (fileBuffer: Buffer) => {
++  const parsePDF = async (
++    fileBuffer: Buffer,
++    options: {
++      uploadImage?: TextinImageUploadHandler;
++    } = {}
++  ) => {
+     logger.debug('Textin PDF parse started');
+     const startTime = Date.now();
+ 
+@@ -44,7 +67,7 @@ export const useTextinServer = ({ appId, secretCode }: { appId: string; secretCo
+       // Build request parameters (https://docs.textin.com/xparse/parse-quickstart#url%E5%8F%82%E6%95%B0%E8%AF%B4%E6%98%8E)
+       const params = {
+         get_image: 'objects', // 返回页面内的子图像
+-        image_output_type: 'base64str', // 图片对象以base64字符串返回
++        image_output_type: 'default', // 图片对象返回临时链接，避免响应体携带大体积 base64
+         parse_mode: 'auto', // 自动模式：直接提取pdf中的文字
+         dpi: 144, // 坐标基准144 dpi
+         markdown_details: 1, // 返回detail字段（markdown元素详细信息）
+@@ -73,8 +96,30 @@ export const useTextinServer = ({ appId, secretCode }: { appId: string; secretCo
+         return Promise.reject('[Textin] No markdown content in response');
+       }
+       logger.debug('Textin markdown content received', { length: rawMarkdown.length });
+-      // Process tables and images (reuse existing utility functions)
+-      const { text, imageList } = matchMdImg(rawMarkdown);
++      const text = await parseMarkdownBase64Images(rawMarkdown, {
++        parseBase64: true,
++        parseHttp: true,
++        controller: options.uploadImage
++          ? async (image) => {
++              if (image.type === 'base64') {
++                return options.uploadImage!({
++                  type: 'base64',
++                  mime: image.mime,
++                  base64: image.base64,
++                  dataUrl: image.dataUrl
++                });
++              }
++
++              const { buffer, mime } = await getImageBuffer(image.url);
++              return options.uploadImage!({
++                type: 'http',
++                url: image.url,
++                mime,
++                buffer
++              });
++            }
++          : undefined
++      });
+ 
+       // Get page count
+       const pages = data.result?.pages?.length || data.result?.total_page_number || 1;
+@@ -86,8 +131,7 @@ export const useTextinServer = ({ appId, secretCode }: { appId: string; secretCo
+ 
+       return {
+         pages,
+-        text,
+-        imageList
++        text
+       };
+     } catch (error) {
+       return responseError(error);
+diff --git a/packages/service/types/joplin-turndown-plugin-gfm.d.ts b/packages/service/types/joplin-turndown-plugin-gfm.d.ts
+new file mode 100644
+index 000000000000..5d8f11053799
+--- /dev/null
++++ b/packages/service/types/joplin-turndown-plugin-gfm.d.ts
+@@ -0,0 +1,5 @@
++declare module 'joplin-turndown-plugin-gfm' {
++  import type TurndownService from 'turndown';
++
++  export function gfm(turndownService: TurndownService): void;
++}
+diff --git a/packages/service/worker/function.ts b/packages/service/worker/function.ts
+index 68d3e1925c35..e565984ad068 100644
+--- a/packages/service/worker/function.ts
++++ b/packages/service/worker/function.ts
+@@ -7,6 +7,9 @@ import { getWorkerController, WorkerNameEnum } from './utils';
+ import type { ReadFileResponse } from './readFile/type';
+ import { isTestEnv } from '@fastgpt/global/common/system/constants';
+ import { serviceEnv } from '../env';
++import { uploadImage2S3Bucket } from '../common/s3/utils';
++import { normalizeMimeType, resolveMimeType } from '../common/s3/utils/mime';
++import path from 'node:path';
+ 
+ export const text2Chunks = (props: SplitProps) => {
+   // Test env, not run worker
+@@ -27,6 +30,10 @@ type ReadFileWorkerProps = {
+   buffer?: ArrayBuffer;
+   sharedBuffer?: SharedArrayBuffer;
+   bufferSize: number;
++  imageKeyOptions?: {
++    prefix: string;
++    expiredTime?: Date;
++  };
+ };
+ 
+ const getReadFileWorker = () =>
+@@ -43,6 +50,10 @@ export const readRawContentFromBuffer = (props: {
+   extension: string;
+   encoding: string;
+   buffer: Buffer;
++  imageKeyOptions?: {
++    prefix: string;
++    expiredTime?: Date;
++  };
+ }) => {
+   const bufferSize = props.buffer.length;
+   const sourceArrayBuffer = props.buffer.buffer;
+@@ -51,6 +62,28 @@ export const readRawContentFromBuffer = (props: {
+     props.buffer.byteLength === sourceArrayBuffer.byteLength &&
+     sourceArrayBuffer instanceof ArrayBuffer;
+ 
++  const uploadFile = props.imageKeyOptions?.prefix
++    ? async ({ name, mime, buffer }: { name: string; mime: string; buffer: ArrayBuffer }) => {
++        const mimetype = normalizeMimeType(mime);
++        if (!mimetype.startsWith('image/')) {
++          throw new Error(`Unsupported worker uploadFile mime type: ${mimetype}`);
++        }
++        // uploadFile 是 worker 通用能力，主线程只接受文件名，避免 worker 传入路径片段越过 prefix。
++        const filename = path.basename(name);
++        const key = await uploadImage2S3Bucket('private', {
++          buffer: Buffer.from(buffer),
++          uploadKey: `${props.imageKeyOptions!.prefix}/${filename}`,
++          mimetype: resolveMimeType([filename], mimetype),
++          filename,
++          expiredTime: props.imageKeyOptions?.expiredTime
++        });
++
++        return {
++          key
++        };
++      }
++    : undefined;
++
+   if (canTransferBuffer) {
+     /**
+      * 大文件解析时优先 transfer 独占 ArrayBuffer，避免再复制一份 SharedArrayBuffer。
+@@ -61,9 +94,11 @@ export const readRawContentFromBuffer = (props: {
+         extension: props.extension,
+         encoding: props.encoding,
+         buffer: sourceArrayBuffer,
+-        bufferSize
++        bufferSize,
++        imageKeyOptions: props.imageKeyOptions
+       },
+-      [sourceArrayBuffer]
++      [sourceArrayBuffer],
++      { uploadFile }
+     );
+   }
+ 
+@@ -71,10 +106,15 @@ export const readRawContentFromBuffer = (props: {
+   const sharedArray = new Uint8Array(sharedBuffer);
+   sharedArray.set(props.buffer);
+ 
+-  return getReadFileWorker().run({
+-    extension: props.extension,
+-    encoding: props.encoding,
+-    sharedBuffer,
+-    bufferSize
+-  });
++  return getReadFileWorker().run(
++    {
++      extension: props.extension,
++      encoding: props.encoding,
++      sharedBuffer,
++      bufferSize,
++      imageKeyOptions: props.imageKeyOptions
++    },
++    undefined,
++    { uploadFile }
++  );
+ };
+diff --git a/packages/service/worker/htmlStr2Md/index.ts b/packages/service/worker/htmlStr2Md/index.ts
+index 1e993463dc07..e9252e0072eb 100644
+--- a/packages/service/worker/htmlStr2Md/index.ts
++++ b/packages/service/worker/htmlStr2Md/index.ts
+@@ -1,19 +1,47 @@
+ import { parentPort } from 'worker_threads';
+ import { html2md } from './utils';
++import {
++  createWorkerUploadFileHandler,
++  handleWorkerUploadFileResponse,
++  isWorkerUploadFileResponse
++} from '../utils/uploadFile';
+ 
+ type IncomingMessage = {
+   id: string;
+   html: string;
++  uploadImages?: boolean;
++  type?: 'uploadFileResult' | 'uploadFileError';
++  requestId?: string;
++  data?: any;
+ };
+ 
+-parentPort?.on('message', (params: IncomingMessage) => {
+-  const { id, html } = params;
++parentPort?.on('message', async (params: IncomingMessage) => {
++  const { id, html, requestId, data, type } = params;
++
++  if (isWorkerUploadFileResponse(type)) {
++    handleWorkerUploadFileResponse({
++      taskId: id,
++      type,
++      requestId,
++      data
++    });
++    return;
++  }
++
++  const uploadFileHandler = createWorkerUploadFileHandler({
++    taskId: id,
++    parentPort
++  });
+ 
+   try {
+-    const md = html2md(html || '');
++    const md = await html2md(html || '', {
++      uploadFile: params.uploadImages ? uploadFileHandler.uploadFile : undefined
++    });
+ 
+     parentPort?.postMessage({ id, type: 'success', data: md });
+   } catch (error) {
+     parentPort?.postMessage({ id, type: 'error', data: error });
++  } finally {
++    uploadFileHandler.cleanup();
+   }
+ });
+diff --git a/packages/service/worker/htmlStr2Md/utils.ts b/packages/service/worker/htmlStr2Md/utils.ts
+index fb596c7e18b0..a97e3de2db38 100644
+--- a/packages/service/worker/htmlStr2Md/utils.ts
++++ b/packages/service/worker/htmlStr2Md/utils.ts
+@@ -1,42 +1,80 @@
+ import TurndownService from 'turndown';
+-import { type ImageType } from '../readFile/type';
+-import { getNanoid } from '@fastgpt/global/common/string/tools';
+ import { simpleMarkdownText } from '@fastgpt/global/common/string/markdown';
+ import { getLogger, LogCategories } from '../../common/logger';
+ import { workerEnv } from '../env';
+-// @ts-ignore
+-const turndownPluginGfm = require('joplin-turndown-plugin-gfm');
++import { gfm } from 'joplin-turndown-plugin-gfm';
++import { uploadBase64Image } from '../utils/base64ImageUpload';
++import { type UploadFileHandler } from '../readFile/type';
++import { batchRun } from '@fastgpt/global/common/system/utils';
+ 
+ const MAX_HTML_SIZE = workerEnv.MAX_HTML_TRANSFORM_CHARS;
+ const logger = getLogger(LogCategories.INFRA.WORKER);
++const htmlBase64UploadConcurrency = 5;
+ 
+-const processBase64Images = (htmlContent: string) => {
+-  // 优化后的正则:
+-  // 1. 使用精确的 base64 字符集 [A-Za-z0-9+/=]+ 避免回溯
+-  // 2. 明确捕获 mime 类型和 base64 数据
+-  // 3. 减少不必要的捕获组
+-  const base64Regex = /src="data:([^;]+);base64,([A-Za-z0-9+/=]+)"/g;
+-  const images: ImageType[] = [];
+-
+-  const processedHtml = htmlContent.replace(base64Regex, (_match, mime, base64Data) => {
+-    const uuid = `IMAGE_${getNanoid(12)}_IMAGE`;
+-    images.push({
+-      uuid,
+-      base64: base64Data,
+-      mime
+-    });
+-    return `src="${uuid}"`;
+-  });
++const htmlBase64SrcRegex = /\bsrc\s*=\s*(["'])data:([^;]+);base64,([A-Za-z0-9+/=]+)\1/gi;
++
++/**
++ * HTML 转 markdown 前实时处理 base64 图片。
++ *
++ * 有 uploadFile 时上传为对象存储 key；没有 uploadFile 时删除 src，避免大体积 base64
++ * 进入 turndown 或被 worker 结果回传。
++ */
++const processBase64Images = async (
++  htmlContent: string,
++  options: {
++    uploadFile?: UploadFileHandler;
++  } = {}
++) => {
++  const matches = Array.from(htmlContent.matchAll(htmlBase64SrcRegex));
++  if (matches.length === 0) return htmlContent;
++
++  const replacements = await batchRun(
++    matches,
++    async (match) => {
++      const [, quote, mime, base64Data] = match;
++
++      if (!options.uploadFile) {
++        return `src=${quote}${quote}`;
++      }
++
++      try {
++        const { key } = await uploadBase64Image({
++          mime,
++          base64: base64Data,
++          uploadFile: options.uploadFile
++        });
++        return `src=${quote}${key}${quote}`;
++      } catch (error) {
++        logger.warn('Failed to upload parsed HTML base64 image', { mime, error });
++        return `src=${quote}${quote}`;
++      }
++    },
++    htmlBase64UploadConcurrency
++  );
+ 
+-  return { processedHtml, images };
++  let result = '';
++  let lastIndex = 0;
++
++  for (const [matchIndex, match] of matches.entries()) {
++    const [fullMatch] = match;
++    const index = match.index ?? 0;
++
++    result += htmlContent.slice(lastIndex, index);
++    result += replacements[matchIndex];
++    lastIndex = index + fullMatch.length;
++  }
++
++  return result + htmlContent.slice(lastIndex);
+ };
+ 
+-export const html2md = (
+-  html: string
+-): {
++export const html2md = async (
++  html: string,
++  options: {
++    uploadFile?: UploadFileHandler;
++  } = {}
++): Promise<{
+   rawText: string;
+-  imageList: ImageType[];
+-} => {
++}> => {
+   const turndownService = new TurndownService({
+     headingStyle: 'atx',
+     bulletListMarker: '-',
+@@ -50,7 +88,7 @@ export const html2md = (
+ 
+   try {
+     turndownService.remove(['i', 'script', 'iframe', 'style']);
+-    turndownService.use(turndownPluginGfm.gfm);
++    turndownService.use(gfm);
+ 
+     // add custom handling for media tag
+     turndownService.addRule('media', {
+@@ -71,25 +109,28 @@ export const html2md = (
+     });
+ 
+     // Base64 img to id, otherwise it will occupy memory when going to md
+-    const { processedHtml, images } = processBase64Images(html);
++    const processedHtml = await processBase64Images(html, {
++      uploadFile: options.uploadFile
++    });
+ 
+-    // if html is too large, return the original html (but preserve image list)
++    // if html is too large, return the original html
+     if (processedHtml.length > MAX_HTML_SIZE) {
+-      return { rawText: processedHtml, imageList: images };
++      return { rawText: processedHtml };
+     }
+ 
+     const md = turndownService.turndown(processedHtml);
+-    // const { text, imageList } = matchMdImg(md);
+ 
+     return {
+-      rawText: simpleMarkdownText(md),
+-      imageList: images
++      rawText: simpleMarkdownText(md)
+     };
+   } catch (error) {
++    if (options.uploadFile) {
++      throw error;
++    }
++
+     logger.error('HTML to markdown conversion failed', { error });
+     return {
+-      rawText: '',
+-      imageList: []
++      rawText: ''
+     };
+   }
+ };
+diff --git a/packages/service/worker/readFile/extension/docx.ts b/packages/service/worker/readFile/extension/docx.ts
+index fa6cd822faf7..4283c8029d39 100644
+--- a/packages/service/worker/readFile/extension/docx.ts
++++ b/packages/service/worker/readFile/extension/docx.ts
+@@ -1,13 +1,18 @@
+ import mammoth, { images } from 'mammoth';
+-import { type ReadRawTextByBuffer, type ReadFileResponse, type ImageType } from '../type';
++import { type ReadRawTextByBuffer, type ReadFileResponse, type UploadFileHandler } from '../type';
+ import { html2md } from '../../htmlStr2Md/utils';
+ import { getLogger, LogCategories } from '../../../common/logger';
++import { resolveMimeExtension } from '../../../common/s3/utils/mime';
+ 
+ /**
+  * read docx to markdown
+  */
+-export const readDocsFile = async ({ buffer }: ReadRawTextByBuffer): Promise<ReadFileResponse> => {
+-  const imageList: ImageType[] = [];
++export const readDocsFile = async (
++  { buffer }: ReadRawTextByBuffer,
++  options: {
++    uploadFile?: UploadFileHandler;
++  } = {}
++): Promise<ReadFileResponse> => {
+   const logger = getLogger(LogCategories.INFRA.WORKER);
+   try {
+     const { value: html } = await mammoth.convertToHtml(
+@@ -17,26 +22,39 @@ export const readDocsFile = async ({ buffer }: ReadRawTextByBuffer): Promise<Rea
+       {
+         ignoreEmptyParagraphs: false,
+         convertImage: images.imgElement(async (image) => {
+-          const imageBase64 = await image.readAsBase64String();
+-          const uuid = crypto.randomUUID();
+           const mime = image.contentType;
+-          imageList.push({
+-            uuid,
+-            base64: imageBase64,
+-            mime
+-          });
++          const name = `${crypto.randomUUID()}${resolveMimeExtension(mime)}`;
++
++          if (!options.uploadFile) {
++            logger.warn('Missing image upload handler when parsing docx image', { name, mime });
++            throw new Error('Missing imageKeyOptions.prefix for parsed document image upload');
++          }
++
++          const imageBuffer = await image.read();
++          const imageArrayBuffer = new Uint8Array(imageBuffer.byteLength);
++          imageArrayBuffer.set(imageBuffer);
++          const { key } = await options
++            .uploadFile({
++              name,
++              mime,
++              buffer: imageArrayBuffer.buffer
++            })
++            .catch((error) => {
++              logger.warn('Failed to upload docx image from worker', { name, mime, error });
++              throw error;
++            });
++
+           return {
+-            src: uuid
++            src: key
+           };
+         })
+       }
+     );
+ 
+-    const { rawText } = html2md(html);
++    const { rawText } = await html2md(html);
+ 
+     return {
+-      rawText,
+-      imageList
++      rawText
+     };
+   } catch (error) {
+     logger.error('Failed to parse docx file', { error });
+diff --git a/packages/service/worker/readFile/extension/html.ts b/packages/service/worker/readFile/extension/html.ts
+index c64ef5e4d9be..e785cd568834 100644
+--- a/packages/service/worker/readFile/extension/html.ts
++++ b/packages/service/worker/readFile/extension/html.ts
+@@ -1,14 +1,21 @@
+-import { type ReadRawTextByBuffer, type ReadFileResponse } from '../type';
++import { type ReadRawTextByBuffer, type ReadFileResponse, type UploadFileHandler } from '../type';
+ import { readFileRawText } from './rawText';
+ import { html2md } from '../../htmlStr2Md/utils';
+ 
+-export const readHtmlRawText = async (params: ReadRawTextByBuffer): Promise<ReadFileResponse> => {
+-  const { rawText: html } = await readFileRawText(params);
+-
+-  const { rawText, imageList } = html2md(html);
++export const readHtmlRawText = async (
++  params: ReadRawTextByBuffer,
++  options: {
++    uploadFile?: UploadFileHandler;
++  } = {}
++): Promise<ReadFileResponse> => {
++  const { rawText: html } = await readFileRawText(params, {
++    uploadFile: options.uploadFile
++  });
++  const { rawText } = await html2md(html, {
++    uploadFile: options.uploadFile
++  });
+ 
+   return {
+-    rawText,
+-    imageList
++    rawText
+   };
+ };
+diff --git a/packages/service/worker/readFile/extension/rawText.ts b/packages/service/worker/readFile/extension/rawText.ts
+index 609a11d217f9..0afb2234ad04 100644
+--- a/packages/service/worker/readFile/extension/rawText.ts
++++ b/packages/service/worker/readFile/extension/rawText.ts
+@@ -1,6 +1,7 @@
+ import iconv from 'iconv-lite';
+-import { type ReadRawTextByBuffer, type ReadFileResponse } from '../type';
+-import { matchMdImg } from '@fastgpt/global/common/string/markdown';
++import { type ReadRawTextByBuffer, type ReadFileResponse, type UploadFileHandler } from '../type';
++import { parseMarkdownBase64Images } from '@fastgpt/global/common/string/markdown';
++import { uploadBase64Image } from '../../utils/base64ImageUpload';
+ 
+ const hasNonAsciiByte = (buffer: Buffer) => {
+   for (let i = 0; i < buffer.length; i++) {
+@@ -25,10 +26,12 @@ const rawEncodingList = [
+ ];
+ 
+ // 加载源文件内容
+-export const readFileRawText = async ({
+-  buffer,
+-  encoding
+-}: ReadRawTextByBuffer): Promise<ReadFileResponse> => {
++export const readFileRawText = async (
++  { buffer, encoding }: ReadRawTextByBuffer,
++  options: {
++    uploadFile?: UploadFileHandler;
++  } = {}
++): Promise<ReadFileResponse> => {
+   const content = (() => {
+     try {
+       const normalizedEncoding = encoding?.toLowerCase?.() || '';
+@@ -47,15 +50,24 @@ export const readFileRawText = async ({
+       }
+ 
+       return buffer.toString('utf-8');
+-    } catch (error) {
++    } catch {
+       return buffer.toString('utf-8');
+     }
+   })();
+ 
+-  const { text, imageList } = matchMdImg(content);
++  const rawText = await parseMarkdownBase64Images(content, {
++    controller: (image) => {
++      if (image.type !== 'base64') return Promise.resolve({ key: '' });
++
++      return uploadBase64Image({
++        mime: image.mime,
++        base64: image.base64,
++        uploadFile: options.uploadFile
++      });
++    }
++  });
+ 
+   return {
+-    rawText: text,
+-    imageList
++    rawText
+   };
+ };
+diff --git a/packages/service/worker/readFile/index.ts b/packages/service/worker/readFile/index.ts
+index 81317894796d..b1769059ff8f 100644
+--- a/packages/service/worker/readFile/index.ts
++++ b/packages/service/worker/readFile/index.ts
+@@ -7,26 +7,45 @@ import { readDocsFile } from './extension/docx';
+ import { readPptxRawText } from './extension/pptx';
+ import { readXlsxRawText } from './extension/xlsx';
+ import { readCsvRawText } from './extension/csv';
++import { type UploadFileHandler } from './type';
++import {
++  createWorkerUploadFileHandlerWithListener,
++  isWorkerUploadFileResponse
++} from '../utils/uploadFile';
+ 
+ type IncomingMessage = {
+   id: string;
++  type?: string;
+ } & Omit<ReadRawTextProps<any>, 'buffer'> & {
+     buffer?: ArrayBuffer;
+     sharedBuffer?: SharedArrayBuffer;
+     bufferSize: number;
++    imageKeyOptions?: {
++      prefix: string;
++      expiredTime?: Date;
++    };
+   };
+ 
+-const read = async (params: ReadRawTextByBuffer) => {
++const read = async (
++  params: ReadRawTextByBuffer,
++  options: { uploadFile?: UploadFileHandler } = {}
++) => {
+   switch (params.extension) {
+     case 'txt':
+     case 'md':
+-      return readFileRawText(params);
++      return readFileRawText(params, {
++        uploadFile: options.uploadFile
++      });
+     case 'html':
+-      return readHtmlRawText(params);
++      return readHtmlRawText(params, {
++        uploadFile: options.uploadFile
++      });
+     case 'pdf':
+       return readPdfFile(params);
+     case 'docx':
+-      return readDocsFile(params);
++      return readDocsFile(params, {
++        uploadFile: options.uploadFile
++      });
+     case 'pptx':
+       return readPptxRawText(params);
+     case 'xlsx':
+@@ -41,7 +60,19 @@ const read = async (params: ReadRawTextByBuffer) => {
+ };
+ 
+ parentPort?.on('message', async (props: IncomingMessage) => {
+-  const { id, buffer: transferredBuffer, sharedBuffer, bufferSize, extension, encoding } = props;
++  if (isWorkerUploadFileResponse(props.type)) {
++    return;
++  }
++
++  const {
++    id,
++    buffer: transferredBuffer,
++    sharedBuffer,
++    bufferSize,
++    extension,
++    encoding,
++    imageKeyOptions
++  } = props;
+ 
+   try {
+     const rawBuffer = transferredBuffer ?? sharedBuffer;
+@@ -52,9 +83,22 @@ parentPort?.on('message', async (props: IncomingMessage) => {
+     // 优先使用 transfer 进来的 ArrayBuffer；兼容旧的 SharedArrayBuffer 零拷贝路径。
+     const buffer = Buffer.from(rawBuffer, 0, bufferSize);
+ 
+-    const data = await read({ extension, encoding, buffer });
++    const uploadFileHandler = createWorkerUploadFileHandlerWithListener({
++      taskId: id,
++      parentPort,
++      enabled: Boolean(imageKeyOptions?.prefix)
++    });
+ 
+-    parentPort?.postMessage({ id, type: 'success', data });
++    try {
++      const data = await read(
++        { extension, encoding, buffer },
++        { uploadFile: uploadFileHandler.uploadFile }
++      );
++
++      parentPort?.postMessage({ id, type: 'success', data });
++    } finally {
++      uploadFileHandler.cleanup();
++    }
+   } catch (error) {
+     parentPort?.postMessage({ id, type: 'error', data: error });
+   }
+diff --git a/packages/service/worker/readFile/type.ts b/packages/service/worker/readFile/type.ts
+index 865cacba8bae..7c58e263d48b 100644
+--- a/packages/service/worker/readFile/type.ts
++++ b/packages/service/worker/readFile/type.ts
+@@ -6,12 +6,17 @@ export type ReadRawTextProps<T> = {
+ 
+ export type ReadRawTextByBuffer = ReadRawTextProps<Buffer>;
+ 
+-export type ImageType = {
+-  uuid: string;
+-  base64: string;
+-  mime: string;
++export type UploadedFileResult = {
++  key: string;
++  previewUrl?: string;
+ };
+ 
++export type UploadFileHandler = (data: {
++  name: string;
++  mime: string;
++  buffer: ArrayBuffer;
++}) => Promise<UploadedFileResult>;
++
+ export type TextItem = {
+   text: string;
+   x: number;
+@@ -34,5 +39,4 @@ export type ParsedPage = {
+ export type ReadFileResponse = {
+   rawText: string;
+   formatText?: string;
+-  imageList?: ImageType[];
+ };
+diff --git a/packages/service/worker/utils.ts b/packages/service/worker/utils.ts
+index 6e15e3200245..e5e9e4be3727 100644
+--- a/packages/service/worker/utils.ts
++++ b/packages/service/worker/utils.ts
+@@ -68,9 +68,27 @@ export const runWorker = <T = any>(name: WorkerNameEnum, params?: Record<string,
+ type WorkerRunTaskType<T> = {
+   data: T;
+   transferList?: TransferListItem[];
++  handlers?: WorkerRunHandlers;
+   resolve: (e: any) => void;
+   reject: (e: any) => void;
+ };
++export type WorkerUploadFileRequest = {
++  name: string;
++  mime: string;
++  buffer: ArrayBuffer;
++};
++export type WorkerUploadFileResult = {
++  key: string;
++};
++/**
++ * Worker 任务运行期间可发起的通用主线程能力。
++ *
++ * 这些 handler 只服务当前 run 调用，worker 发送中间事件时不会释放任务槽位；
++ * 只有最终 success/error 消息才会完成任务。
++ */
++export type WorkerRunHandlers = {
++  uploadFile?: (data: WorkerUploadFileRequest) => Promise<WorkerUploadFileResult>;
++};
+ type WorkerQueueItem = {
+   id: string;
+   worker: NodeWorker;
+@@ -78,12 +96,14 @@ type WorkerQueueItem = {
+   taskTime: number;
+   tasksCompleted: number;
+   timeoutId?: NodeJS.Timeout;
++  handlers?: WorkerRunHandlers;
+   resolve: (e: any) => void;
+   reject: (e: any) => void;
+ };
+ type WorkerResponse<T = any> = {
+   id: string;
+-  type: 'success' | 'error';
++  type: 'success' | 'error' | 'uploadFile';
++  requestId?: string;
+   data: T;
+ };
+ 
+@@ -121,7 +141,7 @@ export class WorkerPool<Props = Record<string, any>, Response = any> {
+     this.maxTasksPerWorker = maxTasksPerWorker;
+   }
+ 
+-  private runTask({ data, transferList, resolve, reject }: WorkerRunTaskType<Props>) {
++  private runTask({ data, transferList, handlers, resolve, reject }: WorkerRunTaskType<Props>) {
+     // Get idle worker or create a new worker
+     const runningWorker = (() => {
+       // @ts-ignore
+@@ -144,6 +164,7 @@ export class WorkerPool<Props = Record<string, any>, Response = any> {
+       runningWorker.taskTime = Date.now();
+       runningWorker.resolve = resolve;
+       runningWorker.reject = reject;
++      runningWorker.handlers = handlers;
+       runningWorker.timeoutId = setTimeout(() => {
+         reject('Worker timeout');
+         // 超时即销毁，避免占着 idle 槽位永远不释放
+@@ -159,11 +180,11 @@ export class WorkerPool<Props = Record<string, any>, Response = any> {
+       );
+     } else {
+       // Not enough worker, push to wait queue
+-      this.waitQueue.push({ data, transferList, resolve, reject });
++      this.waitQueue.push({ data, transferList, handlers, resolve, reject });
+     }
+   }
+ 
+-  run(data: Props, transferList?: TransferListItem[]) {
++  run(data: Props, transferList?: TransferListItem[], handlers?: WorkerRunHandlers) {
+     return new Promise<Response>((resolve, reject) => {
+       /*
+         Whether the task is executed immediately or delayed, the promise callback will dispatch after task complete.
+@@ -171,6 +192,7 @@ export class WorkerPool<Props = Record<string, any>, Response = any> {
+       this.runTask({
+         data,
+         transferList,
++        handlers,
+         resolve,
+         reject
+       });
+@@ -195,13 +217,21 @@ export class WorkerPool<Props = Record<string, any>, Response = any> {
+       status: 'running',
+       taskTime: Date.now(),
+       tasksCompleted: 0,
++      handlers: undefined,
+       resolve: () => {},
+       reject: () => {}
+     };
+     this.workerQueue.push(item);
+ 
+     // watch response
+-    worker.on('message', ({ id, type, data }: WorkerResponse<Response>) => {
++    worker.on('message', ({ id, type, requestId, data }: WorkerResponse<Response>) => {
++      if (id !== item.id) return;
++
++      if (type === 'uploadFile') {
++        this.handleUploadFileMessage({ item, requestId, data });
++        return;
++      }
++
+       if (type === 'success') {
+         item.resolve(data);
+       } else if (type === 'error') {
+@@ -217,6 +247,7 @@ export class WorkerPool<Props = Record<string, any>, Response = any> {
+         this.deleteWorker(item.id);
+       } else {
+         item.status = 'idle';
++        item.handlers = undefined;
+       }
+     });
+ 
+@@ -233,11 +264,55 @@ export class WorkerPool<Props = Record<string, any>, Response = any> {
+     return item;
+   }
+ 
++  private handleUploadFileMessage({
++    item,
++    requestId,
++    data
++  }: {
++    item: WorkerQueueItem;
++    requestId?: string;
++    data: any;
++  }) {
++    const reply = (type: 'uploadFileResult' | 'uploadFileError', payload: any) => {
++      if (!this.workerQueue.includes(item) || item.status !== 'running') return;
++      try {
++        item.worker.postMessage({
++          id: item.id,
++          type,
++          requestId,
++          data: payload
++        });
++      } catch (error) {
++        getLogger(LogCategories.INFRA.WORKER).warn('Failed to reply worker uploadFile request', {
++          workerId: item.id,
++          name: this.name,
++          error
++        });
++      }
++    };
++
++    if (!requestId) {
++      reply('uploadFileError', 'Missing uploadFile requestId');
++      return;
++    }
++
++    const handler = item.handlers?.uploadFile;
++    if (!handler) {
++      reply('uploadFileError', 'Missing uploadFile handler');
++      return;
++    }
++
++    handler(data)
++      .then((result) => reply('uploadFileResult', result))
++      .catch((error) => reply('uploadFileError', error));
++  }
++
+   private deleteWorker(workerId: string) {
+     const item = this.workerQueue.find((item) => item.id === workerId);
+     if (item) {
+       item.reject?.('error');
+       clearTimeout(item.timeoutId);
++      item.handlers = undefined;
+       item.worker.removeAllListeners();
+       item.worker.terminate();
+     }
+diff --git a/packages/service/worker/utils/base64ImageUpload.ts b/packages/service/worker/utils/base64ImageUpload.ts
+new file mode 100644
+index 000000000000..fcfb14626405
+--- /dev/null
++++ b/packages/service/worker/utils/base64ImageUpload.ts
+@@ -0,0 +1,70 @@
++import { type UploadFileHandler } from '../readFile/type';
++import { resolveMimeExtension } from '../../common/s3/utils/mime';
++import { getLogger, LogCategories } from '../../common/logger';
++
++const logger = getLogger(LogCategories.INFRA.WORKER);
++const MAX_PARSED_IMAGE_BUFFER_SIZE = 40 * 1024 * 1024;
++
++export class ParsedImageTooLargeError extends Error {
++  constructor(size: number, maxSize: number) {
++    super(`Parsed image too large. Size: ${size} bytes, maximum allowed: ${maxSize} bytes`);
++    this.name = 'ParsedImageTooLargeError';
++  }
++}
++
++const getBase64DecodedSize = (base64: string) => {
++  const normalizedBase64 = base64.replace(/\s/g, '');
++  const padding = normalizedBase64.endsWith('==') ? 2 : normalizedBase64.endsWith('=') ? 1 : 0;
++
++  return Math.max(0, Math.floor((normalizedBase64.length * 3) / 4) - padding);
++};
++
++const toTransferableArrayBuffer = (buffer: Buffer): ArrayBuffer => {
++  if (
++    buffer.buffer instanceof ArrayBuffer &&
++    buffer.byteOffset === 0 &&
++    buffer.byteLength === buffer.buffer.byteLength
++  ) {
++    return buffer.buffer;
++  }
++
++  const imageArrayBuffer = new Uint8Array(buffer.byteLength);
++  imageArrayBuffer.set(buffer);
++  return imageArrayBuffer.buffer;
++};
++
++export const uploadBase64Image = async ({
++  mime,
++  base64,
++  uploadFile
++}: {
++  mime: string;
++  base64: string;
++  uploadFile?: UploadFileHandler;
++}) => {
++  if (!uploadFile) {
++    logger.warn('Missing image upload handler when parsing document image', { mime });
++    throw new Error('Missing imageKeyOptions.prefix for parsed document image upload');
++  }
++
++  const decodedSize = getBase64DecodedSize(base64);
++  if (decodedSize > MAX_PARSED_IMAGE_BUFFER_SIZE) {
++    throw new ParsedImageTooLargeError(decodedSize, MAX_PARSED_IMAGE_BUFFER_SIZE);
++  }
++
++  const imageBuffer = Buffer.from(base64, 'base64');
++  const filename = `${crypto.randomUUID()}${resolveMimeExtension(mime)}`;
++
++  return uploadFile({
++    name: filename,
++    mime,
++    buffer: toTransferableArrayBuffer(imageBuffer)
++  }).catch((error) => {
++    logger.warn('Failed to upload parsed document image from worker', {
++      filename,
++      mime,
++      error
++    });
++    throw error;
++  });
++};
+diff --git a/packages/service/worker/utils/uploadFile.ts b/packages/service/worker/utils/uploadFile.ts
+new file mode 100644
+index 000000000000..311b69c8dc64
+--- /dev/null
++++ b/packages/service/worker/utils/uploadFile.ts
+@@ -0,0 +1,144 @@
++import type { MessagePort } from 'worker_threads';
++import { type UploadFileHandler, type UploadedFileResult } from '../readFile/type';
++
++type WorkerUploadFileResponse = {
++  id: string;
++  type?: string;
++  requestId?: string;
++  data?: UploadedFileResult | any;
++};
++
++type PendingUploadFileRequest = {
++  taskId: string;
++  resolve: (value: UploadedFileResult) => void;
++  reject: (error: any) => void;
++};
++
++const pendingUploadFileRequests = new Map<string, PendingUploadFileRequest>();
++
++export const isWorkerUploadFileResponse = (type?: string) =>
++  type === 'uploadFileResult' || type === 'uploadFileError';
++
++/**
++ * 处理 worker uploadFile 的主线程回包。
++ *
++ * 多个 worker 入口共用同一套 requestId -> Promise 映射，按 taskId 防串扰。
++ */
++export const handleWorkerUploadFileResponse = ({
++  taskId,
++  type,
++  requestId,
++  data
++}: {
++  taskId: string;
++  type?: string;
++  requestId?: string;
++  data?: any;
++}) => {
++  if (!isWorkerUploadFileResponse(type) || !requestId) return false;
++
++  const pending = pendingUploadFileRequests.get(requestId);
++  if (!pending || pending.taskId !== taskId) return true;
++
++  pendingUploadFileRequests.delete(requestId);
++  if (type === 'uploadFileError') {
++    pending.reject(data);
++  } else {
++    pending.resolve(data as UploadedFileResult);
++  }
++
++  return true;
++};
++
++export const cleanupWorkerUploadFileRequests = (taskId: string, reason: Error) => {
++  for (const [requestId, pending] of pendingUploadFileRequests.entries()) {
++    if (pending.taskId !== taskId) continue;
++    pending.reject(reason);
++    pendingUploadFileRequests.delete(requestId);
++  }
++};
++
++/**
++ * 为 worker 内单个任务创建 uploadFile handler。
++ *
++ * 返回的 handler 会向主线程发送 `uploadFile` 中间事件，并等待同 requestId 的结果回包；
++ * cleanup 必须在任务结束时调用，避免 dangling promise。
++ */
++export const createWorkerUploadFileHandler = ({
++  taskId,
++  parentPort
++}: {
++  taskId: string;
++  parentPort?: MessagePort | null;
++}): {
++  uploadFile: UploadFileHandler;
++  cleanup: () => void;
++} => {
++  const uploadFile: UploadFileHandler = (data) =>
++    new Promise((resolve, reject) => {
++      const requestId = crypto.randomUUID();
++      pendingUploadFileRequests.set(requestId, { taskId, resolve, reject });
++      try {
++        parentPort?.postMessage(
++          {
++            id: taskId,
++            type: 'uploadFile',
++            requestId,
++            data
++          },
++          [data.buffer]
++        );
++      } catch (error) {
++        pendingUploadFileRequests.delete(requestId);
++        reject(error);
++      }
++    });
++
++  return {
++    uploadFile,
++    cleanup: () =>
++      cleanupWorkerUploadFileRequests(
++        taskId,
++        new Error('Worker upload request cancelled before completion')
++      )
++  };
++};
++
++/**
++ * 兼容需要在 worker 入口内部监听回包的任务，例如 readFile 会忽略主 message handler 中的回包。
++ */
++export const createWorkerUploadFileHandlerWithListener = ({
++  taskId,
++  parentPort,
++  enabled
++}: {
++  taskId: string;
++  parentPort?: MessagePort | null;
++  enabled: boolean;
++}): {
++  uploadFile?: UploadFileHandler;
++  cleanup: () => void;
++} => {
++  if (!enabled) return { cleanup: () => {} };
++
++  const onMessage = ({ id, type, requestId, data }: WorkerUploadFileResponse) => {
++    if (id !== taskId) return;
++    handleWorkerUploadFileResponse({
++      taskId,
++      type,
++      requestId,
++      data
++    });
++  };
++
++  parentPort?.on('message', onMessage);
++  const bridge = createWorkerUploadFileHandler({ taskId, parentPort });
++
++  return {
++    uploadFile: bridge.uploadFile,
++    cleanup: () => {
++      parentPort?.off('message', onMessage);
++      bridge.cleanup();
++    }
++  };
++};
+diff --git a/projects/app/src/pages/api/core/dataset/collection/create/images.ts b/projects/app/src/pages/api/core/dataset/collection/create/images.ts
+index a490d7229ff0..87ac08c3f558 100644
+--- a/projects/app/src/pages/api/core/dataset/collection/create/images.ts
++++ b/projects/app/src/pages/api/core/dataset/collection/create/images.ts
+@@ -74,7 +74,7 @@ async function handler(req: ApiRequestProps): Promise<CreateCollectionWithResult
+         const filename = path.basename(file.filename);
+         const { fileKey } = getFileS3Key.dataset({ datasetId, filename });
+         return uploadImage2S3Bucket('private', {
+-          base64Img: (await fs.promises.readFile(file.path)).toString('base64'),
++          buffer: await fs.promises.readFile(file.path),
+           uploadKey: fileKey,
+           mimetype: file.mimetype,
+           filename,
+diff --git a/projects/app/src/pages/api/core/dataset/data/insertImages.ts b/projects/app/src/pages/api/core/dataset/data/insertImages.ts
+index 991cccb67892..b4f4e2311a25 100644
+--- a/projects/app/src/pages/api/core/dataset/data/insertImages.ts
++++ b/projects/app/src/pages/api/core/dataset/data/insertImages.ts
+@@ -67,7 +67,7 @@ async function handler(req: ApiRequestProps): Promise<InsertImagesResponse> {
+     const imageIds = await Promise.all(
+       result.fileMetadata.map(async (file) =>
+         uploadImage2S3Bucket('private', {
+-          base64Img: (await fs.promises.readFile(file.path)).toString('base64'),
++          buffer: await fs.promises.readFile(file.path),
+           uploadKey: getFileS3Key.dataset({
+             datasetId: dataset._id,
+             filename: path.basename(file.filename)
+diff --git a/projects/app/test/api/core/dataset/collection/create/images.test.ts b/projects/app/test/api/core/dataset/collection/create/images.test.ts
+index a0e81c4c2554..5159b0105f0f 100644
+--- a/projects/app/test/api/core/dataset/collection/create/images.test.ts
++++ b/projects/app/test/api/core/dataset/collection/create/images.test.ts
+@@ -162,6 +162,14 @@ describe('POST /api/core/dataset/collection/create/images', () => {
+         trainingType: DatasetCollectionDataProcessModeEnum.chunk
+       }
+     });
++    expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith('private', {
++      buffer: Buffer.from('image-bytes'),
++      uploadKey: 'dataset/team/cat.png',
++      mimetype: 'image/png',
++      filename: 'cat.png',
++      expiredTime: expect.any(Date)
++    });
++    expect(mockUploadImage2S3Bucket.mock.calls[0][1]).not.toHaveProperty('base64Img');
+     expect(mockClearDiskTempFiles).toHaveBeenCalledWith(['/tmp/cat.png']);
+   });
+ });
+diff --git a/projects/app/test/api/core/dataset/data/insertImages.test.ts b/projects/app/test/api/core/dataset/data/insertImages.test.ts
+index f3431f3ac5d0..d9d9a6e5ec51 100644
+--- a/projects/app/test/api/core/dataset/data/insertImages.test.ts
++++ b/projects/app/test/api/core/dataset/data/insertImages.test.ts
+@@ -171,6 +171,14 @@ describe('POST /api/core/dataset/data/insertImages', () => {
+       data: [{ imageId: 'dataset/team/cat.png' }],
+       session: 'session'
+     });
++    expect(mockUploadImage2S3Bucket).toHaveBeenCalledWith('private', {
++      buffer: Buffer.from('image-bytes'),
++      uploadKey: 'dataset/team/cat.png',
++      mimetype: 'image/png',
++      filename: 'cat.png',
++      expiredTime: expect.any(Date)
++    });
++    expect(mockUploadImage2S3Bucket.mock.calls[0][1]).not.toHaveProperty('base64Img');
+     expect(mockClearDiskTempFiles).toHaveBeenCalledWith(['/tmp/cat.png']);
+   });
+ 

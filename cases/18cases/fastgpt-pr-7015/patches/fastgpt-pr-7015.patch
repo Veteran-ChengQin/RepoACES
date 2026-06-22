@@ -1,0 +1,117 @@
+diff --git a/.gitignore b/.gitignore
+index d75e298b889e..a52f505c5b5c 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -41,4 +41,10 @@ projects/app/worker/
+ pro/admin/worker/
+ 
+ .turbo
+-.antigravitycli
+\ No newline at end of file
++.antigravitycli
++
++# content_benchmark local secrets and generated artifacts
++/pro/llm_benchmark/content_benchmark/.env.local
++/pro/llm_benchmark/content_benchmark/.env.*.local
++/pro/llm_benchmark/content_benchmark/eval-runs/
++/pro/llm_benchmark/content_benchmark/.cache/
+diff --git a/packages/service/core/ai/llm/promptCall/index.ts b/packages/service/core/ai/llm/promptCall/index.ts
+index 2e7905c1f79a..84e2239aa6f1 100644
+--- a/packages/service/core/ai/llm/promptCall/index.ts
++++ b/packages/service/core/ai/llm/promptCall/index.ts
+@@ -7,7 +7,9 @@ import type {
+   ChatCompletionTool
+ } from '@fastgpt/global/core/ai/llm/type';
+ import { getPromptToolCallPrompt } from './prompt';
+-import { cloneDeep } from 'lodash';
++import lodash from 'lodash';
++
++const { cloneDeep } = lodash;
+ 
+ export const promptToolCallMessageRewrite = (
+   messages: ChatCompletionMessageParam[],
+@@ -82,7 +84,7 @@ export const parsePromptToolCall = (
+     const toolString = sliceJsonStr(str);
+ 
+     try {
+-      const toolCall = json5.parse(toolString) as { name: string; arguments: Object };
++      const toolCall = json5.parse(toolString) as { name: string; arguments: object };
+ 
+       return {
+         answer: '',
+diff --git a/packages/service/core/ai/model.ts b/packages/service/core/ai/model.ts
+index f4beefa42a62..aa4d6b59dd2a 100644
+--- a/packages/service/core/ai/model.ts
++++ b/packages/service/core/ai/model.ts
+@@ -1,10 +1,12 @@
+-import { cloneDeep } from 'lodash';
++import lodash from 'lodash';
+ import { type SystemModelItemType } from './type';
+ import type {
+   EmbeddingModelItemType,
+   LLMModelItemType
+ } from '@fastgpt/global/core/ai/model.schema';
+ 
++const { cloneDeep } = lodash;
++
+ export const getDefaultLLMModel = () => global.systemDefaultModel.llm!;
+ export const getLLMModel = (model?: string | LLMModelItemType) => {
+   if (!model) return getDefaultLLMModel();
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 266064a0db28..3426785fca77 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -1110,6 +1110,34 @@ importers:
+         specifier: 'catalog:'
+         version: 4.1.5(@opentelemetry/api@1.9.0)(@types/node@20.17.24)(@vitest/coverage-v8@4.1.5)(jsdom@26.1.0(bufferutil@4.1.0)(canvas@3.2.3)(utf-8-validate@5.0.10))(vite@6.2.2(@types/node@20.17.24)(jiti@1.21.7)(lightningcss@1.32.0)(sass@1.85.1)(terser@5.39.0)(tsx@4.20.6)(yaml@2.8.4))
+ 
++  pro/llm_benchmark/content_benchmark:
++    dependencies:
++      '@fastgpt/global':
++        specifier: workspace:*
++        version: link:../../../packages/global
++      '@fastgpt/service':
++        specifier: workspace:*
++        version: link:../../../packages/service
++      gpt-tokenizer:
++        specifier: 'catalog:'
++        version: 3.4.0
++      nanoid:
++        specifier: 'catalog:'
++        version: 5.1.5
++    devDependencies:
++      '@types/node':
++        specifier: 'catalog:'
++        version: 20.17.24
++      tsx:
++        specifier: 'catalog:'
++        version: 4.20.6
++      typescript:
++        specifier: 'catalog:'
++        version: 6.0.3
++      vitest:
++        specifier: 'catalog:'
++        version: 4.1.5(@opentelemetry/api@1.9.0)(@types/node@20.17.24)(@vitest/coverage-v8@4.1.5)(jsdom@26.1.0(bufferutil@4.1.0)(canvas@3.2.3)(utf-8-validate@5.0.10))(vite@6.2.2(@types/node@20.17.24)(jiti@2.7.0)(lightningcss@1.32.0)(sass@1.85.1)(terser@5.39.0)(tsx@4.20.6)(yaml@2.8.4))
++
+   pro/sso:
+     dependencies:
+       '@fastgpt-sdk/otel':
+diff --git a/pnpm-workspace.yaml b/pnpm-workspace.yaml
+index 6772e10dd796..e6ab7930a2cf 100644
+--- a/pnpm-workspace.yaml
++++ b/pnpm-workspace.yaml
+@@ -6,6 +6,7 @@ packages:
+   - projects/marketplace
+   - projects/mcp_server
+   - projects/volume-manager
++  - pro/llm_benchmark/content_benchmark
+   - pro/admin
+   - pro/sso
+ 
+diff --git a/pro b/pro
+index b98839ddf585..178fa40152f7 160000
+--- a/pro
++++ b/pro
+@@ -1 +1 @@
+-Subproject commit b98839ddf585c4b91e6cd823994f89efc02c901b
++Subproject commit 178fa40152f7ddf5fef988d2dc627aaa78689a2a

@@ -1,0 +1,24 @@
+id: fastgpt-pr-7046
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "1759544e1e9028eebae0834ee9299929c88a0fe6"
+  pr_number: 7046
+  pr_url: https://github.com/labring/FastGPT/pull/7046
+  pr_title_raw: "feat: upgrade MiniMax default model to M3"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    Upgrade MiniMax model configuration to use M3 as the default model.
+
+validation:
+  head_commit: "791f68dac07984f094d7719628ae37681f5530ba"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-7046.patch"
+  patch_sha256: "bf08b905aec822c0159b348f44e7ea5280cb95fb25927d898c69507746cdf8b8"
+  changed_files_file: "patches/fastgpt-pr-7046.changed_files.txt"
+  manual_functionality_description: |
+    Check that MiniMax self-host model configuration documentation uses M3 as the default model.
+    Manual evaluation should confirm both Chinese and English documentation are updated consistently and no stale default-model guidance remains in the touched MiniMax config docs.

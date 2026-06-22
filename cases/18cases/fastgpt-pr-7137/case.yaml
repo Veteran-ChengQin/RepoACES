@@ -1,0 +1,26 @@
+id: fastgpt-pr-7137
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "9d5a8777da127283f9e2bfe1b16864b8c18c8e98"
+  pr_number: 7137
+  pr_url: https://github.com/labring/FastGPT/pull/7137
+  pr_title_raw: "feat: route helper bot generation through pro"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    - route HelperBot completions through /api/proApi/core/chat/helperBot/completions
+    - keep HelperBot OpenAPI contracts under packages/global/openapi/core/chat/helperBot
+    - remove the main-repo HelperBot generation dispatch implementation and update the pro submodule pointer
+
+validation:
+  head_commit: "1567871d4a6b24f52dd16bdba9d889d7b5b2b227"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-7137.patch"
+  patch_sha256: "0e3a506ebcd1ca239b9e969ec6d67314509ed59d36d8b8f25f2cc8c564a2d00f"
+  changed_files_file: "patches/fastgpt-pr-7137.changed_files.txt"
+  manual_functionality_description: |
+    Check that HelperBot generation is routed through the pro API completions endpoint instead of the main-repo dispatch implementation.
+    The OpenAPI contracts for HelperBot should remain under the global helperBot package, the app-side request path should call /api/proApi/core/chat/helperBot/completions, and the removed main-repo generation dispatch should not be used by the HelperBot UI flow.

@@ -1,0 +1,2014 @@
+diff --git a/packages/global/core/chat/helperBot/topAgent/type.ts b/packages/global/core/chat/helperBot/topAgent/type.ts
+index b8652b587866..c886a442f1b7 100644
+--- a/packages/global/core/chat/helperBot/topAgent/type.ts
++++ b/packages/global/core/chat/helperBot/topAgent/type.ts
+@@ -1,4 +1,5 @@
+ import z from 'zod';
++import { SelectedDatasetSchema } from '../../../workflow/type/io';
+ 
+ // TopAgent 参数配置
+ export const topAgentParamsSchema = z.object({
+@@ -11,3 +12,13 @@ export const topAgentParamsSchema = z.object({
+   enableSandbox: z.boolean().nullish()
+ });
+ export type TopAgentParamsType = z.infer<typeof topAgentParamsSchema>;
++
++export const TopAgentFormDataSchema = z.object({
++  systemPrompt: z.string().optional(),
++  tools: z.array(z.string()).optional().default([]),
++  datasets: z.array(SelectedDatasetSchema).optional().default([]),
++  fileUploadEnabled: z.boolean().optional().default(false),
++  enableSandboxEnabled: z.boolean().optional().default(false),
++  executionPlan: z.any().optional()
++});
++export type TopAgentFormDataType = z.infer<typeof TopAgentFormDataSchema>;
+diff --git a/packages/global/openapi/core/chat/helperBot/api.ts b/packages/global/openapi/core/chat/helperBot/api.ts
+index 926d8ffee898..6129e8972492 100644
+--- a/packages/global/openapi/core/chat/helperBot/api.ts
++++ b/packages/global/openapi/core/chat/helperBot/api.ts
+@@ -1,13 +1,31 @@
+-import { PaginationResponseSchema } from '../../../api';
+-import { PaginationSchema } from '../../../api';
++import { z } from 'zod';
++import { PaginationResponseSchema, PaginationSchema } from '../../../api';
++import { ChatFileTypeEnum } from '../../../../core/chat/constants';
+ import {
+   HelperBotChatItemSiteSchema,
+   HelperBotTypeEnum,
+   HelperBotTypeEnumSchema
+ } from '../../../../core/chat/helperBot/type';
+ import { topAgentParamsSchema } from '../../../../core/chat/helperBot/topAgent/type';
+-import { z } from 'zod';
+-import { ChatFileTypeEnum } from '../../../../core/chat/constants';
++
++export const HelperBotCompletionsParamsSchema = z.object({
++  chatId: z.string(),
++  chatItemId: z.string(),
++  query: z.string(),
++  files: z.array(
++    z.object({
++      type: z.enum(ChatFileTypeEnum),
++      key: z.string(),
++      url: z.string().optional(),
++      name: z.string()
++    })
++  ),
++  metadata: z.object({
++    type: z.literal(HelperBotTypeEnum.topAgent),
++    data: topAgentParamsSchema
++  })
++});
++export type HelperBotCompletionsParamsType = z.infer<typeof HelperBotCompletionsParamsSchema>;
+ 
+ // 分页获取记录
+ export const GetHelperBotChatRecordsParamsSchema = PaginationSchema.extend({
+@@ -45,22 +63,3 @@ export const GetHelperBotFilePreviewParamsSchema = z.object({
+ });
+ export type GetHelperBotFilePreviewParamsType = z.infer<typeof GetHelperBotFilePreviewParamsSchema>;
+ export const GetHelperBotFilePreviewResponseSchema = z.string();
+-
+-export const HelperBotCompletionsParamsSchema = z.object({
+-  chatId: z.string(),
+-  chatItemId: z.string(),
+-  query: z.string(),
+-  files: z.array(
+-    z.object({
+-      type: z.enum(ChatFileTypeEnum),
+-      key: z.string(),
+-      url: z.string().optional(),
+-      name: z.string()
+-    })
+-  ),
+-  metadata: z.object({
+-    type: z.literal(HelperBotTypeEnum.topAgent),
+-    data: topAgentParamsSchema
+-  })
+-});
+-export type HelperBotCompletionsParamsType = z.infer<typeof HelperBotCompletionsParamsSchema>;
+diff --git a/packages/global/openapi/core/chat/helperBot/index.ts b/packages/global/openapi/core/chat/helperBot/index.ts
+index d25f91da1809..035d4652ae7b 100644
+--- a/packages/global/openapi/core/chat/helperBot/index.ts
++++ b/packages/global/openapi/core/chat/helperBot/index.ts
+@@ -1,14 +1,38 @@
+ import z from 'zod';
+ import type { OpenAPIPath } from '../../../type';
++import { TagsMap } from '../../../tag';
+ import {
++  HelperBotCompletionsParamsSchema,
+   DeleteHelperBotChatParamsSchema,
+   GetHelperBotChatRecordsParamsSchema,
+-  GetHelperBotChatRecordsResponseSchema,
+-  HelperBotCompletionsParamsSchema
++  GetHelperBotChatRecordsResponseSchema
+ } from './api';
+-import { TagsMap } from '../../../tag';
+ 
+ export const HelperBotPath: OpenAPIPath = {
++  '/proApi/core/chat/helperBot/completions': {
++    post: {
++      summary: '辅助生成统一对话接口',
++      description: '辅助生成统一对话接口',
++      tags: [TagsMap.helperBot],
++      requestBody: {
++        content: {
++          'application/json': {
++            schema: HelperBotCompletionsParamsSchema
++          }
++        }
++      },
++      responses: {
++        200: {
++          description: '成功返回流式处理结果',
++          content: {
++            'application/stream+json': {
++              schema: z.any()
++            }
++          }
++        }
++      }
++    }
++  },
+   '/core/chat/helperBot/getRecords': {
+     get: {
+       summary: '分页获取记录',
+@@ -52,29 +76,5 @@ export const HelperBotPath: OpenAPIPath = {
+         }
+       }
+     }
+-  },
+-  '/core/chat/helperBot/completions': {
+-    post: {
+-      summary: '辅助助手对话接口',
+-      description: '辅助助手对话接口',
+-      tags: [TagsMap.helperBot],
+-      requestBody: {
+-        content: {
+-          'application/json': {
+-            schema: HelperBotCompletionsParamsSchema
+-          }
+-        }
+-      },
+-      responses: {
+-        200: {
+-          description: '成功返回处理结果',
+-          content: {
+-            'application/stream+json': {
+-              schema: z.any()
+-            }
+-          }
+-        }
+-      }
+-    }
+   }
+ };
+diff --git a/packages/service/core/chat/HelperBot/dispatch/index.ts b/packages/service/core/chat/HelperBot/dispatch/index.ts
+deleted file mode 100644
+index 8f5719ba4837..000000000000
+--- a/packages/service/core/chat/HelperBot/dispatch/index.ts
++++ /dev/null
+@@ -1,6 +0,0 @@
+-import { HelperBotTypeEnum } from '@fastgpt/global/core/chat/helperBot/type';
+-import { dispatchTopAgent } from './topAgent';
+-
+-export const dispatchMap = {
+-  [HelperBotTypeEnum.topAgent]: dispatchTopAgent
+-};
+diff --git a/packages/service/core/chat/HelperBot/dispatch/topAgent/index.ts b/packages/service/core/chat/HelperBot/dispatch/topAgent/index.ts
+deleted file mode 100644
+index b53b8e6260c8..000000000000
+--- a/packages/service/core/chat/HelperBot/dispatch/topAgent/index.ts
++++ /dev/null
+@@ -1,295 +0,0 @@
+-import { type HelperBotDispatchParamsType, type HelperBotDispatchResponseType } from '../type';
+-import { helperChats2GPTMessages } from '@fastgpt/global/core/chat/helperBot/adaptor';
+-import { getPrompt } from './prompt';
+-import { createLLMResponse } from '../../../../ai/llm/request';
+-import { getDefaultHelperBotModel } from '../../../../ai/model';
+-import { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
+-import { textAdaptGptResponse } from '@fastgpt/global/core/workflow/runtime/utils';
+-import {
+-  generateResourceList,
+-  extractResourcesFromPlan,
+-  buildSystemPrompt,
+-  buildDisplayText
+-} from './utils';
+-import { TopAgentAnswerSchema, TopAgentFormDataSchema } from './type';
+-import { formatAIResponse } from '../utils';
+-import type { TopAgentParamsType } from '@fastgpt/global/core/chat/helperBot/topAgent/type';
+-import type { UserInputInteractive } from '@fastgpt/global/core/workflow/template/system/interactive/type';
+-import { getNanoid } from '@fastgpt/global/common/string/tools';
+-import { WorkflowIOValueTypeEnum } from '@fastgpt/global/core/workflow/constants';
+-import { FlowNodeInputTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
+-import { parseJsonArgs } from '../../../../ai/utils';
+-import { MongoDataset } from '../../../../dataset/schema';
+-import { ObjectIdSchema } from '@fastgpt/global/common/type/mongo';
+-import type { SelectedDatasetType } from '@fastgpt/global/core/workflow/type/io';
+-import { getLogger, LogCategories } from '../../../../../common/logger';
+-import { AGENT_SANDBOX_TOOLSET_ID } from '@fastgpt/global/core/ai/sandbox/tools';
+-
+-export const dispatchTopAgent = async (
+-  props: HelperBotDispatchParamsType<TopAgentParamsType>
+-): Promise<HelperBotDispatchResponseType> => {
+-  const { query, files, data, histories, workflowResponseWrite, user } = props;
+-
+-  const modelData = getDefaultHelperBotModel();
+-  if (!modelData) {
+-    return Promise.reject('Can not get model data');
+-  }
+-
+-  const usage = {
+-    model: modelData.model,
+-    inputTokens: 0,
+-    outputTokens: 0
+-  };
+-
+-  const { resourceList } = await generateResourceList({
+-    teamId: user.teamId,
+-    tmbId: user.tmbId,
+-    isRoot: user.isRoot,
+-    lang: user.lang
+-  });
+-
+-  const systemPrompt = getPrompt({
+-    resourceList,
+-    metadata: data
+-  });
+-
+-  const historyMessages = helperChats2GPTMessages({
+-    messages: histories
+-  });
+-  const conversationMessages = [
+-    { role: 'system' as const, content: systemPrompt },
+-    ...historyMessages,
+-    { role: 'user' as const, content: query }
+-  ];
+-
+-  const llmResponse = await createLLMResponse({
+-    body: {
+-      messages: conversationMessages,
+-      model: modelData,
+-      stream: true
+-    },
+-    onReasoning: ({ text }) => {
+-      workflowResponseWrite?.({
+-        event: SseResponseEventEnum.answer,
+-        data: textAdaptGptResponse({ reasoning_content: text })
+-      });
+-    }
+-    // onStreaming: ({ text }) => {
+-    //   workflowResponseWrite?.({
+-    //     event: SseResponseEventEnum.answer,
+-    //     data: textAdaptGptResponse({ text })
+-    //   });
+-    // }
+-  });
+-
+-  usage.inputTokens = llmResponse.usage.inputTokens;
+-  usage.outputTokens = llmResponse.usage.outputTokens;
+-
+-  const answerText = llmResponse.answerText;
+-  const reasoningText = llmResponse.reasoningText;
+-  // console.log('Top agent response:', answerText);
+-  try {
+-    const parseAnswer = (text: string) => {
+-      return TopAgentAnswerSchema.safeParseAsync(parseJsonArgs(text));
+-    };
+-    let result = await parseAnswer(answerText);
+-    // console.dir({ label: 'Top agent parsed result', result }, {
+-    //   depth: null,
+-    //   maxArrayLength: null
+-    // });
+-    if (!result.success) {
+-      getLogger(LogCategories.MODULE.AI.HELPERBOT).warn(
+-        '[Top agent] JSON parse failed, try repair',
+-        { text: answerText }
+-      );
+-
+-      const repairPrompt = `当前查询的用户问题：${query} \n辅助助手上一次的输出:\n${answerText}，\nJSON 解析的报错信息：\n${result.error} \n
+-         查看JSON 的报错信息来修正 JSON 格式错误，并仅返回正确的 JSON，确保 JSON 格式正确无误且可以被解析。不要包含任何多余的信息。`;
+-      const repairResponse = await createLLMResponse({
+-        body: {
+-          messages: [
+-            { role: 'system' as const, content: systemPrompt },
+-            ...historyMessages,
+-            {
+-              role: 'user' as const,
+-              content: repairPrompt
+-            }
+-          ],
+-          model: modelData,
+-          stream: true
+-        }
+-      });
+-      usage.inputTokens += repairResponse.usage.inputTokens;
+-      usage.outputTokens += repairResponse.usage.outputTokens;
+-
+-      result = await parseAnswer(repairResponse.answerText);
+-      console.dir(
+-        { label: 'Top agent parsed result', result },
+-        {
+-          depth: null,
+-          maxArrayLength: null
+-        }
+-      );
+-      if (!result.success) {
+-        getLogger(LogCategories.MODULE.AI.HELPERBOT).warn('[Top agent] JSON repair failed', {
+-          text: repairResponse.answerText
+-        });
+-        return {
+-          aiResponse: formatAIResponse({
+-            text: answerText,
+-            reasoning: reasoningText
+-          }),
+-          usage
+-        };
+-      }
+-    }
+-
+-    const responseJson = result.data;
+-
+-    if (responseJson.phase === 'generation') {
+-      getLogger(LogCategories.MODULE.AI.HELPERBOT).debug(
+-        '🔄 TopAgent: Configuration generation phase'
+-      );
+-
+-      const { tools, knowledges } = extractResourcesFromPlan(responseJson.execution_plan);
+-      const filterDatasets = await filterValidDatasets({
+-        teamId: user.teamId,
+-        datasetIds: knowledges
+-      });
+-      const enableSandboxEnabled =
+-        responseJson.resources?.system_features?.sandbox?.enabled ||
+-        tools.includes(AGENT_SANDBOX_TOOLSET_ID);
+-      const formData = TopAgentFormDataSchema.parse({
+-        systemPrompt: buildSystemPrompt(responseJson), // 构建 system prompt
+-        tools, // 从 execution_plan 提取
+-        datasets: filterDatasets,
+-        fileUploadEnabled: responseJson.resources?.system_features?.file_upload?.enabled || false,
+-        enableSandboxEnabled,
+-        executionPlan: responseJson.execution_plan // 保存原始 execution_plan
+-      });
+-
+-      if (formData) {
+-        workflowResponseWrite?.({
+-          event: SseResponseEventEnum.topAgentConfig,
+-          data: formData
+-        });
+-      }
+-
+-      workflowResponseWrite?.({
+-        event: SseResponseEventEnum.plan,
+-        data: {
+-          type: 'generation'
+-        }
+-      });
+-
+-      return {
+-        aiResponse: formatAIResponse({
+-          text: buildDisplayText(responseJson), // 构建显示文本
+-          reasoning: reasoningText,
+-          planHint: {
+-            type: 'generation'
+-          }
+-        }),
+-        usage
+-      };
+-    } else {
+-      getLogger(LogCategories.MODULE.AI.HELPERBOT).debug(
+-        '📝 TopAgent: Information collection phase'
+-      );
+-
+-      const formDeata = responseJson.form;
+-      if (formDeata) {
+-        const inputForm: UserInputInteractive = {
+-          type: 'userInput',
+-          params: {
+-            inputForm: formDeata.map((item) => {
+-              return {
+-                type: item.type as FlowNodeInputTypeEnum,
+-                key: getNanoid(6),
+-                label: item.label,
+-                value: '',
+-                required: false,
+-                valueType:
+-                  item.type === FlowNodeInputTypeEnum.numberInput
+-                    ? WorkflowIOValueTypeEnum.number
+-                    : WorkflowIOValueTypeEnum.string,
+-                list:
+-                  'options' in item
+-                    ? item.options?.map((option) => ({ label: option, value: option }))
+-                    : undefined
+-              };
+-            }),
+-            description: responseJson.question
+-          }
+-        };
+-        workflowResponseWrite?.({
+-          event: SseResponseEventEnum.collectionForm,
+-          data: inputForm
+-        });
+-
+-        return {
+-          aiResponse: formatAIResponse({
+-            text: responseJson.question,
+-            reasoning: reasoningText,
+-            collectionForm: inputForm
+-          }),
+-          usage
+-        };
+-      }
+-
+-      workflowResponseWrite?.({
+-        event: SseResponseEventEnum.answer,
+-        data: textAdaptGptResponse({ text: responseJson.question })
+-      });
+-
+-      return {
+-        aiResponse: formatAIResponse({
+-          text: responseJson.question,
+-          reasoning: reasoningText
+-        }),
+-        usage
+-      };
+-    }
+-  } catch (e) {
+-    getLogger(LogCategories.MODULE.AI.HELPERBOT).warn(`[Top agent] Failed to parse JSON response`, {
+-      text: answerText
+-    });
+-    return {
+-      aiResponse: formatAIResponse({
+-        text: answerText,
+-        reasoning: reasoningText
+-      }),
+-      usage
+-    };
+-  }
+-};
+-
+-const filterValidDatasets = async ({
+-  teamId,
+-  datasetIds
+-}: {
+-  teamId: string;
+-  datasetIds: string[];
+-}): Promise<SelectedDatasetType[]> => {
+-  // Check datasetIds is
+-  const result = await MongoDataset.find(
+-    {
+-      teamId,
+-      _id: {
+-        $in: datasetIds.filter((id) => {
+-          const parse = ObjectIdSchema.safeParse(id);
+-          return parse.success;
+-        })
+-      }
+-    },
+-    '_id avatar name vectorModel'
+-  ).lean();
+-  return result.map((item) => ({
+-    datasetId: String(item._id),
+-    avatar: item.avatar,
+-    name: item.name,
+-    vectorModel: {
+-      model: item.vectorModel
+-    }
+-  }));
+-};
+diff --git a/packages/service/core/chat/HelperBot/dispatch/topAgent/prompt.ts b/packages/service/core/chat/HelperBot/dispatch/topAgent/prompt.ts
+deleted file mode 100644
+index 636aed569dad..000000000000
+--- a/packages/service/core/chat/HelperBot/dispatch/topAgent/prompt.ts
++++ /dev/null
+@@ -1,470 +0,0 @@
+-import type { TopAgentParamsType } from '@fastgpt/global/core/chat/helperBot/topAgent/type';
+-
+-export const getPrompt = ({
+-  resourceList,
+-  metadata
+-}: {
+-  resourceList: string;
+-  metadata?: TopAgentParamsType;
+-}) => {
+-  // 构建预设信息部分
+-  const existsInfoPrompt = (() => {
+-    if (!metadata) return '';
+-
+-    const sections: string[] = [];
+-
+-    if (metadata.systemPrompt) {
+-      sections.push(`${metadata.systemPrompt}`);
+-    }
+-    if (metadata.selectedTools?.length) {
+-      sections.push(
+-        `**预设工具**: 搭建者已预先选择了以下工具 ID: ${metadata.selectedTools.join(', ')}`
+-      );
+-    }
+-
+-    if (metadata.selectedDatasets?.length) {
+-      sections.push(
+-        `**预设知识库**: 搭建者已预先选择了以下知识库 ID: ${metadata.selectedDatasets.join(', ')}`
+-      );
+-    }
+-
+-    if (metadata.fileUpload !== undefined && metadata.fileUpload !== null) {
+-      sections.push(
+-        `**文件上传**: ${metadata.fileUpload ? '搭建者已启用文件上传功能' : '搭建者已禁用文件上传功能'}`
+-      );
+-    }
+-
+-    if (metadata.enableSandbox !== undefined && metadata.enableSandbox !== null) {
+-      sections.push(
+-        `**虚拟机**: ${metadata.enableSandbox ? '搭建者已启用虚拟机功能' : '搭建者已禁用虚拟机功能'}`
+-      );
+-    }
+-
+-    if (sections.length === 0) return '';
+-
+-    return `
+-搭建者已提供以下预设信息,这些信息具有**高优先级**,请在后续的信息收集和规划中优先参考:
+-
+-${sections.join('\n')}
+-
+-**重要提示**:
+-- 在规划阶段,优先使用预设知识库,但必须保证与任务语义相关
+-- 禁止把明显不相关的知识库纳入步骤
+-- 若预设知识库不匹配任务,可从可访问知识库中选择更相关者
+-`;
+-  })();
+-
+-  return `<!-- 流程搭建模板设计系统 -->
+-<role>
+-你是一个专业的**流程架构师**和**智能化搭建专家**，专门帮助搭建者设计可复用的Agent执行流程模板。
+-
+-**核心价值**：让搭建者能够快速创建高质量的执行流程，为后续用户提供标准化的问题解决方案。
+-
+-**核心能力**：
+-- 流程抽象化：将具体需求抽象为通用流程模板
+-- 参数化设计：识别可变参数和固定逻辑
+-- 能力边界识别：严格基于系统现有工具、知识库、文件处理等能力进行规划
+-- 复用性优化：确保模板在不同场景下的适应性
+-</role>
+-
+-<mission>
+-**核心目标**：为搭建者设计可复用的执行流程，包含：
+-1. 明确的步骤序列
+-2. 标准化的工具调用
+-3. 合理的决策点设计
+-4. 100%基于系统能力的可行性保证
+-
+-**输出价值**：
+-- 搭建者可以直接使用或参考这个流程设计
+-- 最终用户可以通过这个流程解决相关问题
+-- 系统可以保证完全的可执行性
+-</mission>
+-
+-<preset_info>
+-${existsInfoPrompt}
+-</preset_info>
+-
+-<info_collection_phase>
+-**信息收集阶段**
+-
+-**核心目标**：为搭建者设计可复用的执行流程模板（而非解决单个问题），收集必需的核心信息。
+-
+-**信息收集框架**（按优先级排序）：
+-
+-**🎯 1. 任务场景识别**（首要任务）
+-- 了解用户要实现的具体功能
+-- 识别任务类型、核心特征和目标定位
+-- 为后续信息收集确定方向
+-
+-**⚠️ 2. 能力边界确认**（最关键，必须优先）
+-- **系统能力**：基于“可用工具与知识库”自行判断可用工具及其能力边界
+-- **不支持的功能**：哪些功能无法实现、哪些操作缺少工具支持
+-- **技术约束**：数据格式/大小限制、第三方服务依赖、权限和资源约束
+-
+-**📍 3. 流程定位**
+-- 目标用户群体和典型使用场景
+-- 解决问题的类型和适用范围
+-- 流程的核心价值和预期效果
+-
+-**📥 4. 输入输出规范**（仅模板级，不收集最终用户具体内容）
+-- 输入参数：字段类型/格式/来源/范围/校验规则/可选项
+-- 输出结果：结构规范/格式要求/目标
+-- 参数约束：必选/可选/默认值/取值范围
+-
+-**🔄 5. 可变逻辑识别**
+-- 需要动态调整的步骤
+-- 决策点的判断条件和分支逻辑
+-- 可配置的工具选项和参数映射
+-
+-**提问策略**（重要：避免重复与无效提问）：
+-- ✅ 先总结已有信息（明确列出已知与缺口），再决定是否需要继续提问
+-- ✅ 只问“缺口信息”，不要为了提问而提问
+-- ✅ 同一问题不要重复问；若用户已答复则进入下一步
+-- ✅ 优先选择题（尤其多选），尽量减少用户打字
+-- ✅ 能用选项就不用开放式输入，只有必要时才用输入框
+-- ✅ 不要求用户提供工具/知识库 ID（你应根据可用工具与知识库自行选择并规划）
+-- ✅ 不向搭建者收集最终用户的具体输入内容/样本（这类信息属于运行时由最终用户提供）
+-- ✅ 能用系统已有信息推断的，不再追问
+-
+-**信息收集顺序**：
+-1️⃣ 任务类型/场景 → 2️⃣ 能力边界 → 3️⃣ 流程定位 → 4️⃣ 输入输出/可变逻辑
+-
+-**关键原则**：
+-- ✅ 能力边界优先：先确认能做什么，再设计细节
+-- ✅ 严格基于工具列表：不假设任何未提供的能力
+-- ✅ 问题精准聚焦：每个问题都服务于输出准确信息
+-- ✅ 明确不可行项：重点确认不能做的功能
+-- ✅ 提问必须带有“下一步决策价值”，否则不问
+-- ✅ 只收集模板级信息，不询问最终用户的具体输入内容
+-
+-**📋 输出格式规范**
+-
+-**所有回复必须使用纯JSON格式**（不添加代码块标记），包含以下字段：
+-
+-开放式问题格式：
+-{
+-  "phase": "collection",
+-  "reasoning": "为什么问这个问题：基于什么考虑、希望收集什么信息、对后续有什么帮助",
+-  "question": "实际向用户提出的问题内容"
+-}
+-
+-**两种问题形式**：
+-
+-**形式1：开放式问题**（无需表单）
+-{
+-  "phase": "collection",
+-  "reasoning": "需要了解任务的基本定位和目标场景，这将决定后续需要确认的工具类型和能力边界",
+-  "question": "我想了解一下您希望这个流程模板实现什么功能？能否详细描述一下具体要处理什么样的任务或问题？"
+-}
+-
+-**形式2：表单问题**（4种表单类型）
+-{
+-  "phase": "collection",
+-  "reasoning": "需要确认参数化设计的重点方向，这将影响流程模板的灵活性设计",
+-  "question": "我需要和你确认一些参数，请根据你的需求选择（尽量少输入）：",
+-  "form": [
+-    {
+-      "type": "input",
+-      "label": "如需补充说明，请在这里填写"
+-    },
+-    {
+-      "type": "numberInput",
+-      "label": "你想优化多少次"
+-    },
+-    {
+-      "type": "select",
+-      "label": "用户最需要调整的是（单选）",
+-      "options": ["输入数据源", "处理参数", "输出格式", "执行环境", "其他（请说明）"]
+-    },
+-    {
+-      "type": "multipleSelect",
+-      "label": "你想了解用户什么信息（可多选）",
+-      "options": ["选项 A", "选项 B", "选项 C", "选项 D", "其他（请说明）"]
+-    }
+-  ]
+-}
+-
+-**表单设计指南**：
+-
+-**何时使用选择题**（优先多选，减少输入）：
+-- ✅ 经验水平（初学者/有经验/熟练/专家）
+-- ✅ 优先级排序（时间/质量/成本/创新）
+-- ✅ 任务分类（分析/设计/开发/测试）
+-- ✅ 满意度评估（非常满意/满意/一般/不满意）
+-- ✅ 复杂度判断（简单/中等/复杂/极复杂）
+-- ✅ 适用范围/场景（可多选）
+-
+-**选项设计原则**：
+-- 覆盖主要可能性（3-6个为佳）
+-- ✅ 每组选择题**最后一个选项**固定为“其他（请说明）”
+-- 选项简洁明了
+-- 选项之间有明显区分度
+-- 避免过于技术化的术语
+-- ⚠️ 不为所有问题强制提供选项（必要时才用输入框）
+-
+-**质量检查清单**：
+-- [ ] 是否基于可用工具列表确认能力边界
+-- [ ] 是否明确识别了不支持的功能
+-- [ ] 问题是否直接服务于输出准确信息
+-- [ ] 输出的格式是否是上述的两种 json 的一种，且无代码块标记
+-- [ ] JSON格式是否正确（无代码块标记）
+-- [ ] reasoning是否清晰说明提问意图
+-</info_collection_phase>
+-
+-<capability_boundary_enforcement>
+-**系统能力边界确认**：
+-
+-**动态约束原则**：
+-1. **只规划现有能力**：只能使用系统当前提供的工具和功能
+-2. **基于实际能力判断**：如果系统有编程工具，就可以规划编程任务
+-3. **能力适配规划**：根据可用工具库的能力边界来设计流程
+-4. **避免能力假设**：不能假设系统有未明确提供的能力
+-
+-**规划前自我检查**：
+-- 这个步骤需要什么具体能力？
+-- 当前系统中是否有对应的工具提供这种能力？
+-- 用户是否具备使用该工具的条件？
+-- 如果没有合适的工具，能否用现有能力组合实现？
+-
+-**能力发现机制**：
+-- 优先使用系统中明确提供的工具
+-- 探索现有工具的组合能力
+-- 基于实际可用能力设计解决方案
+-- 避免依赖系统中不存在的能力
+-
+-**重要提醒**：请基于下面提供的可用工具列表，仔细分析系统能力边界，确保规划的每个步骤都有对应的工具支持。
+-</capability_boundary_enforcement>
+-
+-<config_generation_phase>
+-当处于配置信息生成阶段时：
+-
+-<resource_definitions>
+-**资源只分三类，请严格区分：**
+-- **工具 [工具]**：执行动作、调用服务、处理数据、生成内容。
+-- **知识库 [知识库]**：检索已存储的信息，提供领域知识。
+-- **系统功能**：平台前端开关，只能影响交互方式，不是工具或知识库。
+-
+-**硬性边界：**
+-- 模型不能自造工具、知识库或资源 ID。
+-- expectedTools 只能从下方“可用工具与知识库”候选列表中选择带 [工具] 或 [知识库] 标签的真实资源。
+-- description 中只能用 @资源ID 引用带 [工具] 或 [知识库] 标签的真实资源。
+-- file_upload 和 sandbox 不是 expectedTools，也不能写成 @file_upload、@sandbox 或其他 @系统功能ID。
+-- file_upload 和 sandbox 只作为 resources.system_features 下的前端开关；需要时启用开关，并在步骤中搭配真实 [工具]/[知识库] 资源。
+-</resource_definitions>
+-
+-**可用工具与知识库 / 可配置前端开关**：
+-"""
+-${resourceList}
+-"""
+-
+-**配置生成前的内部检查（不要输出）：**
+-1. 任务目标、角色、输入输出和关键约束是否足够明确。
+-2. 每个执行步骤是否有真实可用能力支撑；无法实现的能力不要伪造工具补齐。
+-3. 工具/知识库是否来自“可用工具与知识库”，并按标签设置 type：
+-   - [工具] → {"id": "资源ID", "type": "tool"}
+-   - [知识库] → {"id": "资源ID", "type": "knowledge"}
+-4. 同类工具只选最合适的一个；知识库必须和任务语义相关，不能为凑数量加入。
+-5. 如果需要用户上传私有文件，启用 resources.system_features.file_upload；如果需要代码执行、复杂计算或数据转换，启用 resources.system_features.sandbox。
+-
+-**输出要求**：
+-**重要**
+-1. 只输出JSON规定的字段，不要添加任何解释文字、代码块标记或其他内容！
+-2. 千万不能添加不属于以下模板中的字段到最终的结果中
+-
+-直接输出以下格式的JSON（千万不要添加其他字段进来）：
+-{
+-  "phase": "generation",
+-  "reasoning": "详细说明步骤设计思路和资源配置理由",
+-  "task_analysis": {
+-    "goal": "任务的核心目标描述",
+-    "role": "该流程的角色信息",
+-    "key_features": "收集到的信息，对任务的深度理解和定位"
+-  },
+-  "execution_plan": {
+-    "total_steps": 步骤总数,
+-    "steps": [
+-      {
+-        "id": "step1",
+-        "title": "简洁明确的步骤标题",
+-        "description": "使用 @资源ID 格式的简洁任务描述,明确指出要做什么",
+-        "expectedTools": [
+-          {"id": "资源ID1", "type": "tool或knowledge"},
+-          {"id": "资源ID2", "type": "tool或knowledge"}
+-        ]
+-      }
+-    ]
+-  },
+-  "resources": {
+-    "system_features": {
+-      "file_upload": {
+-        "enabled": true/false,
+-        "purpose": "说明原因（enabled=true时必填）"
+-      },
+-      "sandbox": {
+-        "enabled": true/false,
+-        "purpose": "说明为何需要虚拟机执行能力（enabled=true时必填，适用于代码执行、数据处理等场景）"
+-      }
+-    }
+-  }
+-}
+-
+-**重要说明**：
+-- expectedTools 字段中列出的资源是步骤需要使用的真实 [工具]/[知识库]
+-- 资源通过 id 和 type 标识，type 为 "tool" 或 "knowledge"
+-- description 字段中使用 @资源ID 格式引用资源
+-- 最终的 tools 和 knowledges 列表会从所有步骤的 expectedTools 中提取并去重
+-- file_upload 和 sandbox 只在 resources.system_features 中配置，不进入 expectedTools，也不允许作为 @资源ID 出现在 description 中
+-
+-**字段说明**：
+-- task_analysis: 提供对任务的深度理解和角色定义
+-- reasoning: 说明步骤设计思路和资源配置理由
+-- execution_plan: 结构化的执行步骤列表
+-- resources: 资源配置对象，仅包含系统功能配置
+-  * system_features.file_upload.enabled: 是否需要文件上传（必填）
+-  * system_features.file_upload.purpose: 为什么需要（enabled=true时必填）
+-  * system_features.sandbox.enabled: 是否需要虚拟机执行能力（可选，适用于代码执行、数据处理场景）
+-  * system_features.sandbox.purpose: 为什么需要虚拟机（enabled=true时必填）
+-
+-<execution_plan_design>
+-**执行计划设计**：
+-
+-**步骤设计要求**：
+-1. 每个步骤必须是可执行的独立单元
+-2. 步骤描述要简洁清晰，使用 @资源ID 格式引用资源
+-3. 在 expectedTools 中列出本步骤使用的所有资源
+-4. 步骤数量建议在 3-8 步之间
+-5. expectedTools 必须是对象数组，不能是字符串数组
+-6. expectedTools 中的每个资源都必须存在于“可用工具与知识库”，且带 [工具] 或 [知识库] 标签
+-7. file_upload、sandbox 只代表前端开关，不能出现在 expectedTools 或 @资源引用中
+-</execution_plan_design>
+-
+-**✅ 示例**（需要文件上传和虚拟机时，也只在 system_features 中启用开关）：
+-\`\`\`json
+-{
+-  "phase": "generation",
+-  "reasoning": "用户需要分析财务数据，需要上传报表，并使用真实数据分析工具处理文件内容",
+-  "task_analysis": {
+-    "goal": "分析用户的财务报表数据，提供财务健康评估和建议",
+-    "role": "财务数据分析专家",
+-    "key_features": "支持多种财务报表格式、自动识别数据类型、提供可视化分析"
+-  },
+-  "execution_plan": {
+-    "total_steps": 3,
+-    "steps": [
+-      {
+-        "id": "step1",
+-        "title": "等待文件上传",
+-        "description": "等待用户上传财务报表文件（Excel或PDF格式）",
+-        "expectedTools": []
+-      },
+-      {
+-        "id": "step2",
+-        "title": "数据提取与分析",
+-        "description": "使用 @data_analysis/tool 从文件中提取数据并进行分析",
+-        "expectedTools": [
+-          {"id": "data_analysis/tool", "type": "tool"}
+-        ]
+-      },
+-      {
+-        "id": "step3",
+-        "title": "生成分析报告",
+-        "description": "基于分析结果生成财务健康评估和改进建议",
+-        "expectedTools": []
+-      }
+-    ]
+-  },
+-  "resources": {
+-    "system_features": {
+-      "file_upload": {
+-        "enabled": true,
+-        "purpose": "需要您上传财务报表文件（Excel或PDF格式）进行数据提取和分析"
+-      },
+-      "sandbox": {
+-        "enabled": true,
+-        "purpose": "需要执行数据处理脚本或复杂计算"
+-      }
+-    }
+-  }
+-}
+-\`\`\`
+-
+-**严格输出规则**：
+-- ❌ 不要使用三个反引号json或其他代码块标记
+-- ❌ 不要使用 resources.tools 或 resources.knowledges 格式
+-- ❌ 不要添加任何解释性文字或前言后语
+-- ❌ 不要输出未在候选列表出现的资源 ID
+-- ❌ 不要把 file_upload 或 sandbox 放入 expectedTools
+-- ❌ 不要在 description 中写 @file_upload、@sandbox 或任何 @系统功能ID
+-- ✅ 资源通过 steps[*].expectedTools 引用
+-- ✅ file_upload.enabled=true 时必须提供 purpose 字段
+-- ✅ sandbox.enabled=true 时必须提供 purpose 字段
+-- ✅ 直接、纯净地输出JSON内容
+-
+-**质量要求**：
+-1. **任务理解深度**：确保分析基于对用户需求的深度理解
+-2. **资源匹配精度**：每个资源的选择都要有明确的理由
+-3. **格式准确性**：严格遵循新格式要求，使用 execution_plan 和 expectedTools
+-4. **输出纯净性**：只输出JSON，不包含任何其他内容
+-</config_generation_phase>
+-
+-<phase_decision_guidelines>
+-**🎯 关键：如何判断当前应该处于哪个阶段**
+-
+-**每次回复前，你必须自主评估以下问题**：
+-
+-1. **信息充分性评估**：
+-   - 我是否已经明确了解用户想要实现的核心功能？
+-   - 我是否知道哪些工具和资源适合这个任务？
+-   - 我是否了解用户的关键约束条件？
+-   - 如果上述问题有任何不确定，应该输出 "phase": "collection" 继续提问
+-
+-2. **配置生成时机判断**：
+-   - 满足以下**所有条件**时，才能输出 "phase": "generation"：
+-     * 已经明确任务的核心目标和场景
+-     * 已经确认系统能力边界和可用工具
+-     * 已经收集到足够信息来选择合适的资源
+-     * 对话轮次达到 3-6 轮（避免过早生成）
+-
+-3. **阶段回退机制**：
+-   - 如果用户在配置生成后继续发送消息
+-   - 评估新信息：
+-     * 如果是小调整（修改角色、工具选择等）→ 输出 "phase": "generation" 生成新配置
+-     * 如果发现核心需求变化或信息不足 → 输出 "phase": "collection" 回退继续提问
+-
+-**重要原则**：
+-- ❌ 不要在第一轮对话就生成配置（除非用户提供了极其详细的需求）
+-- ❌ 不要在信息不足时强行生成配置
+-- ✅ 宁可多问一两个问题，也不要生成不准确的配置
+-- ✅ 当确信信息充分时，果断切换到配置生成阶段
+-- ✅ 支持灵活的阶段切换，包括从配置生成回退到信息收集
+-</phase_decision_guidelines>
+-
+-<conversation_rules>
+-**回复格式要求**：
+-- **所有回复必须是 JSON 格式**，包含 phase 字段
+-- 信息收集阶段：输出 {"phase": "collection", "reasoning": "...", "question": "...","form":[...]}
+-- 配置生成阶段：输出 {"phase": "generation", "task_analysis": {...}, "resources": {...}, ...}
+-- ❌ 不要输出任何非 JSON 格式的内容
+-- ❌ 不要添加代码块标记（如三个反引号json）
+-- ❌ 也不能直接输出字符串形式的回答，必须进行格式的封装
+-
+-**特殊场景处理**：
+-- 如果用户明确要求"直接生成配置"，即使信息不足也应输出 "phase": "generation"
+-- 如果用户说"重新开始"或"从头来过"，回到 "phase": "collection" 重新收集
+-- 避免过度询问，通常 3-4 轮即可完成信息收集
+-
+-**质量保证**：
+-- 收集的信息要具体、准确、可验证
+-- 生成的配置要基于收集到的信息
+-- 确保配置中的每个资源都是可执行的
+-- 严格基于系统能力边界进行配置
+-
+-**输出一致性（请自然遵循）**：
+-- 默认只使用两类结构：collection 或 generation
+-- generation 阶段优先使用固定字段：phase/reasoning/task_analysis/execution_plan/resources
+-- collection 阶段优先使用固定字段：phase/reasoning/question/form
+-- 如对 generation 字段完整性不确定，优先回退到 collection 继续提问
+-- 输出前快速自检：无代码块、无前后解释文本、可被 JSON 解析
+-
+-</conversation_rules>`;
+-};
+diff --git a/packages/service/core/chat/HelperBot/dispatch/topAgent/type.ts b/packages/service/core/chat/HelperBot/dispatch/topAgent/type.ts
+deleted file mode 100644
+index ec3d47a16bf1..000000000000
+--- a/packages/service/core/chat/HelperBot/dispatch/topAgent/type.ts
++++ /dev/null
+@@ -1,72 +0,0 @@
+-import z from 'zod';
+-import { AICollectionAnswerSchema } from '../type';
+-import { SelectedDatasetSchema } from '@fastgpt/global/core/workflow/type/io';
+-
+-// 执行计划步骤中的资源引用类型
+-export const StepResourceRefSchema = z.object({
+-  id: z.string(),
+-  type: z.enum(['tool', 'knowledge'])
+-});
+-
+-// 执行计划步骤类型
+-export const ExecutionStepSchema = z.object({
+-  id: z.string(),
+-  title: z.string(),
+-  description: z.string(),
+-  expectedTools: z.array(StepResourceRefSchema).optional()
+-});
+-
+-export const ExecutionPlanSchema = z.object({
+-  total_steps: z.number(),
+-  steps: z.array(ExecutionStepSchema)
+-});
+-export type ExecutionPlanType = z.infer<typeof ExecutionPlanSchema>;
+-
+-export const TopAgentFormDataSchema = z.object({
+-  systemPrompt: z.string().optional(),
+-  tools: z.array(z.string()).optional().default([]),
+-  datasets: z.array(SelectedDatasetSchema).optional().default([]),
+-  fileUploadEnabled: z.boolean().optional().default(false),
+-  enableSandboxEnabled: z.boolean().optional().default(false),
+-  executionPlan: z.any().optional()
+-});
+-export type TopAgentFormDataType = z.infer<typeof TopAgentFormDataSchema>;
+-
+-// 表单收集
+-export const TopAgentCollectionAnswerSchema = AICollectionAnswerSchema.extend({
+-  phase: z.literal('collection'),
+-  reasoning: z.string().nullish()
+-});
+-export const TopAgentGenerationAnswerSchema = z.object({
+-  phase: z.literal('generation'),
+-  reasoning: z.string().nullish(),
+-  task_analysis: z.object({
+-    goal: z.string(),
+-    role: z.string(),
+-    key_features: z.string()
+-  }),
+-  execution_plan: ExecutionPlanSchema.optional(),
+-  resources: z.object({
+-    system_features: z.object({
+-      file_upload: z
+-        .object({
+-          enabled: z.boolean(),
+-          purpose: z.string().optional()
+-        })
+-        .optional()
+-        .default({ enabled: false }),
+-      sandbox: z
+-        .object({
+-          enabled: z.boolean()
+-        })
+-        .optional()
+-        .default({ enabled: false })
+-    })
+-  })
+-});
+-export const TopAgentAnswerSchema = z.discriminatedUnion('phase', [
+-  TopAgentCollectionAnswerSchema,
+-  TopAgentGenerationAnswerSchema
+-]);
+-export type TopAgentAnswerType = z.infer<typeof TopAgentAnswerSchema>;
+-export type TopAgentGenerationAnswerType = z.infer<typeof TopAgentGenerationAnswerSchema>;
+diff --git a/packages/service/core/chat/HelperBot/dispatch/topAgent/utils.ts b/packages/service/core/chat/HelperBot/dispatch/topAgent/utils.ts
+deleted file mode 100644
+index 5412c3dfcd45..000000000000
+--- a/packages/service/core/chat/HelperBot/dispatch/topAgent/utils.ts
++++ /dev/null
+@@ -1,223 +0,0 @@
+-import type { localeType } from '@fastgpt/global/common/i18n/type';
+-import { parseI18nString } from '@fastgpt/global/common/i18n/utils';
+-import type { ExecutionPlanType, TopAgentGenerationAnswerType } from './type';
+-import { SubAppIds, systemSubInfo } from '@fastgpt/global/core/workflow/node/agent/constants';
+-import { MongoDataset } from '../../../../dataset/schema';
+-import { MongoResourcePermission } from '../../../../../support/permission/schema';
+-import { PerResourceTypeEnum } from '@fastgpt/global/support/permission/constant';
+-import { getGroupsByTmbId } from '../../../../../support/permission/memberGroup/controllers';
+-import { getOrgIdSetWithParentByTmbId } from '../../../../../support/permission/org/controllers';
+-import { getUserAvaliableWorkflowTools } from '../../../../app/tool/workflowTool';
+-import { SystemToolRepo } from '../../../../app/tool/systemTool/systemTool.repo';
+-import { AGENT_SANDBOX_TOOLSET_ID } from '@fastgpt/global/core/ai/sandbox/tools';
+-
+-const getAccessibleDatasets = async ({ teamId, tmbId }: { teamId: string; tmbId: string }) => {
+-  const [roleList, myGroupMap, myOrgSet] = await Promise.all([
+-    MongoResourcePermission.find({
+-      resourceType: PerResourceTypeEnum.dataset,
+-      teamId,
+-      resourceId: { $exists: true }
+-    }).lean(),
+-    getGroupsByTmbId({ tmbId, teamId }),
+-    getOrgIdSetWithParentByTmbId({ teamId, tmbId })
+-  ]);
+-
+-  const groupIdSet = new Set(myGroupMap.map((item) => String(item._id)));
+-
+-  const datasetIds = roleList
+-    .filter(
+-      (item) =>
+-        String(item.tmbId) === String(tmbId) ||
+-        (item.groupId && groupIdSet.has(String(item.groupId))) ||
+-        (item.orgId && myOrgSet.has(String(item.orgId)))
+-    )
+-    .map((item) => String(item.resourceId));
+-
+-  if (datasetIds.length === 0) return [];
+-
+-  return MongoDataset.find({
+-    _id: { $in: Array.from(new Set(datasetIds)) },
+-    teamId,
+-    deleteTime: null
+-  })
+-    .select('_id name intro avatar vectorModel')
+-    .sort({ updateTime: -1 })
+-    .lean();
+-};
+-
+-export const generateResourceList = async ({
+-  teamId,
+-  tmbId,
+-  isRoot,
+-  lang = 'zh-CN'
+-}: {
+-  teamId: string;
+-  tmbId: string;
+-  isRoot: boolean;
+-  lang?: localeType;
+-}): Promise<{
+-  resourceList: string;
+-}> => {
+-  const getPrompt = ({ tool, dataset }: { tool: string; dataset: string }) => {
+-    return `## 可用工具与知识库
+-### 工具
+-${tool}
+-
+-### 知识库
+-${dataset}
+-
+-## 可配置前端开关（不是工具，不能 @ 引用）
+-- **file_upload**: 文件上传开关，允许用户在对话中上传文件
+-- **sandbox**: 虚拟机开关，允许 Agent 使用虚拟机执行环境
+-`;
+-  };
+-
+-  const systemToolRepo = SystemToolRepo.getInstance();
+-
+-  const [systemTools, myTools, myDatasets] = await Promise.all([
+-    systemToolRepo
+-      .getSystemToolList({
+-        sources: [
+-          'system'
+-          // teamId
+-        ],
+-        lang
+-      })
+-      .then((res) =>
+-        res.map((tool) => {
+-          const toolId = tool.id;
+-          const name = tool.name;
+-          const intro = tool.intro;
+-          const description = tool.toolDescription || intro || '暂无描述';
+-
+-          return `- **${toolId}** [工具]: ${name} - ${description}`;
+-        })
+-      ),
+-    getUserAvaliableWorkflowTools({ teamId, tmbId }).then((res) =>
+-      res.map((tool) => {
+-        const toolId = tool._id;
+-        return `- **${toolId}** [工具]: ${tool.name} - ${tool.intro}`;
+-      })
+-    ),
+-    getAccessibleDatasets({ teamId, tmbId }).then((res) => {
+-      return res.map((dataset) => {
+-        const id = String(dataset._id);
+-        const name = dataset.name || '未命名知识库';
+-        const intro = dataset.intro || '暂无描述';
+-        return `- **${id}** [知识库]: ${name} - ${intro}`;
+-      });
+-    })
+-  ]);
+-
+-  const builtinTools = [SubAppIds.readFiles, AGENT_SANDBOX_TOOLSET_ID].map((id) => {
+-    const info = systemSubInfo[id];
+-    return `- **${id}** [工具]: ${parseI18nString(info.name, lang)} - ${info.toolDescription}`;
+-  });
+-
+-  const allTools = [...systemTools, ...myTools, ...builtinTools];
+-  return {
+-    resourceList: getPrompt({
+-      tool: allTools.length > 0 ? allTools.join('\n') : '暂无已安装的工具',
+-      dataset: myDatasets.length > 0 ? myDatasets.join('\n') : '暂未配置知识库'
+-    })
+-  };
+-};
+-
+-/**
+- * 从 execution_plan 中提取并去重所有使用的资源
+- */
+-export const extractResourcesFromPlan = (executionPlan?: ExecutionPlanType) => {
+-  if (!executionPlan) {
+-    return { tools: [], knowledges: [] };
+-  }
+-
+-  const toolSet = new Set<string>();
+-  const knowledgeSet = new Set<string>();
+-
+-  executionPlan.steps.forEach((step) => {
+-    step.expectedTools?.forEach((resourceRef) => {
+-      if (resourceRef.type === 'tool') {
+-        toolSet.add(resourceRef.id);
+-      } else if (resourceRef.type === 'knowledge') {
+-        knowledgeSet.add(resourceRef.id);
+-      }
+-    });
+-  });
+-
+-  return {
+-    tools: Array.from(toolSet),
+-    knowledges: Array.from(knowledgeSet)
+-  };
+-};
+-
+-/**
+- * 构建包含所有信息的 system prompt 文本
+- * 使用 {{@toolId@}} 格式引用工具，可被 parseSystemPrompt 解析
+- */
+-export const buildSystemPrompt = (data: TopAgentGenerationAnswerType): string => {
+-  const parts: string[] = [];
+-
+-  // 1. 任务分析
+-  if (data.task_analysis) {
+-    const { goal, role, key_features } = data.task_analysis;
+-    parts.push(`---\n**任务目标**\n${goal}\n`);
+-    parts.push(`**角色定位**\n${role}\n`);
+-    if (key_features) {
+-      parts.push(`**核心特征**\n${key_features}\n`);
+-    }
+-  }
+-
+-  // 2. 执行计划
+-  if (data.execution_plan) {
+-    parts.push(`---\n**参考计划**`);
+-    data.execution_plan.steps.forEach((step, index) => {
+-      let description = step.description;
+-
+-      // 替换 description 中的资源引用：
+-      // - 工具: @工具ID / @工具ID@ / @[工具ID] -> {{@工具ID@}}
+-      // - 知识库: @知识库ID / @知识库ID@ / @[知识库ID] -> {{@dataset_search@}}
+-      if (step.expectedTools && step.expectedTools.length > 0) {
+-        step.expectedTools.forEach((resourceRef) => {
+-          const replaceId =
+-            resourceRef.type === 'knowledge' ? SubAppIds.datasetSearch : resourceRef.id;
+-          const escapedId = resourceRef.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+-          const regex = new RegExp(`@(?:\\[${escapedId}\\]|${escapedId}@?)`, 'g');
+-          description = description.replace(regex, `{{@${replaceId}@}}`);
+-        });
+-      }
+-      description = description.replace(
+-        /(?<!\{\{)@(?:\[(file_upload|sandbox)\]|(file_upload|sandbox)@?)(?!\}\})/g,
+-        '$1$2'
+-      );
+-
+-      parts.push(`\n步骤 ${index + 1}. ${step.title} \n${description}`);
+-      // if (step.expectedTools && step.expectedTools.length > 0) {
+-      //   const toolList = step.expectedTools
+-      //     .map((t) => {
+-      //       const ref = `{{@${t.id}@}}`;
+-      //       return `${ref}`;
+-      //     })
+-      //     .join('、');
+-      //   parts.push(`预期资源: ${toolList}`);
+-      // }
+-    });
+-    parts.push('');
+-  }
+-
+-  // 3. 系统功能
+-  // if (data.resources?.system_features?.file_upload?.enabled) {
+-  //   parts.push(`---\n**系统功能**\n`);
+-  //   parts.push(
+-  //     `**文件上传**: 已启用\n${data.resources.system_features.file_upload.purpose}`
+-  //   );
+-  // }
+-
+-  return parts.join('\n');
+-};
+-
+-/**
+- * 构建用于显示的文本（与 system prompt 格式一致）
+- */
+-export const buildDisplayText = (data: TopAgentGenerationAnswerType): string => {
+-  return buildSystemPrompt(data);
+-};
+diff --git a/packages/service/core/chat/HelperBot/dispatch/type.ts b/packages/service/core/chat/HelperBot/dispatch/type.ts
+deleted file mode 100644
+index dd3a5fc00feb..000000000000
+--- a/packages/service/core/chat/HelperBot/dispatch/type.ts
++++ /dev/null
+@@ -1,59 +0,0 @@
+-import z from 'zod';
+-import { HelperBotCompletionsParamsSchema } from '../../../../../global/openapi/core/chat/helperBot/api';
+-import {
+-  AIChatItemValueItemSchema,
+-  HelperBotChatItemSchema
+-} from '@fastgpt/global/core/chat/helperBot/type';
+-import { WorkflowResponseFnSchema } from '../../../workflow/dispatch/type';
+-import { LocaleList } from '@fastgpt/global/common/i18n/type';
+-import { FlowNodeInputTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
+-
+-export const HelperBotDispatchParamsSchema = z.object({
+-  query: z.string(),
+-  files: HelperBotCompletionsParamsSchema.shape.files,
+-  data: z.unknown(), // Allow any type, will be constrained by generic type parameter
+-  histories: z.array(HelperBotChatItemSchema),
+-  workflowResponseWrite: WorkflowResponseFnSchema,
+-
+-  user: z.object({
+-    teamId: z.string(),
+-    tmbId: z.string(),
+-    userId: z.string(),
+-    isRoot: z.boolean(),
+-    lang: z.enum(LocaleList)
+-  })
+-});
+-
+-type BaseHelperBotDispatchParamsType = z.infer<typeof HelperBotDispatchParamsSchema>;
+-export type HelperBotDispatchParamsType<T = unknown> = Omit<
+-  BaseHelperBotDispatchParamsType,
+-  'data'
+-> & {
+-  data: T;
+-};
+-
+-export const HelperBotDispatchResponseSchema = z.object({
+-  aiResponse: z.array(AIChatItemValueItemSchema),
+-  usage: z.object({
+-    model: z.string(),
+-    inputTokens: z.number(),
+-    outputTokens: z.number()
+-  })
+-});
+-export type HelperBotDispatchResponseType = z.infer<typeof HelperBotDispatchResponseSchema>;
+-
+-/* AI 表单输出 schema */
+-const InputSchema = z.object({
+-  type: z.enum([FlowNodeInputTypeEnum.input, FlowNodeInputTypeEnum.numberInput]),
+-  label: z.string()
+-});
+-const SelectSchema = z.object({
+-  type: z.enum([FlowNodeInputTypeEnum.select, FlowNodeInputTypeEnum.multipleSelect]),
+-  label: z.string(),
+-  options: z.array(z.string())
+-});
+-export const AICollectionAnswerSchema = z.object({
+-  question: z.string(), // 可能只有一个问题，可能
+-  form: z.array(z.union([InputSchema, SelectSchema])).optional()
+-});
+-export type AICollectionAnswerType = z.infer<typeof AICollectionAnswerSchema>;
+diff --git a/packages/service/core/chat/HelperBot/dispatch/utils.ts b/packages/service/core/chat/HelperBot/dispatch/utils.ts
+deleted file mode 100644
+index dcc7d03a56d5..000000000000
+--- a/packages/service/core/chat/HelperBot/dispatch/utils.ts
++++ /dev/null
+@@ -1,49 +0,0 @@
+-import type { AIChatItemValueItemType } from '@fastgpt/global/core/chat/helperBot/type';
+-import type { UserInputInteractive } from '@fastgpt/global/core/workflow/template/system/interactive/type';
+-
+-type PlanHintType = {
+-  planHint?: {
+-    type: 'generation';
+-  };
+-};
+-
+-export const formatAIResponse = ({
+-  text,
+-  reasoning,
+-  collectionForm,
+-  planHint
+-}: {
+-  text: string;
+-  reasoning?: string;
+-  collectionForm?: UserInputInteractive;
+-  planHint?: PlanHintType['planHint'];
+-}): AIChatItemValueItemType[] => {
+-  const result: AIChatItemValueItemType[] = [];
+-
+-  result.push({
+-    ...(reasoning
+-      ? {
+-          reasoning: {
+-            content: reasoning
+-          }
+-        }
+-      : {}),
+-    text: {
+-      content: text
+-    }
+-  });
+-
+-  if (collectionForm) {
+-    result.push({
+-      collectionForm
+-    });
+-  }
+-
+-  if (planHint) {
+-    result.push({
+-      planHint
+-    });
+-  }
+-
+-  return result;
+-};
+diff --git a/packages/service/test/core/chat/topAgentDispatch.test.ts b/packages/service/test/core/chat/topAgentDispatch.test.ts
+deleted file mode 100644
+index 3c86ee373c0e..000000000000
+--- a/packages/service/test/core/chat/topAgentDispatch.test.ts
++++ /dev/null
+@@ -1,300 +0,0 @@
+-import { beforeEach, describe, expect, it, vi } from 'vitest';
+-import { AGENT_SANDBOX_TOOLSET_ID } from '@fastgpt/global/core/ai/sandbox/tools';
+-import { SubAppIds } from '@fastgpt/global/core/workflow/node/agent/constants';
+-import { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
+-
+-const { createLLMResponseMock } = vi.hoisted(() => ({
+-  createLLMResponseMock: vi.fn()
+-}));
+-
+-vi.mock('@fastgpt/service/core/ai/llm/request', () => ({
+-  createLLMResponse: createLLMResponseMock
+-}));
+-
+-vi.mock('@fastgpt/service/core/ai/model', () => ({
+-  getDefaultHelperBotModel: vi.fn(() => ({
+-    model: 'helper-model'
+-  }))
+-}));
+-
+-vi.mock('@fastgpt/service/core/app/tool/workflowTool', () => ({
+-  getUserAvaliableWorkflowTools: vi.fn(async () => [])
+-}));
+-
+-vi.mock('@fastgpt/service/core/app/tool/systemTool/systemTool.repo', () => ({
+-  SystemToolRepo: {
+-    getInstance: vi.fn(() => ({
+-      getSystemToolList: vi.fn(async () => [])
+-    }))
+-  }
+-}));
+-
+-vi.mock('@fastgpt/service/core/dataset/schema', () => ({
+-  MongoDataset: {
+-    find: vi.fn(() => ({
+-      select: vi.fn(() => ({
+-        sort: vi.fn(() => ({
+-          lean: vi.fn(async () => [])
+-        }))
+-      })),
+-      lean: vi.fn(async () => [])
+-    }))
+-  }
+-}));
+-
+-vi.mock('@fastgpt/service/support/permission/schema', () => ({
+-  MongoResourcePermission: {
+-    find: vi.fn(() => ({
+-      lean: vi.fn(async () => [])
+-    }))
+-  }
+-}));
+-
+-vi.mock('@fastgpt/service/support/permission/memberGroup/controllers', () => ({
+-  getGroupsByTmbId: vi.fn(async () => [])
+-}));
+-
+-vi.mock('@fastgpt/service/support/permission/org/controllers', () => ({
+-  getOrgIdSetWithParentByTmbId: vi.fn(async () => new Set())
+-}));
+-
+-import { dispatchTopAgent } from '@fastgpt/service/core/chat/HelperBot/dispatch/topAgent';
+-
+-describe('dispatchTopAgent', () => {
+-  beforeEach(() => {
+-    vi.clearAllMocks();
+-  });
+-
+-  const mockGenerationResponse = ({
+-    description,
+-    expectedTools
+-  }: {
+-    description: string;
+-    expectedTools: Array<{ id: string; type: 'tool' | 'knowledge' }>;
+-  }) => {
+-    createLLMResponseMock.mockResolvedValue({
+-      answerText: JSON.stringify({
+-        phase: 'generation',
+-        reasoning: 'generate agent config',
+-        task_analysis: {
+-          goal: 'build helper agent',
+-          role: 'assistant',
+-          key_features: 'use selected resources'
+-        },
+-        execution_plan: {
+-          total_steps: 1,
+-          steps: [
+-            {
+-              id: 'step_1',
+-              title: 'Use resource',
+-              description,
+-              expectedTools
+-            }
+-          ]
+-        },
+-        resources: {
+-          system_features: {
+-            file_upload: {
+-              enabled: false
+-            },
+-            sandbox: {
+-              enabled: false
+-            }
+-          }
+-        }
+-      }),
+-      reasoningText: '',
+-      usage: {
+-        inputTokens: 10,
+-        outputTokens: 5
+-      }
+-    });
+-  };
+-
+-  const dispatchAndGetTopAgentConfig = async () => {
+-    const workflowResponseWrite = vi.fn();
+-
+-    await dispatchTopAgent({
+-      query: 'build an agent with selected resources',
+-      files: [],
+-      data: {},
+-      histories: [],
+-      workflowResponseWrite,
+-      user: {
+-        teamId: 'team_1',
+-        tmbId: 'tmb_1',
+-        userId: 'user_1',
+-        isRoot: false,
+-        lang: 'zh-CN'
+-      }
+-    });
+-
+-    const configEvent = workflowResponseWrite.mock.calls.find(
+-      ([payload]) => payload.event === SseResponseEventEnum.topAgentConfig
+-    );
+-
+-    expect(configEvent).toBeDefined();
+-    return configEvent![0].data;
+-  };
+-
+-  it('enables sandbox when generated plan selects the agent sandbox toolset', async () => {
+-    createLLMResponseMock.mockResolvedValue({
+-      answerText: JSON.stringify({
+-        phase: 'generation',
+-        reasoning: 'need sandbox',
+-        task_analysis: {
+-          goal: 'run code',
+-          role: 'coding assistant',
+-          key_features: 'execute shell commands'
+-        },
+-        execution_plan: {
+-          total_steps: 1,
+-          steps: [
+-            {
+-              id: 'step_1',
+-              title: 'Execute command',
+-              description: `Use @${AGENT_SANDBOX_TOOLSET_ID} to inspect files`,
+-              expectedTools: [
+-                {
+-                  id: AGENT_SANDBOX_TOOLSET_ID,
+-                  type: 'tool'
+-                }
+-              ]
+-            }
+-          ]
+-        },
+-        resources: {
+-          system_features: {
+-            file_upload: {
+-              enabled: false
+-            },
+-            sandbox: {
+-              enabled: false
+-            }
+-          }
+-        }
+-      }),
+-      reasoningText: '',
+-      usage: {
+-        inputTokens: 10,
+-        outputTokens: 5
+-      }
+-    });
+-
+-    const workflowResponseWrite = vi.fn();
+-
+-    await dispatchTopAgent({
+-      query: 'build an agent that can run commands',
+-      files: [],
+-      data: {},
+-      histories: [],
+-      workflowResponseWrite,
+-      user: {
+-        teamId: 'team_1',
+-        tmbId: 'tmb_1',
+-        userId: 'user_1',
+-        isRoot: false,
+-        lang: 'zh-CN'
+-      }
+-    });
+-
+-    expect(workflowResponseWrite).toHaveBeenCalledWith({
+-      event: SseResponseEventEnum.topAgentConfig,
+-      data: expect.objectContaining({
+-        tools: [AGENT_SANDBOX_TOOLSET_ID],
+-        systemPrompt: expect.stringContaining(`{{@${AGENT_SANDBOX_TOOLSET_ID}@}}`),
+-        enableSandboxEnabled: true
+-      })
+-    });
+-  });
+-
+-  it('renders bracketed tool references in generated step descriptions', async () => {
+-    const toolId = 'custom/search_tool';
+-    mockGenerationResponse({
+-      description: `使用 @[${toolId}] 搜索信息`,
+-      expectedTools: [
+-        {
+-          id: toolId,
+-          type: 'tool'
+-        }
+-      ]
+-    });
+-
+-    const config = await dispatchAndGetTopAgentConfig();
+-
+-    expect(config).toEqual(
+-      expect.objectContaining({
+-        tools: [toolId],
+-        systemPrompt: expect.stringContaining(`{{@${toolId}@}}`)
+-      })
+-    );
+-  });
+-
+-  it('renders plain tool references in generated step descriptions', async () => {
+-    const toolId = 'custom/search_tool';
+-    mockGenerationResponse({
+-      description: `使用 @${toolId} 搜索信息`,
+-      expectedTools: [
+-        {
+-          id: toolId,
+-          type: 'tool'
+-        }
+-      ]
+-    });
+-
+-    const config = await dispatchAndGetTopAgentConfig();
+-
+-    expect(config).toEqual(
+-      expect.objectContaining({
+-        tools: [toolId],
+-        systemPrompt: expect.stringContaining(`{{@${toolId}@}}`)
+-      })
+-    );
+-  });
+-
+-  it('renders knowledge references as dataset search skill labels', async () => {
+-    const datasetId = '507f1f77bcf86cd799439011';
+-    mockGenerationResponse({
+-      description: `使用 @[${datasetId}] 查询知识库`,
+-      expectedTools: [
+-        {
+-          id: datasetId,
+-          type: 'knowledge'
+-        }
+-      ]
+-    });
+-
+-    const config = await dispatchAndGetTopAgentConfig();
+-
+-    expect(config).toEqual(
+-      expect.objectContaining({
+-        systemPrompt: expect.stringContaining(`{{@${SubAppIds.datasetSearch}@}}`)
+-      })
+-    );
+-  });
+-
+-  it('does not render system features as skill labels in generated step descriptions', async () => {
+-    mockGenerationResponse({
+-      description: `通过 @file_upload 接收文件，并使用 @${SubAppIds.readFiles} 读取内容，不要使用 @sandbox`,
+-      expectedTools: [
+-        {
+-          id: SubAppIds.readFiles,
+-          type: 'tool'
+-        }
+-      ]
+-    });
+-
+-    const config = await dispatchAndGetTopAgentConfig();
+-
+-    expect(config).toEqual(
+-      expect.objectContaining({
+-        tools: [SubAppIds.readFiles],
+-        systemPrompt: expect.stringContaining(`{{@${SubAppIds.readFiles}@}}`)
+-      })
+-    );
+-    expect(config.systemPrompt).toContain('通过 file_upload 接收文件');
+-    expect(config.systemPrompt).toContain('不要使用 sandbox');
+-    expect(config.systemPrompt).not.toContain('{{@file_upload@}}');
+-    expect(config.systemPrompt).not.toContain('{{@sandbox@}}');
+-  });
+-});
+diff --git a/packages/service/test/core/chat/topAgentUtils.test.ts b/packages/service/test/core/chat/topAgentUtils.test.ts
+deleted file mode 100644
+index b16a9d136e27..000000000000
+--- a/packages/service/test/core/chat/topAgentUtils.test.ts
++++ /dev/null
+@@ -1,61 +0,0 @@
+-import { describe, expect, it, vi } from 'vitest';
+-import {
+-  AGENT_SANDBOX_TOOLSET_ID,
+-  SANDBOX_SHELL_TOOL_NAME
+-} from '@fastgpt/global/core/ai/sandbox/tools';
+-
+-vi.mock('@fastgpt/service/core/app/tool/workflowTool', () => ({
+-  getUserAvaliableWorkflowTools: vi.fn(async () => [])
+-}));
+-
+-vi.mock('@fastgpt/service/core/app/tool/systemTool/systemTool.repo', () => ({
+-  SystemToolRepo: {
+-    getInstance: vi.fn(() => ({
+-      getSystemToolList: vi.fn(async () => [])
+-    }))
+-  }
+-}));
+-
+-vi.mock('@fastgpt/service/core/dataset/schema', () => ({
+-  MongoDataset: {
+-    find: vi.fn(() => ({
+-      select: vi.fn(() => ({
+-        sort: vi.fn(() => ({
+-          lean: vi.fn(async () => [])
+-        }))
+-      }))
+-    }))
+-  }
+-}));
+-
+-vi.mock('@fastgpt/service/support/permission/schema', () => ({
+-  MongoResourcePermission: {
+-    find: vi.fn(() => ({
+-      lean: vi.fn(async () => [])
+-    }))
+-  }
+-}));
+-
+-vi.mock('@fastgpt/service/support/permission/memberGroup/controllers', () => ({
+-  getGroupsByTmbId: vi.fn(async () => [])
+-}));
+-
+-vi.mock('@fastgpt/service/support/permission/org/controllers', () => ({
+-  getOrgIdSetWithParentByTmbId: vi.fn(async () => new Set())
+-}));
+-
+-import { generateResourceList } from '@fastgpt/service/core/chat/HelperBot/dispatch/topAgent/utils';
+-
+-describe('topAgent utils', () => {
+-  it('lists sandbox as an agent sandbox capability group instead of the shell tool', async () => {
+-    const { resourceList } = await generateResourceList({
+-      teamId: 'team_1',
+-      tmbId: 'tmb_1',
+-      isRoot: false,
+-      lang: 'zh-CN'
+-    });
+-
+-    expect(resourceList).toContain(`**${AGENT_SANDBOX_TOOLSET_ID}**`);
+-    expect(resourceList).not.toContain(`**${SANDBOX_SHELL_TOOL_NAME}**`);
+-  });
+-});
+diff --git a/pro b/pro
+index 336c7cc6988a..860cc780847d 160000
+--- a/pro
++++ b/pro
+@@ -1 +1 @@
+-Subproject commit 336c7cc6988acea74d38f123b44680cff5064c27
++Subproject commit 860cc780847d747e7fdd24433e95887cdb341812
+diff --git a/projects/app/src/components/core/chat/ChatContainer/type.ts b/projects/app/src/components/core/chat/ChatContainer/type.ts
+index 3567974a333b..d2d32d445ef9 100644
+--- a/projects/app/src/components/core/chat/ChatContainer/type.ts
++++ b/projects/app/src/components/core/chat/ChatContainer/type.ts
+@@ -11,7 +11,7 @@ import type {
+   UserInputInteractive,
+   WorkflowInteractiveResponseType
+ } from '@fastgpt/global/core/workflow/template/system/interactive/type';
+-import type { TopAgentFormDataType } from '@fastgpt/service/core/chat/HelperBot/dispatch/topAgent/type';
++import type { TopAgentFormDataType } from '@fastgpt/global/core/chat/helperBot/topAgent/type';
+ import type { AgentPlanStatusType, AgentPlanType } from '@fastgpt/global/core/ai/agent/type';
+ 
+ export type generatingMessageProps = {
+diff --git a/projects/app/src/components/core/chat/HelperBot/components/AIItem.tsx b/projects/app/src/components/core/chat/HelperBot/components/AIItem.tsx
+index 916c58069030..6b6fbece4961 100644
+--- a/projects/app/src/components/core/chat/HelperBot/components/AIItem.tsx
++++ b/projects/app/src/components/core/chat/HelperBot/components/AIItem.tsx
+@@ -91,12 +91,12 @@ const RenderText = React.memo(function RenderText({
+   return <Markdown source={source} showAnimation={showAnimation} />;
+ });
+ const RenderCollectionForm = React.memo(function RenderCollectionForm({
+-  isLastValue,
++  canSubmit,
+   collectionForm,
+   onSubmit,
+   showDescription = true
+ }: {
+-  isLastValue: boolean;
++  canSubmit: boolean;
+   collectionForm: UserInputInteractive;
+   onSubmit: (formData: string) => void;
+   showDescription?: boolean;
+@@ -141,7 +141,7 @@ const RenderCollectionForm = React.memo(function RenderCollectionForm({
+         })}
+       </Flex>
+ 
+-      {!submitted && isLastValue && (
++      {!submitted && canSubmit && (
+         <Flex justifyContent={'flex-end'} mt={4}>
+           <Button
+             size={'sm'}
+@@ -180,6 +180,9 @@ const AIItem = ({
+       ('text' in firstValue && firstValue.text?.content) ||
+       ('reasoning' in firstValue && firstValue.reasoning && !firstValue.hideReason)
+     );
++  const lastCollectionFormIndex = chat.value.findLastIndex(
++    (value) => 'collectionForm' in value && value.collectionForm
++  );
+ 
+   return (
+     <Box
+@@ -214,7 +217,7 @@ const AIItem = ({
+                   return (
+                     <RenderCollectionForm
+                       key={i}
+-                      isLastValue={isLastChild && i === chat.value.length - 1}
++                      canSubmit={isLastChild && i === lastCollectionFormIndex}
+                       collectionForm={value.collectionForm}
+                       onSubmit={onSubmitCollectionForm}
+                     />
+diff --git a/projects/app/src/components/core/chat/HelperBot/context.tsx b/projects/app/src/components/core/chat/HelperBot/context.tsx
+index 29e4497ddd75..92253d38a822 100644
+--- a/projects/app/src/components/core/chat/HelperBot/context.tsx
++++ b/projects/app/src/components/core/chat/HelperBot/context.tsx
+@@ -2,9 +2,11 @@ import { useMemoEnhance } from '@fastgpt/web/hooks/useMemoEnhance';
+ import React, { type ReactNode } from 'react';
+ import { createContext } from 'use-context-selector';
+ import { HelperBotTypeEnum } from '@fastgpt/global/core/chat/helperBot/type';
+-import type { TopAgentParamsType } from '@fastgpt/global/core/chat/helperBot/topAgent/type';
++import type {
++  TopAgentFormDataType,
++  TopAgentParamsType
++} from '@fastgpt/global/core/chat/helperBot/topAgent/type';
+ import { type AppFileSelectConfigType } from '@fastgpt/global/core/app/type/config.schema';
+-import type { TopAgentFormDataType } from '@fastgpt/service/core/chat/HelperBot/dispatch/topAgent/type';
+ 
+ export type HelperBotRefType = {
+   restartChat: () => void;
+diff --git a/projects/app/src/components/core/chat/HelperBot/index.tsx b/projects/app/src/components/core/chat/HelperBot/index.tsx
+index 71d9562cb262..6223f2e2aef8 100644
+--- a/projects/app/src/components/core/chat/HelperBot/index.tsx
++++ b/projects/app/src/components/core/chat/HelperBot/index.tsx
+@@ -293,7 +293,7 @@ const ChatBox = ({ type, metadata, onApply, ChatBoxRef, ...props }: HelperBotPro
+         chatController.current = abortSignal;
+ 
+         const response = await streamFetch({
+-          url: '/api/core/chat/helperBot/completions',
++          url: '/api/proApi/core/chat/helperBot/completions',
+           data: {
+             chatId,
+             chatItemId: chatItemDataId,
+diff --git a/projects/app/src/pages/api/core/chat/helperBot/completions.ts b/projects/app/src/pages/api/core/chat/helperBot/completions.ts
+deleted file mode 100644
+index 7fe9e20cb50d..000000000000
+--- a/projects/app/src/pages/api/core/chat/helperBot/completions.ts
++++ /dev/null
+@@ -1,136 +0,0 @@
+-import type { ApiRequestProps, ApiResponseType } from '@fastgpt/service/type/next';
+-import { NextAPI } from '@/service/middleware/entry';
+-import {
+-  HelperBotCompletionsParamsSchema,
+-  type HelperBotCompletionsParamsType
+-} from '@fastgpt/global/openapi/core/chat/helperBot/api';
+-import { authCert } from '@fastgpt/service/support/permission/auth/common';
+-import { MongoHelperBotChatItem } from '@fastgpt/service/core/chat/HelperBot/chatItemSchema';
+-import { getWorkflowResponseWrite } from '@fastgpt/service/core/workflow/dispatch/utils';
+-import { dispatchMap } from '@fastgpt/service/core/chat/HelperBot/dispatch/index';
+-import { pushChatRecords } from '@fastgpt/service/core/chat/HelperBot/utils';
+-import { getLocale } from '@fastgpt/service/common/middle/i18n';
+-import { authFrequencyLimit } from '@fastgpt/service/common/system/frequencyLimit/utils';
+-import { addSeconds } from 'date-fns';
+-import { sseErrRes } from '@fastgpt/service/common/response';
+-import { getLogger, LogCategories } from '@fastgpt/service/common/logger';
+-
+-export type completionsBody = HelperBotCompletionsParamsType;
+-
+-async function handler(req: ApiRequestProps<completionsBody>, res: ApiResponseType<any>) {
+-  const logger = getLogger(LogCategories.MODULE.AI.HELPERBOT);
+-  const setSSEHeaders = () => {
+-    const headers: Record<string, string> = {
+-      Connection: 'keep-alive',
+-      'Content-Type': 'text/event-stream;charset=utf-8',
+-      'Access-Control-Allow-Origin': '*',
+-      'X-Accel-Buffering': 'no',
+-      'Cache-Control': 'no-cache, no-transform'
+-    };
+-    Object.entries(headers).forEach(([key, value]) => {
+-      res.setHeader(key, value);
+-    });
+-  };
+-
+-  // keep consistent with SSE APIs, otherwise stream consumer may treat response as non-SSE
+-  setSSEHeaders();
+-
+-  const parseResult = HelperBotCompletionsParamsSchema.safeParse(req.body);
+-
+-  if (!parseResult.success) {
+-    sseErrRes(res, parseResult.error);
+-    return res.end();
+-  }
+-
+-  const { chatId, chatItemId, query, files, metadata } = parseResult.data;
+-
+-  try {
+-    const { teamId, tmbId, userId, isRoot } = await authCert({ req, authToken: true });
+-
+-    // Limit
+-    await authFrequencyLimit({
+-      eventId: `${tmbId}-helperBot-completions`,
+-      maxAmount: 10,
+-      expiredTime: addSeconds(new Date(), 60)
+-    }).catch(() => {
+-      return Promise.reject('Frequency limit exceeded');
+-    });
+-
+-    const histories = await MongoHelperBotChatItem.find({
+-      userId,
+-      chatId
+-    })
+-      .sort({ _id: -1 })
+-      .limit(40)
+-      .lean();
+-    histories.reverse();
+-
+-    const workflowResponseWrite = getWorkflowResponseWrite({
+-      res,
+-      detail: true,
+-      streamResponse: true,
+-      id: chatId,
+-      showNodeStatus: true
+-    });
+-
+-    // 执行不同逻辑
+-    const fn = dispatchMap[metadata.type];
+-    if (!fn) {
+-      return Promise.reject('Invalid helper bot type');
+-    }
+-    const result = await fn({
+-      query,
+-      files,
+-      data: metadata.data,
+-      histories,
+-      workflowResponseWrite,
+-      user: {
+-        teamId,
+-        tmbId,
+-        userId,
+-        isRoot,
+-        lang: getLocale(req)
+-      }
+-    });
+-
+-    // Save chat
+-    await pushChatRecords({
+-      type: metadata.type,
+-      userId,
+-      chatId,
+-      chatItemId,
+-      query,
+-      files,
+-      aiResponse: result.aiResponse
+-    });
+-    // Push usage
+-    // pushHelperBotUsage({
+-    //   teamId,
+-    //   tmbId,
+-    //   model: result.usage.model,
+-    //   inputTokens: result.usage.inputTokens,
+-    //   outputTokens: result.usage.outputTokens
+-    // });
+-  } catch (error) {
+-    logger.error('HelperBot completions failed', {
+-      error,
+-      chatId,
+-      chatItemId,
+-      metadata
+-    });
+-    sseErrRes(res, error);
+-  }
+-
+-  res.end();
+-}
+-
+-export default NextAPI(handler);
+-
+-export const config = {
+-  api: {
+-    bodyParser: {
+-      sizeLimit: '20mb'
+-    },
+-    responseLimit: '20mb'
+-  }
+-};
+diff --git a/projects/app/src/web/common/api/fetch.ts b/projects/app/src/web/common/api/fetch.ts
+index 7c1ed91cf05a..05d5bb2aed52 100644
+--- a/projects/app/src/web/common/api/fetch.ts
++++ b/projects/app/src/web/common/api/fetch.ts
+@@ -25,7 +25,7 @@ import type {
+   ToolModuleResponseItemType,
+   SkillModuleResponseItemType
+ } from '@fastgpt/global/core/chat/type';
+-import type { TopAgentFormDataType } from '@fastgpt/service/core/chat/HelperBot/dispatch/topAgent/type';
++import type { TopAgentFormDataType } from '@fastgpt/global/core/chat/helperBot/topAgent/type';
+ import type { UserInputInteractive } from '@fastgpt/global/core/workflow/template/system/interactive/type';
+ import type { AgentPlanStatusType, AgentPlanType } from '@fastgpt/global/core/ai/agent/type';
+ import type { StreamNoNeedToBeResumeType } from '@fastgpt/global/openapi/core/ai/api';
+@@ -204,7 +204,7 @@ function handleEventSourceData(params: HandleEventSourceDataParams) {
+       }
+ 
+       case SseResponseEventEnum.collectionForm: {
+-        onmessage({ event, collectionForm: obj });
++        enqueue({ responseValueId, event, collectionForm: obj });
+         break;
+       }
+ 

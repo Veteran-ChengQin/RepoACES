@@ -1,0 +1,45 @@
+id: fastgpt-pr-6349
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "6213f0001d66fabe45dddf18eb7f6fe58423425a"
+  pr_number: 6349
+  pr_url: https://github.com/labring/FastGPT/pull/6349
+  pr_title_raw: "feat: add vector database migration solution between different vector DBs"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    This PR implements a migration solution for transferring vector data between different vector databases (PostgreSQL, OceanBase, Milvus) as requested in #6196.
+    
+    **Features:**
+    - Support offline (stop-the-world) migration mode for reliable data transfer
+    - Export vectors from source DB with cursor-based pagination
+    - Import vectors to target DB with batch processing (configurable batch size)
+    - Preserve original vector IDs when possible (PG ↔ OceanBase)
+    - ID remapping for Milvus migrations
+    - Validate migration results by comparing counts
+    - CLI script for command-line migration
+    - Admin API endpoint for programmatic migration
+    
+    **Files added:**
+    - `packages/service/common/vectorDB/migration/` - Core migration logic
+      - `type.ts` - Type definitions
+      - `exporters.ts` - Database-specific export implementations
+      - `importers.ts` - Database-specific import implementations
+      - `controller.ts` - Migration orchestration
+      - `index.ts` - Module exports
+    - `projects/app/src/pages/api/admin/migrateVector.ts` - Admin API endpoint
+    - `scripts/migrateVector.ts` - CLI migration script
+    - `.claude/design/vector-db-migration.md` - Design document
+
+validation:
+  head_commit: "28625271623130ca715e8be683b83d19cd1d69f9"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-6349.patch"
+  patch_sha256: "0174909b61f52ad183528d6d176a5487ea658bb810be1907869c42d23dea203e"
+  changed_files_file: "patches/fastgpt-pr-6349.changed_files.txt"
+  manual_functionality_description: |
+    Check that the project provides an offline vector database migration path between PostgreSQL, OceanBase, and Milvus.
+    The migration should export source vectors with cursor pagination, import into the target in configurable batches, preserve IDs where supported, remap IDs for Milvus-style targets, validate counts after migration, and expose both a CLI script and an admin API entry.

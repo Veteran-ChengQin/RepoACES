@@ -1,0 +1,28 @@
+id: fastgpt-pr-7126
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "741ad4e2a35ec9edf6e640ac90505e929742533f"
+  pr_number: 7126
+  pr_url: https://github.com/labring/FastGPT/pull/7126
+  pr_title_raw: "feat(openapi): refine API key auth proxy and app isolation"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    - Add app-level APIKey isolation for publish channels and reject non-chat-completions usage for app-bound APIKeys.
+    - Add global APIKey authProxy support for chat completions, limited to team owner enabled keys.
+    - Allow APIKey plaintext to be copied again from account and publish-channel pages, with copy audit logging.
+    - Align APIKey create/edit/copy modals to v2 modal styling and fix authProxy switch persistence.
+    - Split APIKey docs between global APIKey and app APIKey concepts.
+
+validation:
+  head_commit: "afe3b81c5312212a2db7dec6e12af748970efdb7"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-7126.patch"
+  patch_sha256: "9dda32ba17223cdbfa79874402f24a3c83a701ede05e877ad7e57dcf46c25956"
+  changed_files_file: "patches/fastgpt-pr-7126.changed_files.txt"
+  manual_functionality_description: |
+    Check that API keys are isolated correctly between global account usage and app publish-channel usage.
+    App-bound API keys should only allow chat-completions usage for their bound app and reject unsupported usage, global team-owner keys should be able to use authProxy for chat completions, plaintext key copy should work from account and publish-channel pages with audit logging, authProxy switch state should persist, and docs should distinguish global API keys from app API keys.

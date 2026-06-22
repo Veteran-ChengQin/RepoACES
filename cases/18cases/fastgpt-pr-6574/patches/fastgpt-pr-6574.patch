@@ -1,0 +1,4940 @@
+diff --git a/.claude/skills/add-permission/SKILL.md b/.claude/skills/add-permission/SKILL.md
+new file mode 100644
+index 000000000000..9072f3a4c45d
+--- /dev/null
++++ b/.claude/skills/add-permission/SKILL.md
+@@ -0,0 +1,37 @@
++---
++name: add-permission
++description: 为 FastGPT 新资源接入权限管理。当用户需要为新资源（如 AgentSkill、Plugin 等）添加权限支持时触发。
++---
++
++# 新资源权限接入
++
++## 你的资源是哪种类型？
++
++```
++资源有父子/文件夹结构吗？
++     │
++     ├─ 否 ──► 简单资源 ──► [快速入门](./guides/quick-start.md)
++     │
++     └─ 是 ──► 资源支持权限继承吗？
++                    │
++                    ├─ 否 ──► 简单资源 ──► [快速入门](./guides/quick-start.md)
++                    │
++                    └─ 是 ──► 继承型资源 ──► [完整接入](./guides/full-integration.md)
++```
++
++## 快速链接
++
++| 我想... | 去看... |
++|---------|---------|
++| 5 步完成最小接入 | [快速入门](./guides/quick-start.md) |
++| 接入继承型资源 | [完整接入](./guides/full-integration.md) |
++| 检查遗漏项 | [实施清单](./checklist.md) |
++| 理解权限系统原理 | [参考文档](./reference/README.md) |
++
++## 关键代码位置
++
++| 文件 | 用途 |
++|------|------|
++| `packages/global/support/permission/constant.ts` | 添加 `PerResourceTypeEnum` |
++| `packages/global/support/permission/{resource}/` | 权限常量 + Permission 类 |
++| `packages/service/support/permission/{resource}/auth.ts` | 鉴权函数 |
+diff --git a/.claude/skills/add-permission/checklist.md b/.claude/skills/add-permission/checklist.md
+new file mode 100644
+index 000000000000..73942197065d
+--- /dev/null
++++ b/.claude/skills/add-permission/checklist.md
+@@ -0,0 +1,134 @@
++# 权限接入实施清单
++
++> 上线前核对清单，可打印使用。
++
++## 设计判断
++
++- [ ] 确认资源是否有 owner
++- [ ] 确认资源是否属于 team
++- [ ] 确认资源是否需要协作者
++- [ ] 确认资源是否有 folder / parent-child 结构
++- [ ] 确认资源是否支持 `inheritPermission`
++- [ ] 确认资源是否需要 owner 转移
++
++---
++
++## FastGPT 主仓库
++
++### 权限定义
++
++- [ ] `PerResourceTypeEnum` 已添加新资源类型
++- [ ] `packages/global/support/permission/{resource}/constant.ts` 已创建
++  - [ ] `{Resource}RoleList`
++  - [ ] `{Resource}RolePerMap`
++  - [ ] `{Resource}PerList`
++  - [ ] `{Resource}DefaultRoleVal`
++- [ ] `packages/global/support/permission/{resource}/controller.ts` 已创建
++  - [ ] `{Resource}Permission` 类
++
++### 资源 Schema
++
++- [ ] 包含 `teamId` 字段
++- [ ] 包含 `tmbId` 字段（owner）
++- [ ] 包含 `parentId` 字段（如有层级）
++- [ ] 包含 `inheritPermission` 字段（如有继承）
++
++### 鉴权函数
++
++- [ ] `packages/service/support/permission/{resource}/auth.ts` 已创建
++- [ ] `auth{Resource}` 函数已实现
++- [ ] 如有继承，已实现父级权限合并
++
++### API 权限校验
++
++- [ ] 列表接口：`ReadPermissionVal`
++- [ ] 详情接口：`ReadPermissionVal`
++- [ ] 创建接口：`WritePermissionVal` 或 team 级创建权限
++- [ ] 更新接口：`WritePermissionVal`
++- [ ] 删除接口：`OwnerPermissionVal`（不是 Manage！）
++- [ ] Folder 创建接口（如有）
++- [ ] 恢复继承接口（如有）
++
++### 继承相关（如适用）
++
++- [ ] 明确 folder 类型列表
++- [ ] 资源创建时复制父协作者
++- [ ] 资源移动时同步子树权限
++- [ ] `resumeInheritPermission` 逻辑
++
++---
++
++## fastgpt-pro
++
++### 协作者管理
++
++- [ ] `collaborator/list` 接口
++  - [ ] 返回 `clbs`（最终生效协作者）
++  - [ ] 返回 `parentClbs`（父级协作者）
++- [ ] `collaborator/update` 接口
++  - [ ] 需要 `ManagePermissionVal`
++  - [ ] 不能修改自己的权限
++  - [ ] 非 owner 不能修改管理员权限
++  - [ ] 继承冲突时自动断开继承
++
++### Owner 转移（如适用）
++
++- [ ] `changeOwner` 接口
++  - [ ] 需要 `OwnerPermissionVal`
++  - [ ] 更新资源表 `tmbId`
++  - [ ] 根资源断开继承
++  - [ ] 修正权限记录
++
++### 协作者类型支持
++
++- [ ] 支持 `tmbId`（团队成员）
++- [ ] 支持 `groupId`（成员组）
++- [ ] 支持 `orgId`（组织）
++
++### 审计日志
++
++- [ ] 更新协作者日志
++- [ ] 删除协作者日志
++- [ ] Owner 转移日志
++- [ ] 恢复继承日志（如有）
++- [ ] 移动资源日志（如有）
++
++---
++
++## 前端
++
++- [ ] 协作者列表 API 调用
++- [ ] 协作者更新 API 调用
++- [ ] Owner 转移 API 调用（如有）
++- [ ] 权限配置弹窗 / 协作者管理组件
++- [ ] 继承态提示 UI（如有）
++- [ ] 恢复继承入口（如有）
++
++---
++
++## 测试
++
++### 单元测试
++
++- [ ] Permission 类与角色映射
++- [ ] `getTmbPermission` 优先级逻辑
++- [ ] 继承型资源的父子权限合并
++
++### 集成测试
++
++- [ ] 主要 API 的权限边界
++- [ ] 删除是否要求 owner
++- [ ] 移动与继承恢复逻辑
++- [ ] 协作者更新冲突处理
++- [ ] Owner 转移后权限记录正确性
++
++---
++
++## 最终检查
++
++- [ ] 删除要求 owner，而不是 manage
++- [ ] group / org 协作者按预期生效
++- [ ] 继承断开后生成正确的显式协作者快照
++- [ ] 移动资源后子树权限同步
++- [ ] Owner 转移后旧/新 owner 权限记录正确
++- [ ] 前后端展示的"最终权限"与后端实际鉴权一致
+diff --git a/.claude/skills/add-permission/guides/full-integration.md b/.claude/skills/add-permission/guides/full-integration.md
+new file mode 100644
+index 000000000000..915093333453
+--- /dev/null
++++ b/.claude/skills/add-permission/guides/full-integration.md
+@@ -0,0 +1,289 @@
++# 完整接入：继承型资源权限
++
++> 适用于**继承型资源**：有 folder 结构、支持 `inheritPermission`、需要协作者管理和 owner 转移。
++
++## 概览
++
++继承型资源需要在两个仓库中实现：
++
++| 仓库 | 职责 |
++|------|------|
++| FastGPT 主仓库 | 权限定义、鉴权、继承同步 |
++| fastgpt-pro | 协作者管理、owner 转移、审计日志 |
++
++---
++
++## Part 1: FastGPT 主仓库
++
++### 1.1 基础权限定义
++
++与[快速入门](./quick-start.md)相同，完成 Step 1-3。
++
++### 1.2 资源 Schema 字段
++
++确保资源 Schema 包含以下字段：
++
++```typescript
++const {Resource}Schema = new Schema({
++  teamId: { type: Schema.Types.ObjectId, required: true },
++  tmbId: { type: Schema.Types.ObjectId, required: true },   // 创建者/owner
++  parentId: { type: Schema.Types.ObjectId, default: null }, // 父资源
++  type: { type: String },                                   // 区分 folder 和普通资源
++  inheritPermission: { type: Boolean, default: true }       // 是否继承父权限
++});
++```
++
++### 1.3 实现带继承的鉴权函数
++
++```typescript
++// packages/service/support/permission/{resource}/auth.ts
++export const auth{Resource} = async ({
++  {resource}Id,
++  per,
++  ...props
++}: AuthModeType & {
++  {resource}Id: string;
++  per: PermissionValueType;
++}) => {
++  const result = await parseHeaderCert(props);
++  const { tmbId, teamId } = result;
++
++  const resource = await Mongo{Resource}.findById({resource}Id).lean();
++  if (!resource) {
++    return Promise.reject({Resource}ErrEnum.notExist);
++  }
++
++  if (String(resource.teamId) !== teamId) {
++    return Promise.reject({Resource}ErrEnum.unAuth);
++  }
++
++  const isOwner = result.permission.isOwner || String(resource.tmbId) === String(tmbId);
++
++  // 关键：判断是否需要合并父级权限
++  const isGetParentClb =
++    resource.inheritPermission &&
++    resource.type !== '{resource}Folder' &&  // folder 不继承
++    !!resource.parentId;
++
++  // 并行获取父级权限和自身权限
++  const [folderPer, myPer] = await Promise.all([
++    isGetParentClb
++      ? getTmbPermission({
++          teamId,
++          tmbId,
++          resourceId: resource.parentId!,
++          resourceType: PerResourceTypeEnum.{resource}
++        })
++      : NullRoleVal,
++    getTmbPermission({
++      teamId,
++      tmbId,
++      resourceId: {resource}Id,
++      resourceType: PerResourceTypeEnum.{resource}
++    })
++  ]);
++
++  // 合并权限
++  const Per = new {Resource}Permission({
++    role: sumPer(folderPer, myPer),
++    isOwner
++  });
++
++  if (!Per.checkPer(per)) {
++    return Promise.reject({Resource}ErrEnum.unAuth);
++  }
++
++  return {
++    ...result,
++    permission: Per,
++    {resource}: resource
++  };
++};
++```
++
++### 1.4 Folder 创建时复制父协作者
++
++```typescript
++// 创建 folder 时
++import { createResourceDefaultCollaborators } from '@fastgpt/service/support/permission/controller';
++
++await createResourceDefaultCollaborators({
++  teamId,
++  tmbId,
++  resourceId: newFolderId,
++  resourceType: PerResourceTypeEnum.{resource},
++  parentId,
++  session
++});
++```
++
++### 1.5 移动资源时同步子树权限
++
++```typescript
++// 资源移动后
++import { syncChildrenPermission } from '@fastgpt/service/support/permission/inheritPermission';
++
++await syncChildrenPermission({
++  resource: movedResource,
++  folderTypeList: ['{resource}Folder'],
++  resourceType: PerResourceTypeEnum.{resource},
++  resourceModel: Mongo{Resource},
++  session,
++  collaborators: newParentCollaborators
++});
++```
++
++### 1.6 恢复继承
++
++```typescript
++// 恢复继承时
++import { resumeInheritPermission } from '@fastgpt/service/support/permission/inheritPermission';
++
++await resumeInheritPermission({
++  resource,
++  folderTypeList: ['{resource}Folder'],
++  resourceType: PerResourceTypeEnum.{resource},
++  resourceModel: Mongo{Resource},
++  session
++});
++```
++
++---
++
++## Part 2: fastgpt-pro
++
++### 2.1 协作者列表接口
++
++```typescript
++// fastgpt-pro/projects/app/src/pages/api/core/{resource}/collaborator/list.ts
++async function handler(req) {
++  const { teamId, {resource} } = await auth{Resource}({
++    req,
++    authToken: true,
++    {resource}Id,
++    per: ReadPermissionVal
++  });
++
++  const isGetParentClbs =
++    !!{resource}.inheritPermission &&
++    {resource}.type !== '{resource}Folder' &&
++    !!{resource}.parentId;
++
++  const [parentClbs, childClbs] = await Promise.all([
++    isGetParentClbs
++      ? getResourceOwnedClbs({ teamId, resourceId: {resource}.parentId, resourceType })
++      : [],
++    getResourceOwnedClbs({ teamId, resourceId: {resource}Id, resourceType })
++  ]);
++
++  const realClbs = isGetParentClbs
++    ? mergeCollaboratorList({ childClbs, parentClbs })
++    : childClbs;
++
++  return {
++    clbs: await getClbsInfo(realClbs),       // 最终生效协作者
++    parentClbs: await getClbsInfo(parentClbs) // 父级协作者（用于 UI 展示来源）
++  };
++}
++```
++
++### 2.2 协作者更新接口
++
++```typescript
++// fastgpt-pro/projects/app/src/pages/api/core/{resource}/collaborator/update.ts
++async function handler(req) {
++  const { teamId, tmbId, permission: myPer, {resource} } = await auth{Resource}({
++    req,
++    authToken: true,
++    {resource}Id,
++    per: ManagePermissionVal
++  });
++
++  // 保护规则
++  const changedClbs = getChangedCollaborators({ newRealClbs: collaborators, oldRealClbs });
++
++  // 1. 不能修改自己的权限
++  if (changedClbs.find((clb) => clb?.tmbId === tmbId)) {
++    return Promise.reject({Resource}ErrEnum.canNotEditSelfPermission);
++  }
++
++  // 2. 非 owner 不能修改管理员级协作者
++  if (
++    changedClbs.some((clb) => new {Resource}Permission({ role: clb.changedRole }).hasManagePer) &&
++    !myPer.isOwner
++  ) {
++    return Promise.reject({Resource}ErrEnum.unAuth);
++  }
++
++  // 调用通用编排器
++  await updateResourceCollaborators({
++    teamId,
++    resourceId: {resource}Id,
++    resourceType: PerResourceTypeEnum.{resource},
++    collaborators,
++    folderTypeList: ['{resource}Folder'],
++    resource: {resource},
++    resourceModel: Mongo{Resource},
++    session
++  });
++}
++```
++
++### 2.3 Owner 转移接口
++
++```typescript
++// fastgpt-pro/projects/app/src/pages/api/core/{resource}/changeOwner.ts
++async function handler(req) {
++  const { {resource} } = await auth{Resource}({
++    req,
++    authToken: true,
++    {resource}Id,
++    per: OwnerPermissionVal  // 只有 owner 能转移
++  });
++
++  await changeOwner({
++    changeOwnerType: '{resource}',
++    resourceId: {resource}._id,
++    newOwnerId: newOwnerTmbId,
++    oldOwnerId: {resource}.tmbId,
++    teamId: {resource}.teamId
++  });
++}
++```
++
++---
++
++## Part 3: 前端
++
++### 3.1 协作者管理组件
++
++复用现有的 `MemberManager` 组件，配置：
++
++```typescript
++<MemberManager
++  permission={permission}
++  onGetCollaboratorList={() => get{Resource}Collaborators({resource}Id)}
++  onUpdateCollaborators={(clbs) => update{Resource}Collaborators({resource}Id, clbs)}
++  onDelOneCollaborator={(clb) => delete{Resource}Collaborator({resource}Id, clb)}
++/>
++```
++
++### 3.2 继承态提示
++
++```typescript
++{resource.inheritPermission && resource.parentId && (
++  <Tag colorScheme="blue">继承自父级</Tag>
++)}
++```
++
++---
++
++## 完成后检查
++
++使用 [实施清单](../checklist.md) 进行最终检查。
++
++## 深入了解
++
++- [继承机制详解](../reference/inheritance.md)
++- [协作者管理编排器](../reference/pro-collaborator.md)
++- [Owner 转移机制](../reference/pro-owner-transfer.md)
+diff --git a/.claude/skills/add-permission/guides/quick-start.md b/.claude/skills/add-permission/guides/quick-start.md
+new file mode 100644
+index 000000000000..5f985a8990df
+--- /dev/null
++++ b/.claude/skills/add-permission/guides/quick-start.md
+@@ -0,0 +1,192 @@
++# 快速入门：5 步完成权限接入
++
++> 适用于**简单资源**：无父子结构、无继承、无 owner 转移需求。
++
++## 前置条件
++
++- 资源已有 `teamId` 和 `tmbId` 字段
++- 资源属于某个 team
++
++---
++
++## Step 1: 添加资源类型枚举
++
++```typescript
++// packages/global/support/permission/constant.ts
++export enum PerResourceTypeEnum {
++  // ...existing
++  {resource} = '{resource}'  // 例如: agentSkill = 'agentSkill'
++}
++```
++
++---
++
++## Step 2: 创建权限常量文件
++
++```typescript
++// packages/global/support/permission/{resource}/constant.ts
++import { i18nT } from '@fastgpt/global/common/i18n/utils';
++import {
++  CommonRoleList,
++  CommonPerKeyEnum,
++  CommonRolePerMap,
++  CommonPerList,
++  NullRoleVal
++} from '../constant';
++
++export const {Resource}RoleList = {
++  [CommonPerKeyEnum.read]: {
++    ...CommonRoleList[CommonPerKeyEnum.read],
++    description: i18nT('permission:{resource}.read_desc')
++  },
++  [CommonPerKeyEnum.write]: {
++    ...CommonRoleList[CommonPerKeyEnum.write],
++    description: i18nT('permission:{resource}.write_desc')
++  },
++  [CommonPerKeyEnum.manage]: {
++    ...CommonRoleList[CommonPerKeyEnum.manage],
++    description: i18nT('permission:{resource}.manage_desc')
++  }
++};
++
++export const {Resource}RolePerMap = CommonRolePerMap;
++export const {Resource}PerList = CommonPerList;
++export const {Resource}DefaultRoleVal = NullRoleVal;
++```
++
++---
++
++## Step 3: 创建 Permission 类
++
++```typescript
++// packages/global/support/permission/{resource}/controller.ts
++import { Permission, PerConstructPros } from '../controller';
++import {
++  {Resource}RoleList,
++  {Resource}RolePerMap,
++  {Resource}PerList,
++  {Resource}DefaultRoleVal
++} from './constant';
++
++export class {Resource}Permission extends Permission {
++  constructor(props?: PerConstructPros) {
++    if (!props) {
++      props = { role: {Resource}DefaultRoleVal };
++    } else if (!props.role) {
++      props.role = {Resource}DefaultRoleVal;
++    }
++
++    props.roleList = {Resource}RoleList;
++    props.rolePerMap = {Resource}RolePerMap;
++    props.perList = {Resource}PerList;
++    super(props);
++  }
++}
++```
++
++---
++
++## Step 4: 实现鉴权函数
++
++```typescript
++// packages/service/support/permission/{resource}/auth.ts
++import { AuthModeType } from '../type';
++import { parseHeaderCert } from '../../controller';
++import { PerResourceTypeEnum } from '@fastgpt/global/support/permission/constant';
++import { PermissionValueType } from '@fastgpt/global/support/permission/type';
++import { {Resource}Permission } from '@fastgpt/global/support/permission/{resource}/controller';
++import { getTmbPermission } from '../controller';
++import { Mongo{Resource} } from '@fastgpt/service/core/{resource}/schema';
++import { {Resource}ErrEnum } from '@fastgpt/global/common/error/code/{resource}';
++
++export const auth{Resource} = async ({
++  {resource}Id,
++  per,
++  ...props
++}: AuthModeType & {
++  {resource}Id: string;
++  per: PermissionValueType;
++}) => {
++  const result = await parseHeaderCert(props);
++  const { tmbId, teamId } = result;
++
++  // 1. 查询资源
++  const resource = await Mongo{Resource}.findById({resource}Id).lean();
++  if (!resource) {
++    return Promise.reject({Resource}ErrEnum.notExist);
++  }
++
++  // 2. 验证 team 归属
++  if (String(resource.teamId) !== teamId) {
++    return Promise.reject({Resource}ErrEnum.unAuth);
++  }
++
++  // 3. 判断 owner
++  const isOwner = result.permission.isOwner || String(resource.tmbId) === String(tmbId);
++
++  // 4. 获取权限
++  const myPer = await getTmbPermission({
++    teamId,
++    tmbId,
++    resourceId: {resource}Id,
++    resourceType: PerResourceTypeEnum.{resource}
++  });
++
++  // 5. 构建权限对象并检查
++  const Per = new {Resource}Permission({ role: myPer, isOwner });
++  if (!Per.checkPer(per)) {
++    return Promise.reject({Resource}ErrEnum.unAuth);
++  }
++
++  return {
++    ...result,
++    permission: Per,
++    {resource}: resource
++  };
++};
++```
++
++---
++
++## Step 5: 在 API 中使用
++
++```typescript
++// 读取操作
++const { {resource}, permission } = await auth{Resource}({
++  req,
++  authToken: true,
++  {resource}Id,
++  per: ReadPermissionVal
++});
++
++// 写入操作
++const { {resource}, permission } = await auth{Resource}({
++  req,
++  authToken: true,
++  {resource}Id,
++  per: WritePermissionVal
++});
++
++// 删除操作（要求 owner）
++const { {resource} } = await auth{Resource}({
++  req,
++  authToken: true,
++  {resource}Id,
++  per: OwnerPermissionVal
++});
++```
++
++---
++
++## 完成后检查
++
++- [ ] `PerResourceTypeEnum` 已添加
++- [ ] 权限常量文件已创建
++- [ ] Permission 类已创建
++- [ ] 鉴权函数已实现
++- [ ] API 路由已使用鉴权函数
++
++## 下一步
++
++- 需要协作者管理？→ 在 fastgpt-pro 中添加 `collaborator/list` 和 `collaborator/update` 接口
++- 需要更多细节？→ [参考文档](../reference/README.md)
+diff --git a/.claude/skills/add-permission/reference/README.md b/.claude/skills/add-permission/reference/README.md
+new file mode 100644
+index 000000000000..048859ee9f23
+--- /dev/null
++++ b/.claude/skills/add-permission/reference/README.md
+@@ -0,0 +1,27 @@
++# 参考文档索引
++
++> 深入理解 FastGPT 权限系统的设计原理和实现细节。
++
++## 文档结构
++
++```
++reference/
++├── core-concepts.md      ── 核心概念：权限值、角色、协作者
++├── permission-class.md   ── Permission 类设计与使用
++├── auth-function.md      ── 鉴权函数实现模式
++├── inheritance.md        ── 继承机制详解
++├── pro-collaborator.md   ── fastgpt-pro 协作者管理
++└── pro-owner-transfer.md ── Owner 转移机制
++```
++
++## 按场景查阅
++
++| 我想了解... | 去看... |
++|-------------|---------|
++| 权限值的位字段设计 | [核心概念](./core-concepts.md) |
++| 如何扩展 Permission 类 | [Permission 类设计](./permission-class.md) |
++| 鉴权函数的标准实现 | [鉴权函数实现](./auth-function.md) |
++| 父子资源权限如何合并 | [继承机制](./inheritance.md) |
++| 协作者更新如何处理冲突 | [协作者管理](./pro-collaborator.md) |
++| Owner 转移的完整流程 | [Owner 转移](./pro-owner-transfer.md) |
++
+diff --git a/.claude/skills/add-permission/reference/auth-function.md b/.claude/skills/add-permission/reference/auth-function.md
+new file mode 100644
+index 000000000000..31173d7ec03c
+--- /dev/null
++++ b/.claude/skills/add-permission/reference/auth-function.md
+@@ -0,0 +1,251 @@
++# 鉴权函数实现
++
++## 1. 标准鉴权流程
++
++```
++用户请求 (带 Token/ApiKey)
++       │
++       ▼
++┌──────────────────────┐
++│ parseHeaderCert      │  解析认证信息
++└──────────┬───────────┘
++           │
++           ▼
++┌──────────────────────┐
++│ 查询资源             │
++└──────────┬───────────┘
++           │
++           ▼
++┌──────────────────────┐
++│ 验证 team 归属       │
++└──────────┬───────────┘
++           │
++           ▼
++┌──────────────────────┐
++│ 判断 isOwner         │
++└──────────┬───────────┘
++           │
++           ▼
++┌──────────────────────┐
++│ getTmbPermission     │  获取用户权限
++└──────────┬───────────┘
++           │
++           ▼
++┌──────────────────────┐
++│ 构建 Permission 对象  │
++└──────────┬───────────┘
++           │
++           ▼
++┌──────────────────────┐
++│ checkPer 验证        │
++└──────────────────────┘
++```
++
++---
++
++## 2. 简单资源鉴权模板
++
++```typescript
++// packages/service/support/permission/{resource}/auth.ts
++import { AuthModeType, parseHeaderCert } from '../type';
++import { PerResourceTypeEnum } from '@fastgpt/global/support/permission/constant';
++import { PermissionValueType } from '@fastgpt/global/support/permission/type';
++import { {Resource}Permission } from '@fastgpt/global/support/permission/{resource}/controller';
++import { getTmbPermission } from '../controller';
++
++export const auth{Resource} = async ({
++  {resource}Id,
++  per,
++  ...props
++}: AuthModeType & {
++  {resource}Id: string;
++  per: PermissionValueType;
++}) => {
++  // 1. 解析认证信息
++  const result = await parseHeaderCert(props);
++  const { tmbId, teamId } = result;
++
++  // 2. 查询资源
++  const resource = await Mongo{Resource}.findById({resource}Id).lean();
++  if (!resource) {
++    return Promise.reject({Resource}ErrEnum.notExist);
++  }
++
++  // 3. 验证 team 归属
++  if (String(resource.teamId) !== teamId) {
++    return Promise.reject({Resource}ErrEnum.unAuth);
++  }
++
++  // 4. 判断 owner
++  //    - team owner 视为资源 owner
++  //    - 资源创建者是 owner
++  const isOwner = result.permission.isOwner || String(resource.tmbId) === String(tmbId);
++
++  // 5. 获取用户权限
++  const myPer = await getTmbPermission({
++    teamId,
++    tmbId,
++    resourceId: {resource}Id,
++    resourceType: PerResourceTypeEnum.{resource}
++  });
++
++  // 6. 构建权限对象并检查
++  const Per = new {Resource}Permission({ role: myPer, isOwner });
++  if (!Per.checkPer(per)) {
++    return Promise.reject({Resource}ErrEnum.unAuth);
++  }
++
++  // 7. 返回结果
++  return {
++    ...result,
++    permission: Per,
++    {resource}: resource
++  };
++};
++```
++
++---
++
++## 3. 继承型资源鉴权模板
++
++```typescript
++export const auth{Resource} = async ({
++  {resource}Id,
++  per,
++  ...props
++}: AuthModeType & {
++  {resource}Id: string;
++  per: PermissionValueType;
++}) => {
++  const result = await parseHeaderCert(props);
++  const { tmbId, teamId } = result;
++
++  const resource = await Mongo{Resource}.findById({resource}Id).lean();
++  if (!resource) {
++    return Promise.reject({Resource}ErrEnum.notExist);
++  }
++
++  if (String(resource.teamId) !== teamId) {
++    return Promise.reject({Resource}ErrEnum.unAuth);
++  }
++
++  const isOwner = result.permission.isOwner || String(resource.tmbId) === String(tmbId);
++
++  // 关键：判断是否需要合并父级权限
++  const isGetParentClb =
++    resource.inheritPermission &&           // 开启了继承
++    resource.type !== '{resource}Folder' && // folder 不继承
++    !!resource.parentId;                    // 有父资源
++
++  // 并行获取
++  const [folderPer, myPer] = await Promise.all([
++    isGetParentClb
++      ? getTmbPermission({
++          teamId,
++          tmbId,
++          resourceId: resource.parentId!,
++          resourceType: PerResourceTypeEnum.{resource}
++        })
++      : NullRoleVal,
++    getTmbPermission({
++      teamId,
++      tmbId,
++      resourceId: {resource}Id,
++      resourceType: PerResourceTypeEnum.{resource}
++    })
++  ]);
++
++  // 合并权限
++  const Per = new {Resource}Permission({
++    role: sumPer(folderPer, myPer),
++    isOwner
++  });
++
++  if (!Per.checkPer(per)) {
++    return Promise.reject({Resource}ErrEnum.unAuth);
++  }
++
++  return {
++    ...result,
++    permission: Per,
++    {resource}: resource
++  };
++};
++```
++
++---
++
++## 4. getTmbPermission 实现
++
++```typescript
++// packages/service/support/permission/controller.ts
++export const getTmbPermission = async ({
++  teamId,
++  tmbId,
++  resourceId,
++  resourceType
++}) => {
++  // 1. 个人权限优先
++  const tmbPer = (
++    await MongoResourcePermission.findOne({
++      resourceType,
++      teamId,
++      resourceId,
++      tmbId
++    }, 'permission').lean()
++  )?.permission;
++
++  // 个人权限存在则直接返回（即使是 0）
++  if (tmbPer !== undefined) return tmbPer;
++
++  // 2. 获取 group 和 org 权限
++  const [groupPers, orgPers] = await Promise.all([
++    // 查询用户所属 group 的权限
++    getGroupPermissions(...),
++    // 查询用户所属 org 的权限
++    getOrgPermissions(...)
++  ]);
++
++  // 3. 合并返回
++  return sumPer(...groupPers, ...orgPers);
++};
++```
++
++---
++
++## 5. API 使用示例
++
++```typescript
++// 读取操作
++async function handler(req) {
++  const { {resource}, permission } = await auth{Resource}({
++    req,
++    authToken: true,
++    {resource}Id,
++    per: ReadPermissionVal
++  });
++  return { ...{resource}, permission };
++}
++
++// 写入操作
++async function handler(req) {
++  const { {resource}, permission } = await auth{Resource}({
++    req,
++    authToken: true,
++    {resource}Id,
++    per: WritePermissionVal
++  });
++  // 业务逻辑...
++}
++
++// 删除操作（要求 owner）
++async function handler(req) {
++  await auth{Resource}({
++    req,
++    authToken: true,
++    {resource}Id,
++    per: OwnerPermissionVal
++  });
++  // 删除逻辑...
++}
++```
+diff --git a/.claude/skills/add-permission/reference/core-concepts.md b/.claude/skills/add-permission/reference/core-concepts.md
+new file mode 100644
+index 000000000000..d504cf10bccf
+--- /dev/null
++++ b/.claude/skills/add-permission/reference/core-concepts.md
+@@ -0,0 +1,134 @@
++# 核心概念
++
++## 1. 权限值 (Permission Value) - 位字段设计
++
++权限使用位字段 (bitmask) 表示，支持权限组合：
++
++```typescript
++// packages/global/support/permission/constant.ts
++export const CommonPerList = {
++  owner: ~0 >>> 0,  // 所有位为1，表示所有者
++  read: 0b100,      // 读权限 (4)
++  write: 0b010,     // 写权限 (2)
++  manage: 0b001     // 管理权限 (1)
++};
++```
++
++### 权限值对照表
++
++| 权限 | 值 | 二进制 | 说明 |
++|------|-----|--------|------|
++| NullRoleVal | 0 | 0b000 | 无角色 |
++| ReadPermissionVal | 4 | 0b100 | 读权限 |
++| WritePermissionVal | 2 | 0b010 | 写权限 |
++| ManagePermissionVal | 1 | 0b001 | 管理权限 |
++| OwnerPermissionVal | ~0>>>0 | 全1 | 所有者 |
++
++### 位运算示例
++
++```typescript
++// 检查是否有读权限
++const hasRead = (permission & ReadPermissionVal) === ReadPermissionVal;
++
++// 合并权限
++const merged = permission1 | permission2;
++
++// 添加权限
++const withWrite = permission | WritePermissionVal;
++```
++
++---
++
++## 2. 角色值 (Role Value) - 权限映射
++
++**关键区分**：数据库中 `permission` 字段存储的是**角色值**，不是展开后的权限值。
++
++```typescript
++// 角色 -> 权限映射
++export const CommonRolePerMap = new Map([
++  [0b100, 0b100],  // read 角色 -> read 权限
++  [0b010, 0b110],  // write 角色 -> write + read 权限
++  [0b001, 0b111]   // manage 角色 -> manage + write + read 权限
++]);
++```
++
++### 角色继承关系
++
++```
++manage (0b001) ──包含──► write + read
++   │
++write (0b010) ──包含──► read
++   │
++read (0b100)
++```
++
++---
++
++## 3. 协作者类型
++
++权限可以分配给三种实体（三选一）：
++
++```typescript
++// packages/global/support/permission/collaborator.ts
++type CollaboratorIdType = RequireOnlyOne<{
++  tmbId: string;    // 团队成员
++  groupId: string;  // 成员组
++  orgId: string;    // 组织
++}>;
++```
++
++### 权限优先级
++
++```
++tmbId (个人权限)
++   │
++   └─ 存在？─► 直接返回
++         │
++         └─ 否 ─► groupId + orgId 合并后返回
++```
++
++**注意**：不是"个人 > 组 > 组织"的覆盖关系，而是：
++- 个人权限存在则直接使用
++- 否则 group 和 org 权限按位合并
++
++---
++
++## 4. ResourcePermission Schema
++
++```typescript
++// packages/service/support/permission/schema.ts
++const ResourcePermissionSchema = new Schema({
++  teamId: { type: Schema.Types.ObjectId, required: true },
++
++  // 协作者标识（三选一）
++  tmbId: { type: Schema.Types.ObjectId },
++  groupId: { type: Schema.Types.ObjectId },
++  orgId: { type: Schema.Types.ObjectId },
++
++  // 资源信息
++  resourceType: { type: String, enum: Object.values(PerResourceTypeEnum), required: true },
++  resourceId: { type: Schema.Types.ObjectId },
++
++  // 存储的是角色值
++  permission: { type: Number, required: true }
++});
++```
++
++### 索引
++
++- `resourceId + tmbId` 唯一
++- `resourceId + groupId` 唯一
++- `resourceId + orgId` 唯一
++
++---
++
++## 5. 资源 Schema 权限相关字段
++
++```typescript
++const ResourceSchema = new Schema({
++  teamId: { type: Schema.Types.ObjectId, required: true },
++  tmbId: { type: Schema.Types.ObjectId, required: true },   // 创建者/owner
++  parentId: { type: Schema.Types.ObjectId, default: null }, // 父资源（可选）
++  inheritPermission: { type: Boolean, default: true }       // 是否继承（可选）
++});
++```
+diff --git a/.claude/skills/add-permission/reference/inheritance.md b/.claude/skills/add-permission/reference/inheritance.md
+new file mode 100644
+index 000000000000..1ceeef15be14
+--- /dev/null
++++ b/.claude/skills/add-permission/reference/inheritance.md
+@@ -0,0 +1,295 @@
++# 继承机制详解
++
++## 1. 继承模型概述
++
++```
++┌─────────────────────────────────────────────────────────┐
++│  Folder A (inheritPermission: false)                    │
++│  协作者: [User1: manage, User2: write]                  │
++└───────────────────────┬─────────────────────────────────┘
++                        │
++        ┌───────────────┴───────────────┐
++        ▼                               ▼
++┌───────────────────┐         ┌───────────────────────────┐
++│ Resource B        │         │ Folder C                  │
++│ inherit: true     │         │ inherit: true             │
++│ 自身协作者: []    │         │ 协作者: [User1, User2]    │
++│                   │         │ (从 A 复制)               │
++│ 最终权限:         │         └─────────────┬─────────────┘
++│ User1: manage     │                       │
++│ User2: write      │                       ▼
++│ (来自父级)        │         ┌───────────────────────────┐
++└───────────────────┘         │ Resource D                │
++                              │ inherit: true             │
++                              │ 自身协作者: [User3: read] │
++                              │                           │
++                              │ 最终权限:                 │
++                              │ User1: manage (父级)      │
++                              │ User2: write (父级)       │
++                              │ User3: read (自身)        │
++                              └───────────────────────────┘
++```
++
++### 关键规则
++
++1. **Folder 不继承**：folder 的 `inheritPermission` 无效，它有自己的完整协作者列表
++2. **普通资源继承**：开启继承时，鉴权时合并父级权限
++3. **继承是增量合并**：不是覆盖，子资源可以有额外的显式协作者
++
++---
++
++## 2. 鉴权时的权限合并
++
++```typescript
++// packages/service/support/permission/dataset/auth.ts
++const isGetParentClb =
++  dataset.inheritPermission &&
++  dataset.type !== DatasetTypeEnum.folder &&
++  !!dataset.parentId;
++
++const [folderPer, myPer] = await Promise.all([
++  isGetParentClb
++    ? getTmbPermission({ resourceId: dataset.parentId, ... })
++    : NullRoleVal,
++  getTmbPermission({ resourceId: datasetId, ... })
++]);
++
++// 按位合并
++const Per = new DatasetPermission({
++  role: sumPer(folderPer, myPer),
++  isOwner
++});
++```
++
++### sumPer 实现
++
++```typescript
++export const sumPer = (...pers: PermissionValueType[]) => {
++  return pers.reduce((acc, per) => acc | per, NullRoleVal);
++};
++```
++
++---
++
++## 3. Folder 创建时复制父协作者
++
++```typescript
++// packages/service/support/permission/controller.ts
++export const createResourceDefaultCollaborators = async ({
++  teamId,
++  tmbId,
++  resourceId,
++  resourceType,
++  parentId,
++  session
++}) => {
++  // 1. 获取父协作者
++  const parentClbs = parentId
++    ? await getResourceOwnedClbs({ teamId, resourceId: parentId, resourceType })
++    : [];
++
++  // 2. 构建新协作者列表
++  const collaborators = [
++    ...parentClbs
++      .filter((item) => item.tmbId !== tmbId)  // 排除创建者
++      .map((clb) => {
++        // 父 owner 降级为 manage
++        if (clb.permission === OwnerRoleVal) {
++          clb.permission = ManageRoleVal;
++        }
++        return clb;
++      }),
++    // 创建者成为 owner
++    { tmbId, permission: OwnerRoleVal }
++  ];
++
++  // 3. 批量插入
++  await MongoResourcePermission.insertMany(
++    collaborators.map((clb) => ({
++      teamId,
++      resourceType,
++      resourceId,
++      ...clb
++    })),
++    { session }
++  );
++};
++```
++
++---
++
++## 4. 子树权限同步 (syncChildrenPermission)
++
++当 folder 的协作者变化时，需要同步到继承它的子树。
++
++```typescript
++// packages/service/support/permission/inheritPermission.ts
++export async function syncChildrenPermission({
++  resource,
++  folderTypeList,
++  resourceType,
++  resourceModel,
++  session,
++  collaborators: latestClbList
++}) {
++  // 1. 只处理 folder
++  if (!folderTypeList.includes(resource.type)) return;
++
++  // 2. 获取所有 inheritPermission: true 的 folder 子树
++  const allFolders = await resourceModel.find({
++    teamId: resource.teamId,
++    inheritPermission: true,
++    type: { $in: folderTypeList }
++  });
++
++  // 3. BFS 遍历子树
++  const queue = [resource._id];
++  while (queue.length) {
++    const parentId = queue.shift();
++    const children = allFolders.filter(f => String(f.parentId) === String(parentId));
++
++    for (const child of children) {
++      // 获取子资源现有协作者
++      const childClbs = await getResourceOwnedClbs({ resourceId: child._id, ... });
++
++      for (const latestClb of latestClbList) {
++        // 跳过 owner
++        if (latestClb.permission === OwnerRoleVal) continue;
++
++        const myClb = childClbs.find(c => sameClb(c, latestClb));
++
++        if (myClb) {
++          // 已有则合并（增量）
++          await MongoResourcePermission.updateOne(
++            { _id: myClb._id },
++            { permission: sumPer(myClb.permission, latestClb.permission) },
++            { session }
++          );
++        } else {
++          // 没有则新增
++          await MongoResourcePermission.create([{
++            ...latestClb,
++            resourceId: child._id,
++            resourceType
++          }], { session });
++        }
++      }
++
++      // 删除不再存在的纯继承协作者
++      for (const childClb of childClbs) {
++        const inLatest = latestClbList.find(c => sameClb(c, childClb));
++        if (!inLatest && childClb.permission === parentClb?.permission) {
++          // 是纯继承的，删除
++          await MongoResourcePermission.deleteOne({ _id: childClb._id }, { session });
++        }
++      }
++
++      queue.push(child._id);
++    }
++  }
++}
++```
++
++### 关键点
++
++- **增量合并**：不是简单覆盖，保留子资源的显式增量
++- **只删纯继承**：只删除权限值与父级完全一致的协作者
++- **跳过 owner**：owner 不参与继承同步
++
++---
++
++## 5. 恢复继承 (resumeInheritPermission)
++
++```typescript
++// packages/service/support/permission/inheritPermission.ts
++export const resumeInheritPermission = async ({
++  resource,
++  folderTypeList,
++  resourceType,
++  resourceModel,
++  session
++}) => {
++  const { teamId, parentId, _id: resourceId } = resource;
++
++  // 1. 获取父协作者
++  const parentClbs = parentId
++    ? await getResourceOwnedClbs({ teamId, resourceId: parentId, resourceType })
++    : [];
++
++  // 2. 获取自身协作者
++  const selfClbs = await getResourceOwnedClbs({ teamId, resourceId, resourceType });
++
++  // 3. 合并协作者
++  const mergedClbs = mergeCollaboratorList({
++    childClbs: selfClbs,
++    parentClbs: parentClbs.map((clb) => {
++      // 父 owner 降为 manage
++      if (clb.permission === OwnerRoleVal) {
++        return { ...clb, permission: ManageRoleVal };
++      }
++      return clb;
++    })
++  });
++
++  // 4. 删除旧协作者
++  await MongoResourcePermission.deleteMany({
++    resourceType,
++    resourceId
++  }, { session });
++
++  // 5. 插入合并后的协作者
++  await MongoResourcePermission.insertMany(
++    mergedClbs.map(clb => ({
++      teamId,
++      resourceType,
++      resourceId,
++      ...clb
++    })),
++    { session }
++  );
++
++  // 6. 如果是 folder，同步子树
++  if (folderTypeList.includes(resource.type)) {
++    await syncChildrenPermission({
++      resource,
++      folderTypeList,
++      resourceType,
++      resourceModel,
++      session,
++      collaborators: mergedClbs
++    });
++  }
++
++  // 7. 设置继承标志
++  await resourceModel.updateOne(
++    { _id: resourceId },
++    { inheritPermission: true },
++    { session }
++  );
++};
++```
++
++---
++
++## 6. 资源移动时的处理
++
++```typescript
++// 移动资源后
++if (newParentId !== oldParentId) {
++  // 获取新父级协作者
++  const newParentClbs = await getResourceOwnedClbs({
++    resourceId: newParentId,
++    ...
++  });
++
++  // 同步子树
++  await syncChildrenPermission({
++    resource: movedResource,
++    folderTypeList,
++    resourceType,
++    resourceModel,
++    session,
++    collaborators: newParentClbs
++  });
++}
++```
+diff --git a/.claude/skills/add-permission/reference/permission-class.md b/.claude/skills/add-permission/reference/permission-class.md
+new file mode 100644
+index 000000000000..ff9ce3c13d10
+--- /dev/null
++++ b/.claude/skills/add-permission/reference/permission-class.md
+@@ -0,0 +1,143 @@
++# Permission 类设计
++
++## 1. 基类结构
++
++```typescript
++// packages/global/support/permission/controller.ts
++export class Permission {
++  role: PermissionValueType;
++  private permission: PermissionValueType;
++
++  // 权限状态（计算属性）
++  isOwner: boolean;
++  hasManagePer: boolean;
++  hasWritePer: boolean;
++  hasReadPer: boolean;
++
++  // 角色状态
++  hasManageRole: boolean;
++  hasWriteRole: boolean;
++  hasReadRole: boolean;
++
++  constructor({ role, isOwner, roleList, perList, rolePerMap }) {
++    this.role = isOwner ? OwnerRoleVal : role;
++    this.updatePermissions();
++  }
++
++  // 检查是否拥有指定权限
++  checkPer(perm: PermissionValueType): boolean {
++    if (perm === OwnerPermissionVal) {
++      return this.permission === OwnerPermissionVal;
++    }
++    return (this.permission & perm) === perm;
++  }
++
++  // 添加角色
++  addRole(...roleList: RoleValueType[]) {
++    for (const role of roleList) {
++      this.role = this.role | role;
++    }
++    this.updatePermissions();
++    return this;
++  }
++}
++```
++
++### 关键点
++
++1. **存储的是 role**：`permission` 字段存的是 role 值，通过 `rolePerMap` 展开成实际权限
++2. **isOwner 提升**：如果 `isOwner=true`，role 直接设为 `OwnerRoleVal`
++3. **链式调用**：`addRole` 返回 `this`，支持链式操作
++
++---
++
++## 2. 创建资源特定的 Permission 类
++
++```typescript
++// packages/global/support/permission/{resource}/controller.ts
++import { Permission, PerConstructPros } from '../controller';
++import {
++  {Resource}RoleList,
++  {Resource}RolePerMap,
++  {Resource}PerList,
++  {Resource}DefaultRoleVal
++} from './constant';
++
++export class {Resource}Permission extends Permission {
++  constructor(props?: PerConstructPros) {
++    // 处理空参数
++    if (!props) {
++      props = { role: {Resource}DefaultRoleVal };
++    } else if (!props.role) {
++      props.role = {Resource}DefaultRoleVal;
++    }
++
++    // 注入资源特定的配置
++    props.roleList = {Resource}RoleList;
++    props.rolePerMap = {Resource}RolePerMap;
++    props.perList = {Resource}PerList;
++
++    super(props);
++  }
++}
++```
++
++---
++
++## 3. 使用示例
++
++### 3.1 基本检查
++
++```typescript
++const per = new DatasetPermission({ role: WriteRoleVal });
++
++per.hasReadPer;   // true（write 包含 read）
++per.hasWritePer;  // true
++per.hasManagePer; // false
++per.isOwner;      // false
++
++per.checkPer(ReadPermissionVal);  // true
++per.checkPer(ManagePermissionVal); // false
++```
++
++### 3.2 在鉴权中使用
++
++```typescript
++const Per = new {Resource}Permission({
++  role: myPer,
++  isOwner: String(resource.tmbId) === String(tmbId)
++});
++
++if (!Per.checkPer(per)) {
++  return Promise.reject({Resource}ErrEnum.unAuth);
++}
++
++// 返回给调用方
++return {
++  permission: Per,
++  {resource}: resource
++};
++```
++
++### 3.3 合并权限
++
++```typescript
++import { sumPer } from '@fastgpt/global/support/permission/utils';
++
++// 合并父级权限和自身权限
++const Per = new {Resource}Permission({
++  role: sumPer(folderPer, myPer),
++  isOwner
++});
++```
++
++---
++
++## 4. 现有 Permission 类
++
++| 类 | 文件 |
++|----|------|
++| `Permission` | `packages/global/support/permission/controller.ts` |
++| `DatasetPermission` | `packages/global/support/permission/dataset/controller.ts` |
++| `AppPermission` | `packages/global/support/permission/app/controller.ts` |
++| `TeamPermission` | `packages/global/support/permission/user/controller.ts` |
+diff --git a/.claude/skills/add-permission/reference/pro-collaborator.md b/.claude/skills/add-permission/reference/pro-collaborator.md
+new file mode 100644
+index 000000000000..da19cc1ea4f6
+--- /dev/null
++++ b/.claude/skills/add-permission/reference/pro-collaborator.md
+@@ -0,0 +1,298 @@
++# fastgpt-pro 协作者管理
++
++> fastgpt-pro 在 FastGPT 主仓库的基础权限系统之上，提供"可运营的权限管理能力"。
++
++## 1. 架构分层
++
++```
++┌────────────────────────────────────────────────────────────────────┐
++│                         fastgpt-pro 权限扩展层                     │
++├────────────────────────────────────────────────────────────────────┤
++│ API 层                                                             │
++│ ├── /api/core/{resource}/collaborator/list                         │
++│ ├── /api/core/{resource}/collaborator/update                       │
++│ └── /api/core/{resource}/changeOwner                               │
++├────────────────────────────────────────────────────────────────────┤
++│ 编排层                                                             │
++│ ├── updateResourceCollaborators                                    │
++│ ├── getChangedCollaborators                                        │
++│ ├── checkRoleUpdateConflict                                        │
++│ └── mergeCollaboratorList                                          │
++├────────────────────────────────────────────────────────────────────┤
++│ FastGPT 主仓库基础能力                                             │
++│ ├── authDataset / authApp                                          │
++│ ├── getTmbPermission                                               │
++│ └── ResourcePermission Schema                                      │
++└────────────────────────────────────────────────────────────────────┘
++```
++
++**一句话概括**：FastGPT 负责"判定权限"，fastgpt-pro 负责"管理权限"。
++
++---
++
++## 2. 协作者列表接口
++
++### 接口设计
++
++```typescript
++// fastgpt-pro/projects/app/src/pages/api/core/{resource}/collaborator/list.ts
++type Response = {
++  clbs: CollaboratorItemDetailType[];       // 最终生效协作者
++  parentClbs?: CollaboratorItemDetailType[]; // 父级协作者（用于展示来源）
++};
++```
++
++### 实现
++
++```typescript
++async function handler(req) {
++  const { teamId, {resource} } = await auth{Resource}({
++    req,
++    authToken: true,
++    {resource}Id,
++    per: ReadPermissionVal
++  });
++
++  // 判断是否需要获取父级协作者
++  const isGetParentClbs =
++    !!{resource}.inheritPermission &&
++    {resource}.type !== '{resource}Folder' &&
++    !!{resource}.parentId;
++
++  const [parentClbs, childClbs] = await Promise.all([
++    isGetParentClbs
++      ? getResourceOwnedClbs({ teamId, resourceId: {resource}.parentId, resourceType })
++      : [],
++    getResourceOwnedClbs({ teamId, resourceId: {resource}Id, resourceType })
++  ]);
++
++  // 合并得到最终生效协作者
++  const realClbs = isGetParentClbs
++    ? mergeCollaboratorList({ childClbs, parentClbs })
++    : childClbs;
++
++  return {
++    clbs: await getClbsInfo(realClbs),
++    parentClbs: await getClbsInfo(parentClbs)
++  };
++}
++```
++
++### 设计意图
++
++- 不是简单返回 `MongoResourcePermission.find({ resourceId })`
++- 同时返回"最终权限视图"和"继承来源视图"
++- 前端可以据此展示"此权限来自父级"的 UI 提示
++
++---
++
++## 3. 协作者更新接口
++
++### 核心流程
++
++```typescript
++async function handler(req) {
++  // 1. 鉴权（需要 manage 权限）
++  const { teamId, tmbId, permission: myPer, {resource} } = await auth{Resource}({
++    req,
++    authToken: true,
++    {resource}Id,
++    per: ManagePermissionVal
++  });
++
++  // 2. 获取新旧协作者
++  const [parentClbs, oldChildClbs] = await Promise.all([
++    getResourceOwnedClbs({ resourceId: parentId }),
++    getResourceOwnedClbs({ resourceId: {resource}Id })
++  ]);
++
++  const oldRealClbs = isGetParentClbs
++    ? mergeCollaboratorList({ childClbs: oldChildClbs, parentClbs })
++    : oldChildClbs;
++
++  // 3. 计算变化
++  const changedClbs = getChangedCollaborators({
++    newRealClbs: collaborators,
++    oldRealClbs
++  });
++
++  // 4. 权限保护检查
++  await checkPermissionProtection(changedClbs, tmbId, myPer);
++
++  // 5. 调用编排器更新
++  await updateResourceCollaborators({
++    teamId,
++    resourceId: {resource}Id,
++    resourceType,
++    collaborators,
++    folderTypeList,
++    resource: {resource},
++    resourceModel,
++    session
++  });
++}
++```
++
++### 权限保护规则
++
++```typescript
++// 1. 不能修改自己的权限
++if (changedClbs.find((clb) => clb?.tmbId === tmbId)) {
++  return Promise.reject(ErrEnum.canNotEditSelfPermission);
++}
++
++// 2. 非 owner 不能修改管理员级协作者
++if (
++  changedClbs.some((clb) =>
++    new {Resource}Permission({ role: clb.changedRole }).hasManagePer
++  ) &&
++  !myPer.isOwner
++) {
++  return Promise.reject(ErrEnum.unAuth);
++}
++```
++
++---
++
++## 4. updateResourceCollaborators 编排器
++
++### 核心逻辑
++
++```typescript
++export const updateResourceCollaborators = async ({
++  teamId,
++  resourceId,
++  resourceType,
++  collaborators,      // 用户想更新成的协作者列表
++  folderTypeList,
++  resource,
++  resourceModel,
++  session
++}) => {
++  // 1. 获取父级和当前协作者
++  const [parentClbs, oldChildClbs] = await Promise.all([...]);
++
++  // 2. 计算旧的最终协作者
++  const oldRealClbs = isGetParentClbs
++    ? mergeCollaboratorList({ childClbs: oldChildClbs, parentClbs })
++    : oldChildClbs;
++
++  // 3. 计算变化的协作者
++  const changedClbs = getChangedCollaborators({
++    newRealClbs: collaborators,
++    oldRealClbs
++  });
++
++  // 4. 检测继承冲突
++  const hasConflict = checkRoleUpdateConflict({
++    changedClbs,
++    parentClbs
++  });
++
++  // 5. 如果是 folder，先同步子树
++  if (folderTypeList.includes(resource.type)) {
++    await syncChildrenPermission({
++      resource,
++      collaborators,
++      ...
++    });
++  }
++
++  // 6. 如果处于继承态且有冲突，自动断开继承
++  if (resource.inheritPermission && hasConflict) {
++    await resourceModel.updateOne(
++      { _id: resourceId },
++      { inheritPermission: false },
++      { session }
++    );
++  }
++
++  // 7. 更新协作者记录
++  if (folderTypeList.includes(resource.type) || hasConflict) {
++    // folder 或冲突：整表重建
++    await MongoResourcePermission.deleteMany({ resourceId }, { session });
++    await MongoResourcePermission.insertMany(collaborators, { session });
++  } else {
++    // 普通情况：增量更新
++    for (const clb of changedClbs) {
++      if (clb.action === 'add') {
++        await MongoResourcePermission.create([clb], { session });
++      } else if (clb.action === 'update') {
++        await MongoResourcePermission.updateOne(
++          { resourceId, ...clbId },
++          { permission: clb.permission },
++          { session }
++        );
++      } else if (clb.action === 'delete') {
++        await MongoResourcePermission.deleteOne({ resourceId, ...clbId }, { session });
++      }
++    }
++  }
++};
++```
++
++---
++
++## 5. 继承冲突检测
++
++### checkRoleUpdateConflict
++
++```typescript
++export const checkRoleUpdateConflict = ({
++  changedClbs,
++  parentClbs
++}) => {
++  for (const changed of changedClbs) {
++    // 找到对应的父协作者
++    const parentClb = parentClbs.find(p => sameClb(p, changed));
++
++    if (parentClb) {
++      // 如果修改了来自父级的协作者权限，或删除了父级协作者
++      if (
++        changed.action === 'delete' ||
++        changed.permission !== parentClb.permission
++      ) {
++        return true; // 有冲突
++      }
++    }
++  }
++  return false;
++};
++```
++
++### 冲突即断继承
++
++**设计价值**：
++1. 用户不需要先点"取消继承"再改协作者
++2. 直接改协作者就自动完成"打断继承"状态迁移
++3. 交互从"配置底层机制"变成"编辑最终结果"
++
++---
++
++## 6. 为什么 folder 要"整表重建"
++
++folder 或继承态冲突时，采用"删除全部协作者记录，再插入新列表"。
++
++**原因**：这两类场景里，"当前资源的协作者记录"已经不再只是"子级自定义增量"，而是要转成一份新的"显式完整权限快照"。
++
++```typescript
++if (folderTypeList.includes(resource.type) || hasConflict) {
++  // 整表重建
++  await MongoResourcePermission.deleteMany({ resourceId }, { session });
++  await MongoResourcePermission.insertMany(collaborators, { session });
++}
++```
++
++---
++
++## 7. 支持三类协作者
++
++fastgpt-pro 的协作者管理同时支持：
++
++| 类型 | 字段 | 说明 |
++|------|------|------|
++| 团队成员 | tmbId | 个人级权限 |
++| 成员组 | groupId | 组级权限 |
++| 组织 | orgId | 组织级权限 |
++
++新资源接入时，必须同时支持这三类协作者。
+diff --git a/.claude/skills/add-permission/reference/pro-owner-transfer.md b/.claude/skills/add-permission/reference/pro-owner-transfer.md
+new file mode 100644
+index 000000000000..c448179b11b8
+--- /dev/null
++++ b/.claude/skills/add-permission/reference/pro-owner-transfer.md
+@@ -0,0 +1,259 @@
++# Owner 转移机制
++
++## 1. 接口入口
++
++```typescript
++// fastgpt-pro/projects/app/src/pages/api/core/{resource}/changeOwner.ts
++async function handler(req) {
++  // 只有 owner 能转移
++  const { {resource} } = await auth{Resource}({
++    req,
++    authToken: true,
++    {resource}Id,
++    per: OwnerPermissionVal
++  });
++
++  await changeOwner({
++    changeOwnerType: '{resource}',
++    resourceId: {resource}._id,
++    newOwnerId: newOwnerTmbId,
++    oldOwnerId: {resource}.tmbId,
++    teamId: {resource}.teamId
++  });
++}
++```
++
++---
++
++## 2. 通用 changeOwner 实现
++
++```typescript
++// fastgpt-pro/projects/app/src/service/core/changeOwner.ts
++export const changeOwner = async ({
++  changeOwnerType,
++  resourceId,
++  newOwnerId,
++  oldOwnerId,
++  teamId
++}) => {
++  const session = await mongoose.startSession();
++  session.startTransaction();
++
++  try {
++    const { resourceModel, folderTypeList, resourceType } = getResourceConfig(changeOwnerType);
++
++    // 1. 查询资源
++    const resource = await resourceModel.findById(resourceId);
++
++    // 2. 如果是 folder，获取整个子树
++    const allResources = folderTypeList.includes(resource.type)
++      ? await getResourceTree(resource, resourceModel, folderTypeList)
++      : [resource];
++
++    // 3. 更新资源表的 tmbId
++    await updateResourceOwner(allResources, newOwnerId, resourceModel, session);
++
++    // 4. 根资源断开继承
++    await resourceModel.updateOne(
++      { _id: resourceId },
++      { inheritPermission: false },
++      { session }
++    );
++
++    // 5. 修正权限记录
++    await fixPermissionRecords(allResources, oldOwnerId, newOwnerId, resourceType, session);
++
++    await session.commitTransaction();
++  } catch (error) {
++    await session.abortTransaction();
++    throw error;
++  } finally {
++    session.endSession();
++  }
++};
++```
++
++---
++
++## 3. 更新资源表 Owner
++
++```typescript
++const updateResourceOwner = async (
++  allResources,
++  newOwnerId,
++  resourceModel,
++  session
++) => {
++  // 根资源直接改 owner
++  await resourceModel.updateOne(
++    { _id: allResources[0]._id },
++    { tmbId: newOwnerId },
++    { session }
++  );
++
++  // 子资源：只改仍属于旧 owner 的
++  const childResources = allResources.slice(1);
++  const oldOwnerChildren = childResources.filter(
++    r => String(r.tmbId) === String(oldOwnerId)
++  );
++
++  if (oldOwnerChildren.length > 0) {
++    await resourceModel.updateMany(
++      { _id: { $in: oldOwnerChildren.map(r => r._id) } },
++      { tmbId: newOwnerId },
++      { session }
++    );
++  }
++};
++```
++
++---
++
++## 4. 权限记录修正策略
++
++```typescript
++const fixPermissionRecords = async (
++  allResources,
++  oldOwnerId,
++  newOwnerId,
++  resourceType,
++  session
++) => {
++  const resourceIds = allResources.map(r => r._id);
++
++  // 查询涉及的权限记录
++  const permissions = await MongoResourcePermission.find({
++    resourceType,
++    resourceId: { $in: resourceIds },
++    tmbId: { $in: [oldOwnerId, newOwnerId] }
++  });
++
++  // 按资源分组
++  const perByResource = groupBy(permissions, 'resourceId');
++
++  for (const [resourceId, pers] of Object.entries(perByResource)) {
++    const oldOwnerPer = pers.find(p => String(p.tmbId) === String(oldOwnerId));
++    const newOwnerPer = pers.find(p => String(p.tmbId) === String(newOwnerId));
++
++    if (oldOwnerPer && newOwnerPer) {
++      // 情况1：两者都有记录 → 合并后只保留 newOwner
++      await MongoResourcePermission.updateOne(
++        { _id: newOwnerPer._id },
++        { permission: Math.max(oldOwnerPer.permission, newOwnerPer.permission) },
++        { session }
++      );
++      await MongoResourcePermission.deleteOne(
++        { _id: oldOwnerPer._id },
++        { session }
++      );
++    } else if (oldOwnerPer && !newOwnerPer) {
++      // 情况2：只有 oldOwner 有记录 → 改成 newOwner
++      await MongoResourcePermission.updateOne(
++        { _id: oldOwnerPer._id },
++        { tmbId: newOwnerId },
++        { session }
++      );
++    }
++    // 情况3：只有 newOwner 有记录 → 保持不变
++  }
++};
++```
++
++### 注意
++
++当前使用 `Math.max(oldPer, newPer)` 合并权限。这在 bitmask 设计下有潜在风险，因为数值更大不一定代表权限更强。
++
++建议后续改成更明确的合并策略：
++
++```typescript
++// 推荐做法
++const mergedPermission = oldOwnerPer.permission | newOwnerPer.permission;
++```
++
++---
++
++## 5. Folder 子树处理
++
++```typescript
++const getResourceTree = async (root, resourceModel, folderTypeList) => {
++  const result = [root];
++  const queue = [root._id];
++
++  while (queue.length) {
++    const parentId = queue.shift();
++
++    const children = await resourceModel.find({
++      parentId,
++      teamId: root.teamId
++    });
++
++    for (const child of children) {
++      result.push(child);
++      // 只有 folder 才继续递归
++      if (folderTypeList.includes(child.type)) {
++        queue.push(child._id);
++      }
++    }
++  }
++
++  return result;
++};
++```
++
++---
++
++## 6. 完整流程图
++
++```
++Owner 转移请求
++       │
++       ▼
++┌──────────────────────┐
++│ 验证 OwnerPermission │
++└──────────┬───────────┘
++           │
++           ▼
++┌──────────────────────┐
++│ 查询资源（及子树）    │
++└──────────┬───────────┘
++           │
++           ▼
++┌──────────────────────┐
++│ 更新资源表 tmbId     │
++│ (根资源 + 旧owner子) │
++└──────────┬───────────┘
++           │
++           ▼
++┌──────────────────────┐
++│ 根资源断开继承       │
++│ inheritPermission:   │
++│ false                │
++└──────────┬───────────┘
++           │
++           ▼
++┌──────────────────────┐
++│ 修正权限记录         │
++│ oldOwner → newOwner  │
++└──────────────────────┘
++```
++
++---
++
++## 7. 审计日志
++
++Owner 转移是敏感操作，必须记录审计日志：
++
++```typescript
++await addOperationLog({
++  teamId,
++  tmbId,
++  operationType: 'changeOwner',
++  resourceType,
++  resourceId,
++  metadata: {
++    oldOwnerId,
++    newOwnerId,
++    resourceName: resource.name
++  }
++});
++```
+diff --git a/packages/global/common/error/code/agentSkill.ts b/packages/global/common/error/code/agentSkill.ts
+index 9604e0e252ba..5de39a5a2f54 100644
+--- a/packages/global/common/error/code/agentSkill.ts
++++ b/packages/global/common/error/code/agentSkill.ts
+@@ -3,7 +3,8 @@ import { i18nT } from '../../../../web/i18n/utils';
+ /* agentSkill: 509000 */
+ export enum SkillErrEnum {
+   unExist = 'skillUnExist',
+-  unAuthSkill = 'unAuthSkill'
++  unAuthSkill = 'unAuthSkill',
++  canNotEditAdminPermission = 'canNotEditAdminPermission'
+ }
+ const skillErrList = [
+   {
+@@ -13,6 +14,10 @@ const skillErrList = [
+   {
+     statusText: SkillErrEnum.unAuthSkill,
+     message: i18nT('common:code_error.skill_error.un_auth_skill')
++  },
++  {
++    statusText: SkillErrEnum.canNotEditAdminPermission,
++    message: i18nT('common:code_error.skill_error.can_not_edit_admin_permission')
+   }
+ ];
+ export default skillErrList.reduce((acc, cur, index) => {
+diff --git a/packages/global/core/agentSkills/type.ts b/packages/global/core/agentSkills/type.ts
+index 5bd7d9ea47ca..ddb95b592844 100644
+--- a/packages/global/core/agentSkills/type.ts
++++ b/packages/global/core/agentSkills/type.ts
+@@ -58,6 +58,7 @@ export const AgentSkillSchema = z.object({
+   _id: z.string(),
+   parentId: z.string().nullable().optional(),
+   type: AgentSkillTypeSchema,
++  inheritPermission: z.boolean().optional(),
+   source: AgentSkillSourceSchema,
+   name: z.string(),
+   description: z.string(),
+@@ -65,8 +66,8 @@ export const AgentSkillSchema = z.object({
+   category: z.array(AgentSkillCategorySchema),
+   config: AgentSkillConfigSchema,
+   avatar: z.string().optional(),
+-  teamId: z.string().optional(),
+-  tmbId: z.string().optional(),
++  teamId: z.string(),
++  tmbId: z.string(),
+   createTime: z.date(),
+   updateTime: z.date(),
+   deleteTime: z.date().nullable().optional(),
+@@ -81,6 +82,7 @@ export const AgentSkillListItemSchema = z.object({
+   source: AgentSkillSourceSchema,
+   type: AgentSkillTypeSchema,
+   parentId: z.string().nullable().optional(),
++  inheritPermission: z.boolean().optional(),
+   name: z.string(),
+   description: z.string(),
+   author: z.string(),
+diff --git a/packages/global/openapi/core/agentSkills/api.ts b/packages/global/openapi/core/agentSkills/api.ts
+index dac40e3eb566..847caaf09707 100644
+--- a/packages/global/openapi/core/agentSkills/api.ts
++++ b/packages/global/openapi/core/agentSkills/api.ts
+@@ -67,13 +67,28 @@ export const UpdateSkillBodySchema = z.object({
+   description: z.string().optional(),
+   category: z.array(AgentSkillCategorySchema).optional(),
+   config: AgentSkillConfigSchema.optional(),
+-  avatar: z.string().optional()
++  avatar: z.string().optional(),
++  parentId: z
++    .string()
++    .nullable()
++    .optional()
++    .describe('移动到指定文件夹，null 表示根目录，undefined 表示不移动')
+ });
+ export type UpdateSkillBody = z.infer<typeof UpdateSkillBodySchema>;
+ 
+ export const UpdateSkillResponseSchema = z.void();
+ export type UpdateSkillResponse = z.infer<typeof UpdateSkillResponseSchema>;
+ 
++export const CopySkillBodySchema = z.object({
++  skillId: IdSchema
++});
++export type CopySkillBody = z.infer<typeof CopySkillBodySchema>;
++
++export const CopySkillResponseSchema = z.object({
++  skillId: z.string()
++});
++export type CopySkillResponse = z.infer<typeof CopySkillResponseSchema>;
++
+ export const DeleteSkillQuerySchema = z.object({
+   skillId: IdSchema
+ });
+@@ -90,6 +105,9 @@ export type GetSkillDetailQuery = z.infer<typeof GetSkillDetailQuerySchema>;
+ export const GetSkillDetailResponseSchema = z.object({
+   _id: z.string(),
+   source: AgentSkillSourceSchema,
++  type: AgentSkillTypeSchema.optional(),
++  parentId: z.string().nullable().optional(),
++  inheritPermission: z.boolean().optional(),
+   name: z.string(),
+   description: z.string(),
+   author: z.string(),
+@@ -99,15 +117,16 @@ export const GetSkillDetailResponseSchema = z.object({
+   teamId: z.string().optional(),
+   tmbId: z.string().optional(),
+   createTime: z.string(),
+-  updateTime: z.string()
++  updateTime: z.string(),
++  permission: z.any().optional()
+ });
+ export type GetSkillDetailResponse = z.infer<typeof GetSkillDetailResponseSchema>;
+ 
+ export const ImportSkillBodySchema = z.object({
++  parentId: z.string().nullable().optional().describe('导入的目标目录 ID'),
+   name: z.string().optional().describe('导入后的技能名称'),
+   description: z.string().optional().describe('导入后的技能描述'),
+-  avatar: z.string().optional().describe('导入后的技能头像'),
+-  parentId: NullableParentIdSchema
++  avatar: z.string().optional().describe('导入后的技能头像')
+ });
+ export type ImportSkillBody = z.infer<typeof ImportSkillBodySchema>;
+ 
+diff --git a/packages/global/support/permission/agentSkill/constant.ts b/packages/global/support/permission/agentSkill/constant.ts
+index f8c4c59b3330..c546bc8bf915 100644
+--- a/packages/global/support/permission/agentSkill/constant.ts
++++ b/packages/global/support/permission/agentSkill/constant.ts
+@@ -1,11 +1,31 @@
+-import { NullRoleVal, CommonPerList, CommonRoleList, CommonRolePerMap } from '../constant';
+-import type { PermissionListType, RolePerMapType } from '../type';
++import { i18nT } from '../../../../web/i18n/utils';
++import {
++  NullRoleVal,
++  CommonPerKeyEnum,
++  CommonRoleList,
++  CommonRolePerMap,
++  CommonPerList
++} from '../constant';
++import type { RolePerMapType } from '../type';
+ import type { RoleListType } from '../type';
+ 
+-export const SkillDefaultRoleVal = NullRoleVal;
++export const SkillRoleList: RoleListType = {
++  [CommonPerKeyEnum.read]: {
++    ...CommonRoleList[CommonPerKeyEnum.read],
++    description: i18nT('skill:permission.des.read')
++  },
++  [CommonPerKeyEnum.write]: {
++    ...CommonRoleList[CommonPerKeyEnum.write],
++    description: i18nT('skill:permission.des.write')
++  },
++  [CommonPerKeyEnum.manage]: {
++    ...CommonRoleList[CommonPerKeyEnum.manage],
++    description: i18nT('skill:permission.des.manage')
++  }
++};
++
++export const SkillRolePerMap: RolePerMapType = CommonRolePerMap;
+ 
+-// Skill permissions currently mirror the common read/write/manage set.
+-// Extend here when skill-specific permission bits are needed.
+-export const SkillPerList: PermissionListType = { ...CommonPerList };
+-export const SkillRoleList: RoleListType = { ...CommonRoleList };
+-export const SkillRolePerMap: RolePerMapType = new Map([...CommonRolePerMap]);
++export const SkillPerList = CommonPerList;
++
++export const SkillDefaultRoleVal = NullRoleVal;
+diff --git a/packages/global/support/permission/constant.ts b/packages/global/support/permission/constant.ts
+index d8c173bb82a8..51837832aafa 100644
+--- a/packages/global/support/permission/constant.ts
++++ b/packages/global/support/permission/constant.ts
+@@ -50,7 +50,8 @@ export enum PerResourceTypeEnum {
+   team = 'team',
+   app = 'app',
+   dataset = 'dataset',
+-  model = 'model'
++  model = 'model',
++  agentSkill = 'agentSkill'
+ }
+ 
+ /* new permission */
+diff --git a/packages/global/support/permission/user/constant.ts b/packages/global/support/permission/user/constant.ts
+index 890f50d796d2..bea6ce1a6918 100644
+--- a/packages/global/support/permission/user/constant.ts
++++ b/packages/global/support/permission/user/constant.ts
+@@ -12,20 +12,23 @@ import { sumPer } from '../utils';
+ export enum TeamPerKeyEnum {
+   appCreate = 'appCreate',
+   datasetCreate = 'datasetCreate',
+-  apikeyCreate = 'apikeyCreate'
++  apikeyCreate = 'apikeyCreate',
++  skillCreate = 'skillCreate'
+ }
+ 
+ export enum TeamRoleKeyEnum {
+   appCreate = 'appCreate',
+   datasetCreate = 'datasetCreate',
+-  apikeyCreate = 'apikeyCreate'
++  apikeyCreate = 'apikeyCreate',
++  skillCreate = 'skillCreate'
+ }
+ 
+ export const TeamPerList: PermissionListType<TeamPerKeyEnum> = {
+   ...CommonPerList,
+   apikeyCreate: 0b100000,
+   appCreate: 0b001000,
+-  datasetCreate: 0b010000
++  datasetCreate: 0b010000,
++  skillCreate: 0b1000000
+ };
+ 
+ export const TeamRoleList: RoleListType<TeamRoleKeyEnum> = {
+@@ -60,6 +63,12 @@ export const TeamRoleList: RoleListType<TeamRoleKeyEnum> = {
+     description: '',
+     name: i18nT('account_team:permission_apikeyCreate'),
+     value: 0b100000
++  },
++  [TeamRoleKeyEnum.skillCreate]: {
++    checkBoxType: 'multiple',
++    description: '',
++    name: i18nT('account_team:permission_skillCreate'),
++    value: 0b1000000
+   }
+ };
+ 
+@@ -80,6 +89,10 @@ export const TeamRolePerMap: RolePerMapType = new Map([
+   [
+     TeamRoleList['apikeyCreate'].value,
+     sumPer(TeamPerList.apikeyCreate, CommonPerList.read, CommonPerList.write) as PermissionValueType
++  ],
++  [
++    TeamRoleList['skillCreate'].value,
++    sumPer(TeamPerList.skillCreate, CommonPerList.read, CommonPerList.write) as PermissionValueType
+   ]
+ ]);
+ 
+@@ -89,6 +102,7 @@ export const TeamManageRoleVal = TeamRoleList['manage'].value;
+ export const TeamAppCreateRoleVal = TeamRoleList['appCreate'].value;
+ export const TeamDatasetCreateRoleVal = TeamRoleList['datasetCreate'].value;
+ export const TeamApikeyCreateRoleVal = TeamRoleList['apikeyCreate'].value;
++export const TeamSkillCreateRoleVal = TeamRoleList['skillCreate'].value;
+ export const TeamDefaultRoleVal = TeamReadRoleVal;
+ 
+ export const TeamReadPermissionVal = TeamPerList.read;
+@@ -97,4 +111,5 @@ export const TeamManagePermissionVal = TeamPerList.manage;
+ export const TeamAppCreatePermissionVal = TeamPerList.appCreate;
+ export const TeamDatasetCreatePermissionVal = TeamPerList.datasetCreate;
+ export const TeamApikeyCreatePermissionVal = TeamPerList.apikeyCreate;
++export const TeamSkillCreatePermissionVal = TeamPerList.skillCreate;
+ export const TeamDefaultPermissionVal = TeamReadPermissionVal;
+diff --git a/packages/global/support/permission/user/controller.ts b/packages/global/support/permission/user/controller.ts
+index b92f98072da8..3579305939a5 100644
+--- a/packages/global/support/permission/user/controller.ts
++++ b/packages/global/support/permission/user/controller.ts
+@@ -3,6 +3,7 @@ import {
+   TeamApikeyCreateRoleVal,
+   TeamAppCreateRoleVal,
+   TeamDatasetCreateRoleVal,
++  TeamSkillCreateRoleVal,
+   TeamDefaultRoleVal,
+   TeamPerList,
+   TeamRoleList,
+@@ -13,9 +14,11 @@ export class TeamPermission extends Permission {
+   hasAppCreateRole: boolean = false;
+   hasDatasetCreateRole: boolean = false;
+   hasApikeyCreateRole: boolean = false;
++  hasSkillCreateRole: boolean = false;
+   hasAppCreatePer: boolean = false;
+   hasDatasetCreatePer: boolean = false;
+   hasApikeyCreatePer: boolean = false;
++  hasSkillCreatePer: boolean = false;
+ 
+   constructor(props?: PerConstructPros) {
+     if (!props) {
+@@ -34,9 +37,11 @@ export class TeamPermission extends Permission {
+       this.hasAppCreateRole = this.checkRole(TeamAppCreateRoleVal);
+       this.hasDatasetCreateRole = this.checkRole(TeamDatasetCreateRoleVal);
+       this.hasApikeyCreateRole = this.checkRole(TeamApikeyCreateRoleVal);
++      this.hasSkillCreateRole = this.checkRole(TeamSkillCreateRoleVal);
+       this.hasAppCreatePer = this.checkPer(TeamAppCreateRoleVal);
+       this.hasDatasetCreatePer = this.checkPer(TeamDatasetCreateRoleVal);
+       this.hasApikeyCreatePer = this.checkPer(TeamApikeyCreateRoleVal);
++      this.hasSkillCreatePer = this.checkPer(TeamSkillCreateRoleVal);
+     });
+   }
+ }
+diff --git a/packages/global/support/user/audit/constants.ts b/packages/global/support/user/audit/constants.ts
+index 506febb8e386..e631186655a6 100644
+--- a/packages/global/support/user/audit/constants.ts
++++ b/packages/global/support/user/audit/constants.ts
+@@ -101,7 +101,12 @@ export enum AuditEventEnum {
+   DELETE_SKILL = 'DELETE_SKILL',
+   IMPORT_SKILL = 'IMPORT_SKILL',
+   CREATE_SKILL_FOLDER = 'CREATE_SKILL_FOLDER',
+-  EXPORT_SKILL = 'EXPORT_SKILL'
++  EXPORT_SKILL = 'EXPORT_SKILL',
++  COPY_SKILL = 'COPY_SKILL',
++  MOVE_SKILL = 'MOVE_SKILL',
++  UPDATE_SKILL_COLLABORATOR = 'UPDATE_SKILL_COLLABORATOR',
++  DELETE_SKILL_COLLABORATOR = 'DELETE_SKILL_COLLABORATOR',
++  TRANSFER_SKILL_OWNERSHIP = 'TRANSFER_SKILL_OWNERSHIP'
+ }
+ 
+ export type AuditEventParamsType = {
+diff --git a/packages/service/core/agentSkills/controller.ts b/packages/service/core/agentSkills/controller.ts
+index ffa8edd0196d..77a11a727a3d 100644
+--- a/packages/service/core/agentSkills/controller.ts
++++ b/packages/service/core/agentSkills/controller.ts
+@@ -4,16 +4,15 @@ import {
+   AgentSkillSourceEnum,
+   AgentSkillTypeEnum
+ } from '@fastgpt/global/core/agentSkills/constants';
+-import type {
+-  AgentSkillSchemaType,
+-  AgentSkillListItemType,
+-  SkillPackageType
+-} from '@fastgpt/global/core/agentSkills/type';
++import type { AgentSkillSchemaType, SkillPackageType } from '@fastgpt/global/core/agentSkills/type';
+ import type { ClientSession } from '../../common/mongo';
+ import { uploadSkillPackage, deleteSkillAllPackages } from './storage';
++import { removeImageByPath } from '../../common/file/image/controller';
+ import { createVersion } from './version/controller';
+-import { MongoApp } from '../app/schema';
+-import { NodeInputKeyEnum } from '@fastgpt/global/core/workflow/constants';
++import { mongoSessionRun } from '../../common/mongo/sessionRun';
++import { getLogger, LogCategories } from '../../common/logger';
++
++const logger = getLogger(LogCategories.MODULE.AGENT_SKILLS.CREATION);
+ 
+ // Types for service operations
+ type CreateSkillData = {
+@@ -34,16 +33,6 @@ type UpdateSkillData = Partial<
+   Pick<CreateSkillData, 'name' | 'description' | 'category' | 'config' | 'avatar'>
+ >;
+ 
+-type ListSkillsParams = {
+-  source?: 'store' | 'mine';
+-  teamId?: string;
+-  searchKey?: string;
+-  category?: string;
+-  parentId?: string | null;
+-  page: number;
+-  pageSize: number;
+-};
+-
+ // ==================== CRUD Operations ====================
+ 
+ /**
+@@ -155,6 +144,9 @@ export async function deleteSkill(skillId: string, session?: ClientSession): Pro
+   for (const item of deleteList) {
+     if (item.teamId && item.type !== AgentSkillTypeEnum.folder) {
+       deleteSkillAllPackages(item.teamId.toString(), item._id);
++      if (item.avatar) {
++        removeImageByPath(item.avatar);
++      }
+     }
+   }
+ }
+@@ -171,98 +163,6 @@ export async function getSkillById(skillId: string): Promise<AgentSkillSchemaTyp
+   return skill as AgentSkillSchemaType | null;
+ }
+ 
+-// ==================== List Operations ====================
+-
+-/**
+- * List skills with pagination and filtering
+- */
+-export async function listSkills(
+-  params: ListSkillsParams
+-): Promise<{ list: AgentSkillListItemType[]; total: number }> {
+-  const { source, teamId, searchKey, category, parentId, page, pageSize } = params;
+-
+-  // Build query
+-  const query: Record<string, any> = {
+-    deleteTime: null
+-  };
+-
+-  // Parent ID filter
+-  if (parentId !== undefined) {
+-    query.parentId = parentId || null;
+-  }
+-
+-  // Source filter
+-  if (source === 'store') {
+-    query.source = AgentSkillSourceEnum.system;
+-  } else if (source === 'mine' && teamId) {
+-    query.source = AgentSkillSourceEnum.personal;
+-    query.teamId = teamId;
+-  }
+-
+-  // Category filter — use $in because category is an array field
+-  if (category) {
+-    query.category = { $in: [category] };
+-  }
+-
+-  // Search key (text search on name and description)
+-  if (searchKey) {
+-    query.$or = [
+-      { name: { $regex: searchKey, $options: 'i' } },
+-      { description: { $regex: searchKey, $options: 'i' } }
+-    ];
+-  }
+-
+-  // Execute query with pagination
+-  const skip = (page - 1) * pageSize;
+-
+-  const [skills, total] = await Promise.all([
+-    MongoAgentSkills.find(query)
+-      .select(
+-        '_id source type parentId name description author category avatar createTime updateTime'
+-      )
+-      .sort({ type: -1, createTime: -1 }) // Folders first
+-      .skip(skip)
+-      .limit(pageSize)
+-      .lean(),
+-    MongoAgentSkills.countDocuments(query)
+-  ]);
+-
+-  // Append appCount for non-folder skills
+-  const nonFolderSkills = skills.filter((s) => s.type !== AgentSkillTypeEnum.folder);
+-  const appCountMap = new Map<string, number>();
+-
+-  if (nonFolderSkills.length > 0) {
+-    const counts = await Promise.all(
+-      nonFolderSkills.map((skill) =>
+-        MongoApp.countDocuments({
+-          deleteTime: null,
+-          modules: {
+-            $elemMatch: {
+-              inputs: {
+-                $elemMatch: {
+-                  key: NodeInputKeyEnum.skills,
+-                  'value.skillId': skill._id.toString()
+-                }
+-              }
+-            }
+-          }
+-        })
+-      )
+-    );
+-    nonFolderSkills.forEach((skill, i) => {
+-      appCountMap.set(skill._id.toString(), counts[i]);
+-    });
+-  }
+-
+-  return {
+-    list: skills.map((s) => ({
+-      ...s,
+-      appCount: appCountMap.get(s._id.toString()) ?? 0
+-    })) as AgentSkillListItemType[],
+-    total
+-  };
+-}
+-
+ // ==================== Import/Export ====================
+ 
+ /**
+@@ -441,7 +341,7 @@ export async function createSkillFolder(
+     tmbId: string;
+   },
+   session?: ClientSession
+-): Promise<string> {
++): Promise<AgentSkillSchemaType> {
+   const { name, description, parentId, teamId, tmbId } = data;
+ 
+   // Check name uniqueness in the same parent folder
+@@ -468,7 +368,7 @@ export async function createSkillFolder(
+   });
+ 
+   await folder.save({ session });
+-  return folder._id.toString();
++  return folder.toObject() as AgentSkillSchemaType;
+ }
+ 
+ /**
+@@ -511,3 +411,28 @@ async function getParents(
+ 
+   return paths;
+ }
++
++/**
++ * Update parent folders' updateTime recursively (fire-and-forget)
++ */
++export const updateParentFoldersUpdateTime = ({ parentId }: { parentId?: string | null }) => {
++  mongoSessionRun(async (session) => {
++    const existsId = new Set<string>();
++    let currentId: string | null | undefined = parentId;
++    while (true) {
++      if (!currentId || existsId.has(currentId)) return;
++
++      existsId.add(currentId);
++
++      const parentSkill = await MongoAgentSkills.findById(currentId, 'parentId updateTime');
++      if (!parentSkill) return;
++
++      parentSkill.updateTime = new Date();
++      await parentSkill.save({ session });
++
++      currentId = parentSkill.parentId ?? null;
++    }
++  }).catch((err) => {
++    logger.error('Failed to update parent folder updateTime', { error: err });
++  });
++};
+diff --git a/packages/service/core/agentSkills/schema.ts b/packages/service/core/agentSkills/schema.ts
+index b577d8637563..76b0e07754d0 100644
+--- a/packages/service/core/agentSkills/schema.ts
++++ b/packages/service/core/agentSkills/schema.ts
+@@ -21,6 +21,11 @@ const AgentSkillsSchema = new Schema({
+     enum: Object.values(AgentSkillTypeEnum),
+     default: AgentSkillTypeEnum.skill
+   },
++  // Permission inheritance
++  inheritPermission: {
++    type: Boolean,
++    default: true
++  },
+   source: {
+     type: String,
+     enum: Object.values(AgentSkillSourceEnum),
+diff --git a/packages/service/support/permission/agentSkill/auth.ts b/packages/service/support/permission/agentSkill/auth.ts
+index 853976681b19..36168825fb19 100644
+--- a/packages/service/support/permission/agentSkill/auth.ts
++++ b/packages/service/support/permission/agentSkill/auth.ts
+@@ -1,13 +1,22 @@
+ import { MongoAgentSkills } from '../../../core/agentSkills/schema';
+-import { AgentSkillSourceEnum } from '@fastgpt/global/core/agentSkills/constants';
++import {
++  AgentSkillSourceEnum,
++  AgentSkillTypeEnum
++} from '@fastgpt/global/core/agentSkills/constants';
+ import type { AgentSkillSchemaType } from '@fastgpt/global/core/agentSkills/type';
+ import { SkillErrEnum } from '@fastgpt/global/common/error/code/agentSkill';
+ import { SkillPermission } from '@fastgpt/global/support/permission/agentSkill/controller';
+-import { ReadPermissionVal, ReadRoleVal } from '@fastgpt/global/support/permission/constant';
++import {
++  NullRoleVal,
++  PerResourceTypeEnum,
++  ReadRoleVal
++} from '@fastgpt/global/support/permission/constant';
+ import type { PermissionValueType } from '@fastgpt/global/support/permission/type';
+ import type { AuthModeType, AuthResponseType } from '../type';
+ import { getTmbInfoByTmbId } from '../../user/team/controller';
+ import { parseHeaderCert } from '../auth/common';
++import { getTmbPermission } from '../controller';
++import { sumPer } from '@fastgpt/global/support/permission/utils';
+ 
+ export type AuthSkillResponse = AuthResponseType<SkillPermission> & {
+   skill: AgentSkillSchemaType & { permission: SkillPermission };
+@@ -16,16 +25,16 @@ export type AuthSkillResponse = AuthResponseType<SkillPermission> & {
+ /**
+  * Verify skill access permission by tmbId (no request dependency, for internal use).
+  *
+- * Permission rules (mirrors authAppByTmbId):
++ * Permission rules:
+  * - System skills: read-only for all team members; write/manage are rejected
+- * - Team owner or skill creator: owner-level access (read + write + manage)
+- * - Other team members: no default access (NullRoleVal)
++ * - Team owner or skill creator: owner-level access
++ * - Other team members: permission from ResourcePermission table (supports inheritance)
+  */
+ export const authSkillByTmbId = async ({
+   tmbId,
+   skillId,
+   per,
+-  isRoot
++  isRoot = false
+ }: {
+   tmbId: string;
+   skillId: string;
+@@ -34,10 +43,11 @@ export const authSkillByTmbId = async ({
+ }): Promise<{
+   skill: AgentSkillSchemaType & { permission: SkillPermission };
+ }> => {
+-  const { teamId, permission: tmbPer } = await getTmbInfoByTmbId({ tmbId });
+-
+   const skill = await (async () => {
+-    const skill = await MongoAgentSkills.findOne({ _id: skillId, deleteTime: null }).lean();
++    const [{ teamId, permission: tmbPer }, skill] = await Promise.all([
++      getTmbInfoByTmbId({ tmbId }),
++      MongoAgentSkills.findOne({ _id: skillId, deleteTime: null }).lean()
++    ]);
+ 
+     if (!skill) {
+       return Promise.reject(SkillErrEnum.unExist);
+@@ -54,20 +64,45 @@ export const authSkillByTmbId = async ({
+       return Promise.reject(SkillErrEnum.unAuthSkill);
+     }
+ 
+-    // System skills are read-only for all team members (equivalent to AppTypeEnum.hidden)
++    // System skills are read-only for all team members
+     if (skill.source === AgentSkillSourceEnum.system) {
+-      if (per !== ReadPermissionVal) {
++      const sysPer = new SkillPermission({ role: ReadRoleVal, isOwner: false });
++      if (!sysPer.checkPer(per)) {
+         return Promise.reject(SkillErrEnum.unAuthSkill);
+       }
+       return {
+         ...skill,
+-        permission: new SkillPermission({ isOwner: false, role: ReadRoleVal })
++        permission: sysPer
+       };
+     }
+ 
+-    // Team owner or skill creator gets full (owner-level) permission; others get NullRoleVal
++    // Check if should inherit permission from parent folder
+     const isOwner = tmbPer.isOwner || String(skill.tmbId) === String(tmbId);
+-    const Per = new SkillPermission({ isOwner });
++    const isGetParentClb =
++      skill.inheritPermission !== false &&
++      skill.type !== AgentSkillTypeEnum.folder &&
++      !!skill.parentId;
++
++    // Get parent folder permission and self permission in parallel
++    const [folderPer = NullRoleVal, myPer = NullRoleVal] = await Promise.all([
++      isGetParentClb
++        ? getTmbPermission({
++            teamId,
++            tmbId,
++            resourceId: skill.parentId!,
++            resourceType: PerResourceTypeEnum.agentSkill
++          })
++        : NullRoleVal,
++      getTmbPermission({
++        teamId,
++        tmbId,
++        resourceId: skillId,
++        resourceType: PerResourceTypeEnum.agentSkill
++      })
++    ]);
++
++    // Merge folder permission and self permission
++    const Per = new SkillPermission({ role: sumPer(folderPer, myPer), isOwner });
+ 
+     if (!Per.checkPer(per)) {
+       return Promise.reject(SkillErrEnum.unAuthSkill);
+diff --git a/packages/service/support/user/audit/util.ts b/packages/service/support/user/audit/util.ts
+index 7e5feeeabad3..496ed4b18c98 100644
+--- a/packages/service/support/user/audit/util.ts
++++ b/packages/service/support/user/audit/util.ts
+@@ -1,5 +1,6 @@
+ import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
+ import { DatasetTypeEnum } from '@fastgpt/global/core/dataset/constants';
++import { AgentSkillTypeEnum } from '@fastgpt/global/core/agentSkills/constants';
+ import { i18nT } from '../../../../web/i18n/utils';
+ import { MongoTeamAudit } from './schema';
+ import type {
+@@ -45,6 +46,12 @@ export function getI18nDatasetType(type: DatasetTypeEnum | string): string {
+   return i18nT('common:UnKnow');
+ }
+ 
++export function getI18nSkillType(type: AgentSkillTypeEnum | string): string {
++  if (type === AgentSkillTypeEnum.folder) return i18nT('account_team:skill.folder');
++  if (type === AgentSkillTypeEnum.skill) return i18nT('account_team:skill.skill');
++  return i18nT('common:UnKnow');
++}
++
+ export function getI18nInformLevel(level: string): string {
+   if (level === 'common') return i18nT('account_team:inform_level_common');
+   if (level === 'important') return i18nT('account_team:inform_level_important');
+diff --git a/packages/web/i18n/en/account_team.json b/packages/web/i18n/en/account_team.json
+index 5f6b339502c0..1723f6504621 100644
+--- a/packages/web/i18n/en/account_team.json
++++ b/packages/web/i18n/en/account_team.json
+@@ -66,6 +66,8 @@
+   "dataset.folder_dataset": "Folder",
+   "dataset.website_dataset": "Website Sync",
+   "dataset.yuque_dataset": "Yuque Knowledge Base",
++  "skill.folder": "Skill Folder",
++  "skill.skill": "Skill",
+   "delete": "delete",
+   "delete_api_key": "Delete the API key",
+   "delete_app": "Delete the workbench application",
+@@ -208,6 +210,11 @@
+   "log_deploy_skill": "[{{name}}] Deployed the skill named [{{skillName}}]",
+   "log_import_skill": "[{{name}}] Imported a skill named [{{skillName}}]",
+   "log_export_skill": "[{{name}}] Exported a skill named [{{skillName}}]",
++  "log_copy_skill": "[{{name}}] Copied a skill named [{{skillName}}]",
++  "log_move_skill": "[{{name}}] Moved a skill named [{{skillName}}] to [{{targetFolderName}}]",
++  "log_update_skill_collaborator": "[{{name}}] Updated collaborators of [{{skillType}}] [{{skillName}}] to: Organizations: [{{orgList}}], Groups: [{{groupList}}], Members: [{{tmbList}}]; Permission: [{{permission}}]",
++  "log_delete_skill_collaborator": "[{{name}}] Deleted collaborator [{{itemName}}]: [{{itemValueName}}] from [{{skillType}}] [{{skillName}}]",
++  "log_transfer_skill_ownership": "[{{name}}] Transferred ownership of skill [{{skillName}}] to [{{newOwnerName}}]",
+   "log_update_skill": "[{{name}}] Updated the skill named [{{skillName}}]",
+   "log_user": "Operator",
+   "login": "Log in",
+@@ -231,6 +238,8 @@
+   "permission_appCreate_tip": "Can create applications in the root directory (creation permissions in folders are controlled by the folder)",
+   "permission_datasetCreate": "Create Knowledge Base",
+   "permission_datasetCreate_Tip": "Can create knowledge bases in the root directory (creation permissions in folders are controlled by the folder)",
++  "permission_skillCreate": "Create Skills",
++  "permission_skillCreate_Tip": "Can create skills in the root directory (creation permissions in folders are controlled by the folder)",
+   "permission_manage": "Admin",
+   "permission_manage_tip": "Can manage members, create groups, manage all groups, and assign permissions to groups and members",
+   "please_bind_contact": "Please bind the contact information",
+@@ -289,6 +298,11 @@
+   "deploy_skill": "Deploy skill",
+   "import_skill": "Import skill",
+   "export_skill": "Export skill",
++  "copy_skill": "Copy skill",
++  "move_skill": "Move skill",
++  "update_skill_collaborator": "Update skill collaborator",
++  "delete_skill_collaborator": "Delete skill collaborator",
++  "transfer_skill_ownership": "Transfer skill ownership",
+   "update_skill": "Update skill",
+   "used_times_limit": "Limit",
+   "user_name": "username",
+diff --git a/packages/web/i18n/en/common.json b/packages/web/i18n/en/common.json
+index bede7bdb75a2..97193c2615f6 100644
+--- a/packages/web/i18n/en/common.json
++++ b/packages/web/i18n/en/common.json
+@@ -154,6 +154,7 @@
+   "code_error.app_error.un_auth_app": "Unauthorized to Operate This Application",
+   "code_error.skill_error.not_exist": "Skill Does Not Exist",
+   "code_error.skill_error.un_auth_skill": "Unauthorized to Operate This Skill",
++  "code_error.skill_error.can_not_edit_admin_permission": "Can not edit admin permission",
+   "code_error.chat_error.un_auth": "Unauthorized to Operate This Chat Record",
+   "code_error.error_code.400": "Request Failed",
+   "code_error.error_code.401": "No Access Permission",
+diff --git a/packages/web/i18n/en/skill.json b/packages/web/i18n/en/skill.json
+index 8097d80d786e..a8d7a234c46d 100644
+--- a/packages/web/i18n/en/skill.json
++++ b/packages/web/i18n/en/skill.json
+@@ -62,5 +62,8 @@
+   "sandbox_ready_warm": "Sandbox is ready (warm start)",
+   "sandbox_failed": "Sandbox creation failed: {{message}}",
+   "sandbox_retry": "Retry",
+-  "sandbox_error_title": "Sandbox Creation Failed"
++  "sandbox_error_title": "Sandbox Creation Failed",
++  "permission.des.read": "Can view Agent Skill",
++  "permission.des.write": "Can edit Agent Skill",
++  "permission.des.manage": "Can manage Agent Skill and collaborators"
+ }
+diff --git a/packages/web/i18n/zh-CN/account_team.json b/packages/web/i18n/zh-CN/account_team.json
+index 58f14919e80b..8c886b64b4a1 100644
+--- a/packages/web/i18n/zh-CN/account_team.json
++++ b/packages/web/i18n/zh-CN/account_team.json
+@@ -68,6 +68,8 @@
+   "dataset.folder_dataset": "文件夹",
+   "dataset.website_dataset": "网站同步",
+   "dataset.yuque_dataset": "语雀知识库",
++  "skill.folder": "技能文件夹",
++  "skill.skill": "技能",
+   "delete": "删除",
+   "delete_api_key": "删除api密钥",
+   "delete_app": "删除工作台应用",
+@@ -212,6 +214,11 @@
+   "log_deploy_skill": "【{{name}}】发布了名为【{{skillName}}】的技能",
+   "log_import_skill": "【{{name}}】导入了名为【{{skillName}}】的技能",
+   "log_export_skill": "【{{name}}】导出了名为【{{skillName}}】的技能",
++  "log_copy_skill": "【{{name}}】复制了名为【{{skillName}}】的技能",
++  "log_move_skill": "【{{name}}】将名为【{{skillName}}】的技能移动到【{{targetFolderName}}】",
++  "log_update_skill_collaborator": "【{{name}}】将名为【{{skillName}}】的【{{skillType}}】的协作者更新为：组织：【{{orgList}}】，群组：【{{groupList}}】，成员【{{tmbList}}】；权限更新为：【{{permission}}】",
++  "log_delete_skill_collaborator": "【{{name}}】删除了名为【{{skillName}}】的【{{skillType}}】的协作者【{{itemName}}】：【{{itemValueName}}】",
++  "log_transfer_skill_ownership": "【{{name}}】将名为【{{skillName}}】的技能所有权转移给了【{{newOwnerName}}】",
+   "log_user": "操作人员",
+   "login": "登录",
+   "manage_member": "管理成员",
+@@ -234,6 +241,8 @@
+   "permission_appCreate_tip": "可以在根目录创建应用，（文件夹下的创建权限由文件夹控制）",
+   "permission_datasetCreate": "创建知识库",
+   "permission_datasetCreate_Tip": "可以在根目录创建知识库，（文件夹下的创建权限由文件夹控制）",
++  "permission_skillCreate": "创建技能",
++  "permission_skillCreate_Tip": "可以在根目录创建技能，（文件夹下的创建权限由文件夹控制）",
+   "permission_manage": "管理员",
+   "permission_manage_tip": "可以管理成员、创建群组、管理所有群组、为群组和成员分配权限",
+   "please_bind_contact": "请绑定联系方式",
+@@ -290,6 +299,11 @@
+   "deploy_skill": "发布技能",
+   "import_skill": "导入技能",
+   "export_skill": "导出技能",
++  "copy_skill": "复制技能",
++  "move_skill": "移动技能",
++  "update_skill_collaborator": "更新技能协作者",
++  "delete_skill_collaborator": "删除技能协作者",
++  "transfer_skill_ownership": "转移技能所有权",
+   "used_times_limit": "有效人数",
+   "user_name": "用户名",
+   "user_team_invite_member": "邀请成员",
+diff --git a/packages/web/i18n/zh-CN/common.json b/packages/web/i18n/zh-CN/common.json
+index 43bee5e8f665..aa3ae6556638 100644
+--- a/packages/web/i18n/zh-CN/common.json
++++ b/packages/web/i18n/zh-CN/common.json
+@@ -154,6 +154,7 @@
+   "code_error.app_error.un_auth_app": "无权操作该应用",
+   "code_error.skill_error.not_exist": "技能不存在",
+   "code_error.skill_error.un_auth_skill": "无权操作该技能",
++  "code_error.skill_error.can_not_edit_admin_permission": "不能编辑管理员权限",
+   "code_error.chat_error.un_auth": "没有权限操作此对话记录",
+   "code_error.error_code.400": "请求失败",
+   "code_error.error_code.401": "无访问权限",
+diff --git a/packages/web/i18n/zh-CN/skill.json b/packages/web/i18n/zh-CN/skill.json
+index 10abb67a64af..89ba48989843 100644
+--- a/packages/web/i18n/zh-CN/skill.json
++++ b/packages/web/i18n/zh-CN/skill.json
+@@ -61,5 +61,8 @@
+   "sandbox_ready_warm": "沙箱环境就绪（热启动）",
+   "sandbox_failed": "沙箱创建失败: {{message}}",
+   "sandbox_retry": "重试",
+-  "sandbox_error_title": "沙箱创建失败"
++  "sandbox_error_title": "沙箱创建失败",
++  "permission.des.read": "可查看 Agent Skill",
++  "permission.des.write": "可编辑 Agent Skill",
++  "permission.des.manage": "可管理 Agent Skill 和协作者"
+ }
+diff --git a/packages/web/i18n/zh-Hant/account_team.json b/packages/web/i18n/zh-Hant/account_team.json
+index d2a83a06596b..c18eceaabb71 100644
+--- a/packages/web/i18n/zh-Hant/account_team.json
++++ b/packages/web/i18n/zh-Hant/account_team.json
+@@ -65,6 +65,8 @@
+   "dataset.folder_dataset": "資料夾",
+   "dataset.website_dataset": "網站同步",
+   "dataset.yuque_dataset": "語雀知識庫",
++  "skill.folder": "技能資料夾",
++  "skill.skill": "技能",
+   "delete": "刪除",
+   "delete_api_key": "刪除api密鑰",
+   "delete_app": "刪除工作台應用",
+@@ -204,6 +206,11 @@
+   "log_deploy_skill": "【{{name}}】發布了名為【{{skillName}}】的技能",
+   "log_import_skill": "【{{name}}】匯入了名為【{{skillName}}】的技能",
+   "log_export_skill": "【{{name}}】匯出了名為【{{skillName}}】的技能",
++  "log_copy_skill": "【{{name}}】複製了名為【{{skillName}}】的技能",
++  "log_move_skill": "【{{name}}】將名為【{{skillName}}】的技能移動到【{{targetFolderName}}】",
++  "log_update_skill_collaborator": "【{{name}}】將名為【{{skillName}}】的【{{skillType}}】的協作者更新為：組織：【{{orgList}}】，群組：【{{groupList}}】，成員【{{tmbList}}】；權限更新為：【{{permission}}】",
++  "log_delete_skill_collaborator": "【{{name}}】刪除了名為【{{skillName}}】的【{{skillType}}】的協作者【{{itemName}}】：【{{itemValueName}}】",
++  "log_transfer_skill_ownership": "【{{name}}】將名為【{{skillName}}】的技能所有權轉移給了【{{newOwnerName}}】",
+   "log_update_skill": "【{{name}}】更新了名為【{{skillName}}】的技能",
+   "log_user": "操作人員",
+   "login": "登入",
+@@ -227,6 +234,8 @@
+   "permission_appCreate_tip": "可以在根目錄建立應用程式，（資料夾下的建立權限由資料夾控制）",
+   "permission_datasetCreate": "建立知識庫",
+   "permission_datasetCreate_Tip": "可以在根目錄建立知識庫，（資料夾下的建立權限由資料夾控制）",
++  "permission_skillCreate": "建立技能",
++  "permission_skillCreate_Tip": "可以在根目錄建立技能，（資料夾下的建立權限由資料夾控制）",
+   "permission_manage": "管理員",
+   "permission_manage_tip": "可以管理成員、建立群組、管理所有群組、為群組和成員分配權限",
+   "please_bind_contact": "請綁定聯繫方式",
+@@ -284,6 +293,11 @@
+   "deploy_skill": "發布技能",
+   "import_skill": "匯入技能",
+   "export_skill": "匯出技能",
++  "copy_skill": "複製技能",
++  "move_skill": "移動技能",
++  "update_skill_collaborator": "更新技能協作者",
++  "delete_skill_collaborator": "刪除技能協作者",
++  "transfer_skill_ownership": "轉移技能所有權",
+   "update_skill": "更新技能",
+   "used_times_limit": "有效人數",
+   "user_name": "使用者名稱",
+diff --git a/packages/web/i18n/zh-Hant/common.json b/packages/web/i18n/zh-Hant/common.json
+index d901c26bf8b7..274c956f77ac 100644
+--- a/packages/web/i18n/zh-Hant/common.json
++++ b/packages/web/i18n/zh-Hant/common.json
+@@ -153,6 +153,7 @@
+   "code_error.app_error.un_auth_app": "無權操作此應用程式",
+   "code_error.skill_error.not_exist": "技能不存在",
+   "code_error.skill_error.un_auth_skill": "無權操作該技能",
++  "code_error.skill_error.can_not_edit_admin_permission": "不能編輯管理員權限",
+   "code_error.chat_error.un_auth": "沒有權限操作此對話記錄",
+   "code_error.error_code.400": "請求失敗",
+   "code_error.error_code.401": "無存取權限",
+diff --git a/packages/web/i18n/zh-Hant/skill.json b/packages/web/i18n/zh-Hant/skill.json
+index 562e6b4399cb..98722579516b 100644
+--- a/packages/web/i18n/zh-Hant/skill.json
++++ b/packages/web/i18n/zh-Hant/skill.json
+@@ -61,5 +61,8 @@
+   "sandbox_ready_warm": "沙箱環境就緒（熱啟動）",
+   "sandbox_failed": "沙箱創建失敗: {{message}}",
+   "sandbox_retry": "重試",
+-  "sandbox_error_title": "沙箱創建失敗"
+-}
+\ No newline at end of file
++  "sandbox_error_title": "沙箱創建失敗",
++  "permission.des.read": "可查看 Agent Skill",
++  "permission.des.write": "可編輯 Agent Skill",
++  "permission.des.manage": "可管理 Agent Skill 和協作者"
++}
+diff --git a/packages/web/support/user/audit/constants.ts b/packages/web/support/user/audit/constants.ts
+index 7707eb060ad4..4a1cd82dba3a 100644
+--- a/packages/web/support/user/audit/constants.ts
++++ b/packages/web/support/user/audit/constants.ts
+@@ -515,27 +515,27 @@ export const auditLogMap = {
+   [AuditEventEnum.CREATE_SKILL]: {
+     content: i18nT('account_team:log_create_skill'),
+     typeLabel: i18nT('account_team:create_skill'),
+-    params: {} as { name?: string; skillName: string }
++    params: {} as { name?: string; skillName: string; skillType: string }
+   },
+   [AuditEventEnum.UPDATE_SKILL]: {
+     content: i18nT('account_team:log_update_skill'),
+     typeLabel: i18nT('account_team:update_skill'),
+-    params: {} as { name?: string; skillName: string }
++    params: {} as { name?: string; skillName: string; skillType: string }
+   },
+   [AuditEventEnum.DEPLOY_SKILL]: {
+     content: i18nT('account_team:log_deploy_skill'),
+     typeLabel: i18nT('account_team:deploy_skill'),
+-    params: {} as { name?: string; skillName: string }
++    params: {} as { name?: string; skillName: string; skillType: string }
+   },
+   [AuditEventEnum.DELETE_SKILL]: {
+     content: i18nT('account_team:log_delete_skill'),
+     typeLabel: i18nT('account_team:delete_skill'),
+-    params: {} as { name?: string; skillName: string }
++    params: {} as { name?: string; skillName: string; skillType: string }
+   },
+   [AuditEventEnum.IMPORT_SKILL]: {
+     content: i18nT('account_team:log_import_skill'),
+     typeLabel: i18nT('account_team:import_skill'),
+-    params: {} as { name?: string; skillName: string }
++    params: {} as { name?: string; skillName: string; skillType: string }
+   },
+   [AuditEventEnum.CREATE_SKILL_FOLDER]: {
+     content: i18nT('account_team:log_create_skill_folder'),
+@@ -545,6 +545,51 @@ export const auditLogMap = {
+   [AuditEventEnum.EXPORT_SKILL]: {
+     content: i18nT('account_team:log_export_skill'),
+     typeLabel: i18nT('account_team:export_skill'),
+-    params: {} as { name?: string; skillName: string }
++    params: {} as { name?: string; skillName: string; skillType: string }
++  },
++  [AuditEventEnum.COPY_SKILL]: {
++    content: i18nT('account_team:log_copy_skill'),
++    typeLabel: i18nT('account_team:copy_skill'),
++    params: {} as { name?: string; skillName: string; skillType: string }
++  },
++  [AuditEventEnum.MOVE_SKILL]: {
++    content: i18nT('account_team:log_move_skill'),
++    typeLabel: i18nT('account_team:move_skill'),
++    params: {} as { name?: string; skillName: string; skillType: string; targetFolderName: string }
++  },
++  [AuditEventEnum.UPDATE_SKILL_COLLABORATOR]: {
++    content: i18nT('account_team:log_update_skill_collaborator'),
++    typeLabel: i18nT('account_team:update_skill_collaborator'),
++    params: {} as {
++      name?: string;
++      skillName: string;
++      skillType: string;
++      tmbList: string[];
++      groupList: string[];
++      orgList: string[];
++      permission: string;
++    }
++  },
++  [AuditEventEnum.DELETE_SKILL_COLLABORATOR]: {
++    content: i18nT('account_team:log_delete_skill_collaborator'),
++    typeLabel: i18nT('account_team:delete_skill_collaborator'),
++    params: {} as {
++      name?: string;
++      skillName: string;
++      skillType: string;
++      itemName: string;
++      itemValueName: string;
++    }
++  },
++  [AuditEventEnum.TRANSFER_SKILL_OWNERSHIP]: {
++    content: i18nT('account_team:log_transfer_skill_ownership'),
++    typeLabel: i18nT('account_team:transfer_skill_ownership'),
++    params: {} as {
++      name?: string;
++      skillName: string;
++      skillType: string;
++      oldOwnerName: string;
++      newOwnerName: string;
++    }
+   }
+ } as const;
+diff --git a/projects/app/src/pageComponents/dashboard/skill/detail/context.tsx b/projects/app/src/pageComponents/dashboard/skill/detail/context.tsx
+index e6c6d4741748..460d1ae37769 100644
+--- a/projects/app/src/pageComponents/dashboard/skill/detail/context.tsx
++++ b/projects/app/src/pageComponents/dashboard/skill/detail/context.tsx
+@@ -158,6 +158,8 @@ const SkillDetailContextProvider = ({ children }: { children: ReactNode }) => {
+           ...res,
+           type: AgentSkillTypeEnum.skill,
+           config: res.config ?? {},
++          teamId: res.teamId ?? '',
++          tmbId: res.tmbId ?? '',
+           currentVersion: 0,
+           versionCount: 0,
+           createTime: new Date(res.createTime),
+diff --git a/projects/app/src/pages/api/core/agentSkills/copy.ts b/projects/app/src/pages/api/core/agentSkills/copy.ts
+new file mode 100644
+index 000000000000..3d792da25ac2
+--- /dev/null
++++ b/projects/app/src/pages/api/core/agentSkills/copy.ts
+@@ -0,0 +1,136 @@
++import { NextAPI } from '@/service/middleware/entry';
++import {
++  WritePermissionVal,
++  PerResourceTypeEnum,
++  OwnerRoleVal
++} from '@fastgpt/global/support/permission/constant';
++import { TeamSkillCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
++import { authSkill } from '@fastgpt/service/support/permission/agentSkill/auth';
++import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
++import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
++import { createSkill, updateCurrentStorage } from '@fastgpt/service/core/agentSkills/controller';
++import { copySkillPackage } from '@fastgpt/service/core/agentSkills/storage';
++import { createVersion } from '@fastgpt/service/core/agentSkills/version/controller';
++import { MongoResourcePermission } from '@fastgpt/service/support/permission/schema';
++import { addAuditLog, getI18nSkillType } from '@fastgpt/service/support/user/audit/util';
++import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
++import { copyAvatarImage } from '@fastgpt/service/common/file/image/controller';
++import { getS3AvatarSource } from '@fastgpt/service/common/s3/sources/avatar';
++import type { ApiRequestProps } from '@fastgpt/service/type/next';
++import type { CopySkillBody, CopySkillResponse } from '@fastgpt/global/core/agentSkills/api';
++
++async function handler(req: ApiRequestProps<CopySkillBody>): Promise<CopySkillResponse> {
++  const { skillId } = req.body;
++
++  // 1. Auth: require write permission on the source skill
++  const { skill, teamId } = await authSkill({
++    req,
++    skillId,
++    per: WritePermissionVal,
++    authToken: true,
++    authApiKey: true
++  });
++
++  // 2. Auth: require write permission on the parent folder, or team-level create permission for root
++  const { tmbId } = skill.parentId
++    ? await authSkill({
++        req,
++        skillId: String(skill.parentId),
++        per: WritePermissionVal,
++        authToken: true,
++        authApiKey: true
++      })
++    : await authUserPer({
++        req,
++        authToken: true,
++        authApiKey: true,
++        per: TeamSkillCreatePermissionVal
++      });
++
++  // 3. Append " Copy" suffix to the name; duplicate conflicts are handled by E11000 (see app/copy.ts)
++  const copyName = `${skill.name} Copy`;
++
++  if (!skill.currentStorage) {
++    return Promise.reject(new Error('Skill has no storage, cannot copy'));
++  }
++
++  // 4. Transaction: copy avatar → create skill record → copy MinIO package → create version → write owner record
++  const newSkillId = await mongoSessionRun(async (session) => {
++    // Copy avatar (handles S3 file / MongoDB image record / emoji safely)
++    const avatar = await copyAvatarImage({
++      teamId,
++      imageUrl: skill.avatar ?? '',
++      temporary: true,
++      session
++    });
++
++    // Create the new skill record
++    const newId = await createSkill(
++      {
++        parentId: skill.parentId ?? null,
++        name: copyName,
++        description: skill.description,
++        author: String(skill.author || ''),
++        category: skill.category,
++        config: skill.config,
++        avatar,
++        teamId,
++        tmbId
++      },
++      session
++    );
++
++    // Copy the ZIP package in MinIO to the new skill path
++    const storageInfo = await copySkillPackage(skill.currentStorage!, {
++      teamId,
++      skillId: newId,
++      version: 0
++    });
++
++    // Update currentStorage on the new skill
++    await updateCurrentStorage(newId, storageInfo, session);
++
++    // Create the initial v0 version record
++    await createVersion(
++      {
++        skillId: newId,
++        tmbId,
++        version: 0,
++        versionName: 'Copied from ' + skill.name,
++        storage: storageInfo
++      },
++      session
++    );
++
++    // Write owner record to ResourcePermission
++    await MongoResourcePermission.insertOne(
++      {
++        teamId,
++        tmbId,
++        resourceId: newId,
++        permission: OwnerRoleVal,
++        resourceType: PerResourceTypeEnum.agentSkill
++      },
++      { session }
++    );
++
++    // Promote temporary avatar to permanent (remove TTL)
++    await getS3AvatarSource().refreshAvatar(avatar, undefined, session);
++
++    return newId;
++  });
++
++  // 5. Audit log
++  (async () => {
++    addAuditLog({
++      tmbId,
++      teamId,
++      event: AuditEventEnum.COPY_SKILL,
++      params: { skillName: skill.name, skillType: getI18nSkillType(skill.type) }
++    });
++  })();
++
++  return { skillId: newSkillId };
++}
++
++export default NextAPI(handler);
+diff --git a/projects/app/src/pages/api/core/agentSkills/create.ts b/projects/app/src/pages/api/core/agentSkills/create.ts
+index 7aa1c52ade4d..6a478682a283 100644
+--- a/projects/app/src/pages/api/core/agentSkills/create.ts
++++ b/projects/app/src/pages/api/core/agentSkills/create.ts
+@@ -1,5 +1,4 @@
+-import type { NextApiRequest, NextApiResponse } from 'next';
+-import { jsonRes } from '@fastgpt/service/common/response';
++import { NextAPI } from '@/service/middleware/entry';
+ import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
+ import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
+ import {
+@@ -12,256 +11,215 @@ import { createSkillPackage } from '@fastgpt/service/core/agentSkills/zipBuilder
+ import { uploadSkillPackage } from '@fastgpt/service/core/agentSkills/storage';
+ import { createVersion } from '@fastgpt/service/core/agentSkills/version/controller';
+ import type { CreateSkillBody, CreateSkillResponse } from '@fastgpt/global/core/agentSkills/api';
+-import { AgentSkillCategoryEnum } from '@fastgpt/global/core/agentSkills/constants';
++import {
++  AgentSkillCategoryEnum,
++  AgentSkillTypeEnum
++} from '@fastgpt/global/core/agentSkills/constants';
+ import { authSkill } from '@fastgpt/service/support/permission/agentSkill/auth';
+-import { WritePermissionVal } from '@fastgpt/global/support/permission/constant';
+-import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
++import {
++  WritePermissionVal,
++  PerResourceTypeEnum,
++  OwnerRoleVal
++} from '@fastgpt/global/support/permission/constant';
++import { TeamSkillCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
++import { MongoResourcePermission } from '@fastgpt/service/support/permission/schema';
++import { addAuditLog, getI18nSkillType } from '@fastgpt/service/support/user/audit/util';
+ import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
+ import { formatModelChars2Points } from '@fastgpt/service/support/wallet/usage/utils';
+ import { createUsage } from '@fastgpt/service/support/wallet/usage/controller';
+ import { UsageSourceEnum } from '@fastgpt/global/support/wallet/usage/constants';
+ import { i18nT } from '@fastgpt/web/i18n/utils';
+ import { getLogger, LogCategories } from '@fastgpt/service/common/logger';
++import { getS3AvatarSource } from '@fastgpt/service/common/s3/sources/avatar';
++import type { ApiRequestProps } from '@fastgpt/service/type/next';
+ 
+ const logger = getLogger(LogCategories.MODULE.AGENT_SKILLS.CREATION);
+ 
+-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+-  try {
+-    // Only accept POST requests
+-    if (req.method !== 'POST') {
+-      return jsonRes(res, {
+-        code: 405,
+-        error: 'Method not allowed'
+-      });
+-    }
+-
+-    // Get request body
+-    const {
+-      parentId,
+-      name,
+-      description,
+-      requirements,
+-      model,
+-      category = [],
+-      config = {},
+-      avatar
+-    } = req.body as CreateSkillBody;
++async function handler(req: ApiRequestProps<CreateSkillBody>): Promise<CreateSkillResponse> {
++  const {
++    parentId,
++    name,
++    description,
++    requirements,
++    model,
++    category = [],
++    config = {},
++    avatar
++  } = req.body;
++
++  // Authenticate user: if parentId exists, verify parent folder permission
++  const { teamId, tmbId, userId } = parentId
++    ? await authSkill({
++        req,
++        skillId: parentId,
++        per: WritePermissionVal,
++        authToken: true,
++        authApiKey: true
++      })
++    : await authUserPer({
++        req,
++        authToken: true,
++        authApiKey: true,
++        per: TeamSkillCreatePermissionVal
++      });
++
++  // Validate required fields
++  if (!name || typeof name !== 'string' || name.trim().length === 0) {
++    return Promise.reject({ code: 400, error: 'Skill name is required' });
++  }
++  if (name.length > 50) {
++    return Promise.reject({ code: 400, error: 'Skill name must be less than 50 characters' });
++  }
++  if (description && description.length > 500) {
++    return Promise.reject({ code: 400, error: 'Description must be less than 500 characters' });
++  }
++  if (requirements && !model) {
++    return Promise.reject({ code: 400, error: 'Model is required when requirements is provided' });
++  }
++  if (requirements && requirements.length > 8000) {
++    return Promise.reject({ code: 400, error: 'Requirements must be less than 8000 characters' });
++  }
+ 
+-    // Authenticate user: if parentId exists, verify parent folder permission
+-    const { teamId, tmbId, userId } = parentId
+-      ? await authSkill({
+-          req,
+-          skillId: parentId,
+-          per: WritePermissionVal,
+-          authToken: true,
+-          authApiKey: true
+-        })
+-      : await authUserPer({
+-          req,
+-          authToken: true,
+-          authApiKey: true
+-        });
++  const validCategories = Object.values(AgentSkillCategoryEnum) as string[];
++  if (category.length > 0 && category.some((c) => !validCategories.includes(c))) {
++    return Promise.reject({ code: 400, error: 'Invalid category value' });
++  }
++  if (config && JSON.stringify(config).length > 50_000) {
++    return Promise.reject({ code: 400, error: 'Config exceeds maximum allowed size (50KB)' });
++  }
+ 
+-    // Validate required fields
+-    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+-      return jsonRes(res, {
+-        code: 400,
+-        error: 'Skill name is required'
+-      });
+-    }
++  // Check if skill name already exists in the same parent folder
++  const nameExists = await checkSkillNameExists(name.trim(), teamId, parentId || null);
++  if (nameExists) {
++    return Promise.reject({ code: 409, error: 'Skill name already exists in this directory' });
++  }
+ 
+-    // Validate name length
+-    if (name.length > 50) {
+-      return jsonRes(res, {
+-        code: 400,
+-        error: 'Skill name must be less than 50 characters'
+-      });
+-    }
++  // Generate SKILL.md content
++  let skillMd: string;
+ 
+-    // Validate description length
+-    if (description && description.length > 500) {
+-      return jsonRes(res, {
+-        code: 400,
+-        error: 'Description must be less than 500 characters'
+-      });
+-    }
++  if (requirements && model) {
++    logger.debug('Using AI-assisted skill generation', {
++      name: name.trim(),
++      hasDescription: !!description,
++      requirementsLength: requirements.length,
++      model
++    });
+ 
+-    // Validate requirements and model pairing
+-    if (requirements && !model) {
+-      return jsonRes(res, {
+-        code: 400,
+-        error: 'Model is required when requirements is provided'
+-      });
+-    }
++    const [generatedSkillMd, usage] = await generateSkillMd({
++      name: name.trim(),
++      description: description?.trim() || '',
++      requirements: requirements.trim(),
++      model
++    });
+ 
+-    // Validate requirements length
+-    if (requirements && requirements.length > 8000) {
+-      return jsonRes(res, {
+-        code: 400,
+-        error: 'Requirements must be less than 8000 characters'
+-      });
+-    }
++    skillMd = generatedSkillMd;
+ 
+-    // Validate category enum values
+-    const validCategories = Object.values(AgentSkillCategoryEnum) as string[];
+-    if (category.length > 0 && category.some((c) => !validCategories.includes(c))) {
+-      return jsonRes(res, { code: 400, error: 'Invalid category value' });
+-    }
++    logger.debug('AI skill generation completed', {
++      skillMdLength: skillMd.length,
++      inputTokens: usage.inputTokens,
++      outputTokens: usage.outputTokens
++    });
+ 
+-    // Validate config size (max 50 KB)
+-    if (config && JSON.stringify(config).length > 50_000) {
+-      return jsonRes(res, { code: 400, error: 'Config exceeds maximum allowed size (50KB)' });
+-    }
++    const { totalPoints, modelName } = formatModelChars2Points({
++      model,
++      inputTokens: usage.inputTokens,
++      outputTokens: usage.outputTokens
++    });
+ 
+-    // Check if skill name already exists in the same parent folder
+-    const nameExists = await checkSkillNameExists(name.trim(), teamId, parentId || null);
+-    if (nameExists) {
+-      return jsonRes(res, {
+-        code: 409,
+-        error: 'Skill name already exists in this directory'
+-      });
+-    }
++    createUsage({
++      teamId,
++      tmbId,
++      appName: i18nT('common:support.wallet.usage.Assist Generate Skill'),
++      totalPoints,
++      source: UsageSourceEnum.assist_generate_skill,
++      list: [
++        {
++          moduleName: i18nT('common:support.wallet.usage.Assist Generate Skill'),
++          amount: totalPoints,
++          model: modelName,
++          inputTokens: usage.inputTokens,
++          outputTokens: usage.outputTokens
++        }
++      ]
++    });
++  } else {
++    logger.debug('Using simple skill generation', {
++      name: name.trim(),
++      hasDescription: !!description
++    });
+ 
+-    // Generate SKILL.md content
+-    let skillMd: string;
++    skillMd = buildSkillMd({
++      name: name.trim(),
++      description: description?.trim() || ''
++    });
++  }
+ 
+-    if (requirements && model) {
+-      // AI-assisted generation mode
+-      logger.debug('Using AI-assisted skill generation', {
+-        name: name.trim(),
+-        hasDescription: !!description,
+-        requirementsLength: requirements.length,
+-        model
+-      });
++  // Create skill with full workflow (transaction)
++  // E11000 from concurrent duplicate creation propagates as-is (409-like conflict)
++  const skillId = await mongoSessionRun(async (session) => {
++    const zipBuffer = await createSkillPackage({ name: name.trim(), skillMd });
+ 
+-      const [generatedSkillMd, usage] = await generateSkillMd({
++    const newSkillId = await createSkill(
++      {
++        parentId: parentId || null,
+         name: name.trim(),
+         description: description?.trim() || '',
+-        requirements: requirements.trim(),
+-        model
+-      });
+-
+-      skillMd = generatedSkillMd;
+-
+-      // Log LLM response
+-      logger.debug('AI skill generation completed', {
+-        skillMdLength: skillMd.length,
+-        inputTokens: usage.inputTokens,
+-        outputTokens: usage.outputTokens
+-      });
+-
+-      // Create usage record for AI generation
+-      const { totalPoints, modelName } = formatModelChars2Points({
+-        model,
+-        inputTokens: usage.inputTokens,
+-        outputTokens: usage.outputTokens
+-      });
+-
+-      createUsage({
++        author: userId || '',
++        category: category.length > 0 ? category : [AgentSkillCategoryEnum.other],
++        config,
++        avatar,
+         teamId,
+-        tmbId,
+-        appName: i18nT('common:support.wallet.usage.Assist Generate Skill'),
+-        totalPoints,
+-        source: UsageSourceEnum.assist_generate_skill,
+-        list: [
+-          {
+-            moduleName: i18nT('common:support.wallet.usage.Assist Generate Skill'),
+-            amount: totalPoints,
+-            model: modelName,
+-            inputTokens: usage.inputTokens,
+-            outputTokens: usage.outputTokens
+-          }
+-        ]
+-      });
+-    } else {
+-      // Simple generation mode (frontmatter only)
+-      logger.debug('Using simple skill generation', {
+-        name: name.trim(),
+-        hasDescription: !!description
+-      });
+-
+-      skillMd = buildSkillMd({
+-        name: name.trim(),
+-        description: description?.trim() || ''
+-      });
+-    }
+-
+-    // Create skill with full workflow (transaction)
+-    const skillId = await mongoSessionRun(async (session) => {
+-      // 1. Create ZIP package
+-      const zipBuffer = await createSkillPackage({
+-        name: name.trim(),
+-        skillMd
+-      });
++        tmbId
++      },
++      session
++    );
++
++    const storageInfo = await uploadSkillPackage({
++      teamId,
++      skillId: newSkillId,
++      version: 0,
++      zipBuffer
++    });
+ 
+-      // 2. Create skill record first (to get the skillId)
+-      const newSkillId = await createSkill(
+-        {
+-          parentId: parentId || null,
+-          name: name.trim(),
+-          description: description?.trim() || '',
+-          author: userId || '',
+-          category: category.length > 0 ? category : [AgentSkillCategoryEnum.other],
+-          config,
+-          avatar,
+-          teamId,
+-          tmbId
+-        },
+-        session
+-      );
++    await updateCurrentStorage(newSkillId, storageInfo, session);
+ 
+-      // 3. Upload ZIP to MinIO
+-      const storageInfo = await uploadSkillPackage({
+-        teamId,
++    await createVersion(
++      {
+         skillId: newSkillId,
+-        version: 0,
+-        zipBuffer
+-      });
+-
+-      // 4. Update skill's currentStorage field
+-      await updateCurrentStorage(newSkillId, storageInfo, session);
+-
+-      // 5. Create v0 version record
+-      await createVersion(
+-        {
+-          skillId: newSkillId,
+-          tmbId,
+-          version: 0,
+-          versionName: 'Initial creation',
+-          storage: storageInfo
+-        },
+-        session
+-      );
+-
+-      return newSkillId;
+-    });
+-
+-    // Add audit log
+-    (async () => {
+-      addAuditLog({
+         tmbId,
++        version: 0,
++        versionName: 'Initial creation',
++        storage: storageInfo
++      },
++      session
++    );
++
++    await MongoResourcePermission.insertOne(
++      {
+         teamId,
+-        event: AuditEventEnum.CREATE_SKILL,
+-        params: {
+-          skillName: name.trim()
+-        }
+-      });
+-    })();
+-
+-    jsonRes<CreateSkillResponse>(res, {
+-      data: skillId
++        tmbId,
++        resourceId: newSkillId,
++        permission: OwnerRoleVal,
++        resourceType: PerResourceTypeEnum.agentSkill
++      },
++      { session }
++    );
++
++    await getS3AvatarSource().refreshAvatar(avatar, undefined, session);
++
++    return newSkillId;
++  });
++
++  (async () => {
++    addAuditLog({
++      tmbId,
++      teamId,
++      event: AuditEventEnum.CREATE_SKILL,
++      params: { skillName: name.trim(), skillType: getI18nSkillType(AgentSkillTypeEnum.skill) }
+     });
+-  } catch (err: any) {
+-    logger.error('Create skill error', { error: err });
++  })();
+ 
+-    // E11000: unique index violation (concurrent duplicate name creation)
+-    if (err.code === 11000 || err.codeName === 'DuplicateKey') {
+-      return jsonRes(res, { code: 409, error: 'Skill name already exists' });
+-    }
+-
+-    jsonRes(res, {
+-      code: 500,
+-      error: err?.message || 'Failed to create skill'
+-    });
+-  }
++  return skillId;
+ }
++
++export default NextAPI(handler);
+diff --git a/projects/app/src/pages/api/core/agentSkills/delete.ts b/projects/app/src/pages/api/core/agentSkills/delete.ts
+index e2c7abd2c167..458b3ad0c9a2 100644
+--- a/projects/app/src/pages/api/core/agentSkills/delete.ts
++++ b/projects/app/src/pages/api/core/agentSkills/delete.ts
+@@ -1,54 +1,41 @@
+-import type { NextApiRequest, NextApiResponse } from 'next';
+-import { jsonRes } from '@fastgpt/service/common/response';
++import { NextAPI } from '@/service/middleware/entry';
+ import { authSkill } from '@fastgpt/service/support/permission/agentSkill/auth';
+ import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
+ import { deleteSkill } from '@fastgpt/service/core/agentSkills/controller';
+-import type { DeleteSkillQuery, DeleteSkillResponse } from '@fastgpt/global/core/agentSkills/api';
+-import { WritePermissionVal } from '@fastgpt/global/support/permission/constant';
+-import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
++import type { DeleteSkillQuery } from '@fastgpt/global/core/agentSkills/api';
++import { OwnerPermissionVal } from '@fastgpt/global/support/permission/constant';
++import { addAuditLog, getI18nSkillType } from '@fastgpt/service/support/user/audit/util';
+ import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
+ import { isValidObjectId } from 'mongoose';
++import type { ApiRequestProps } from '@fastgpt/service/type/next';
+ 
+-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+-  try {
+-    if (req.method !== 'DELETE') {
+-      return jsonRes(res, { code: 405, error: 'Method not allowed' });
+-    }
++async function handler(req: ApiRequestProps<{}, DeleteSkillQuery>) {
++  const { skillId } = req.query;
+ 
+-    const { skillId } = req.query as unknown as DeleteSkillQuery;
+-
+-    if (!skillId) {
+-      return jsonRes(res, { code: 400, error: 'Skill ID is required' });
+-    }
+-
+-    if (!isValidObjectId(skillId)) {
+-      return jsonRes(res, { code: 400, error: 'Invalid skill ID format' });
+-    }
+-
+-    // Verify write permission via authSkill (replaces authUserPer + canModifySkill)
+-    const { teamId, tmbId, skill } = await authSkill({
+-      req,
+-      skillId,
+-      per: WritePermissionVal,
+-      authToken: true,
+-      authApiKey: true
+-    });
++  if (!skillId || !isValidObjectId(skillId)) {
++    return Promise.reject({ code: 400, error: 'Invalid skill ID' });
++  }
+ 
+-    await mongoSessionRun(async (session) => {
+-      return deleteSkill(skillId, session);
++  const { teamId, tmbId, skill } = await authSkill({
++    req,
++    skillId,
++    per: OwnerPermissionVal,
++    authToken: true,
++    authApiKey: true
++  });
++
++  await mongoSessionRun(async (session) => {
++    return deleteSkill(skillId, session);
++  });
++
++  (async () => {
++    addAuditLog({
++      tmbId,
++      teamId,
++      event: AuditEventEnum.DELETE_SKILL,
++      params: { skillName: skill.name, skillType: getI18nSkillType(skill.type) }
+     });
+-
+-    (async () => {
+-      addAuditLog({
+-        tmbId,
+-        teamId,
+-        event: AuditEventEnum.DELETE_SKILL,
+-        params: { skillName: skill.name }
+-      });
+-    })();
+-
+-    jsonRes<DeleteSkillResponse>(res, { data: undefined });
+-  } catch (err: any) {
+-    jsonRes(res, { code: 500, error: err });
+-  }
++  })();
+ }
++
++export default NextAPI(handler);
+diff --git a/projects/app/src/pages/api/core/agentSkills/detail.ts b/projects/app/src/pages/api/core/agentSkills/detail.ts
+index 9d8264a4f866..7df70f27d288 100644
+--- a/projects/app/src/pages/api/core/agentSkills/detail.ts
++++ b/projects/app/src/pages/api/core/agentSkills/detail.ts
+@@ -1,84 +1,48 @@
+-import type { NextApiRequest, NextApiResponse } from 'next';
+-import { jsonRes } from '@fastgpt/service/common/response';
+-import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
+-import { getSkillById } from '@fastgpt/service/core/agentSkills/controller';
++import { NextAPI } from '@/service/middleware/entry';
++import { authSkill } from '@fastgpt/service/support/permission/agentSkill/auth';
++import { ReadPermissionVal } from '@fastgpt/global/support/permission/constant';
+ import type {
+   GetSkillDetailQuery,
+   GetSkillDetailResponse
+ } from '@fastgpt/global/core/agentSkills/api';
+ import { isValidObjectId } from 'mongoose';
++import type { ApiRequestProps } from '@fastgpt/service/type/next';
+ 
+-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+-  try {
+-    // Only accept GET requests
+-    if (req.method !== 'GET') {
+-      return jsonRes(res, { code: 405, error: 'Method not allowed' });
+-    }
++async function handler(
++  req: ApiRequestProps<{}, GetSkillDetailQuery>
++): Promise<GetSkillDetailResponse> {
++  const { skillId } = req.query;
+ 
+-    // Authenticate user
+-    const { teamId } = await authUserPer({
+-      req,
+-      authToken: true,
+-      authApiKey: true
+-    });
+-
+-    // Get query parameters
+-    const { skillId } = req.query as unknown as GetSkillDetailQuery;
+-
+-    // Validate skillId
+-    if (!skillId) {
+-      return jsonRes(res, {
+-        code: 400,
+-        error: 'Skill ID is required'
+-      });
+-    }
+-
+-    if (!isValidObjectId(skillId)) {
+-      return jsonRes(res, { code: 400, error: 'Invalid skill ID format' });
+-    }
+-
+-    // Get skill
+-    const skill = await getSkillById(skillId);
+-
+-    if (!skill) {
+-      return jsonRes(res, {
+-        code: 404,
+-        error: 'Skill not found'
+-      });
+-    }
+-
+-    // Check access permission for personal skills
+-    if (skill.source === 'personal' && skill.teamId !== teamId) {
+-      return jsonRes(res, {
+-        code: 403,
+-        error: 'You do not have access to this skill'
+-      });
+-    }
+-
+-    // Format response — only expose teamId/tmbId for personal skills belonging to the requester's team
+-    const isOwnPersonalSkill = skill.source === 'personal' && skill.teamId?.toString() === teamId;
+-
+-    const response: GetSkillDetailResponse = {
+-      _id: skill._id,
+-      source: skill.source,
+-      name: skill.name,
+-      description: skill.description,
+-      author: skill.author,
+-      category: skill.category,
+-      config: skill.config,
+-      avatar: skill.avatar,
+-      ...(isOwnPersonalSkill && { teamId: skill.teamId, tmbId: skill.tmbId }),
+-      createTime: skill.createTime?.toISOString() || new Date().toISOString(),
+-      updateTime: skill.updateTime?.toISOString() || new Date().toISOString()
+-    };
+-
+-    jsonRes<GetSkillDetailResponse>(res, {
+-      data: response
+-    });
+-  } catch (err) {
+-    jsonRes(res, {
+-      code: 500,
+-      error: err
+-    });
++  if (!skillId || !isValidObjectId(skillId)) {
++    return Promise.reject({ code: 400, error: 'Invalid skill ID' });
+   }
++
++  const { skill, permission } = await authSkill({
++    req,
++    authToken: true,
++    authApiKey: true,
++    skillId,
++    per: ReadPermissionVal
++  });
++
++  return {
++    _id: skill._id,
++    source: skill.source,
++    type: skill.type,
++    parentId: skill.parentId,
++    inheritPermission: skill.inheritPermission,
++    name: skill.name,
++    description: skill.description,
++    author: skill.author,
++    category: skill.category,
++    config: skill.config,
++    avatar: skill.avatar,
++    teamId: skill.teamId,
++    tmbId: skill.tmbId,
++    createTime: skill.createTime?.toISOString() || new Date().toISOString(),
++    updateTime: skill.updateTime?.toISOString() || new Date().toISOString(),
++    permission
++  };
+ }
++
++export default NextAPI(handler);
+diff --git a/projects/app/src/pages/api/core/agentSkills/edit.ts b/projects/app/src/pages/api/core/agentSkills/edit.ts
+index b84004d0f7f1..0d88c4d9458b 100644
+--- a/projects/app/src/pages/api/core/agentSkills/edit.ts
++++ b/projects/app/src/pages/api/core/agentSkills/edit.ts
+@@ -1,7 +1,8 @@
+ import type { NextApiRequest, NextApiResponse } from 'next';
+ import { sseErrRes } from '@fastgpt/service/common/response';
+ import { responseWrite } from '@fastgpt/service/common/response';
+-import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
++import { authSkill } from '@fastgpt/service/support/permission/agentSkill/auth';
++import { WritePermissionVal } from '@fastgpt/global/support/permission/constant';
+ import { createEditDebugSandbox } from '@fastgpt/service/core/agentSkills/sandboxController';
+ import type { CreateEditDebugSandboxBody } from '@fastgpt/global/core/agentSkills/api';
+ import { SseResponseEventEnum } from '@fastgpt/global/core/workflow/runtime/constants';
+@@ -26,13 +27,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
+   res.flushHeaders();
+ 
+   try {
+-    // Authenticate user
+-    const { teamId, tmbId } = await authUserPer({
+-      req,
+-      authToken: true,
+-      authApiKey: true
+-    });
+-
+     // Parse request body
+     const { skillId, image } = req.body as CreateEditDebugSandboxBody;
+ 
+@@ -49,6 +43,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
+       return;
+     }
+ 
++    // Authenticate user and verify write permission
++    const { teamId, tmbId } = await authSkill({
++      req,
++      authToken: true,
++      authApiKey: true,
++      skillId,
++      per: WritePermissionVal
++    });
++
+     // Validate optional parameters
+     if (image && !image.repository) {
+       sseErrRes(res, new Error('image.repository is required when image is provided'));
+diff --git a/projects/app/src/pages/api/core/agentSkills/export.ts b/projects/app/src/pages/api/core/agentSkills/export.ts
+index ab8688278a23..4a63a784b5c5 100644
+--- a/projects/app/src/pages/api/core/agentSkills/export.ts
++++ b/projects/app/src/pages/api/core/agentSkills/export.ts
+@@ -5,7 +5,7 @@ import { ReadPermissionVal } from '@fastgpt/global/support/permission/constant';
+ import { downloadSkillPackage } from '@fastgpt/service/core/agentSkills/storage';
+ import type { ExportSkillQuery } from '@fastgpt/global/core/agentSkills/api';
+ import { AgentSkillTypeEnum } from '@fastgpt/global/core/agentSkills/constants';
+-import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
++import { addAuditLog, getI18nSkillType } from '@fastgpt/service/support/user/audit/util';
+ import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
+ import { getLogger, LogCategories } from '@fastgpt/service/common/logger';
+ 
+@@ -61,7 +61,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
+         teamId,
+         event: AuditEventEnum.EXPORT_SKILL,
+         params: {
+-          skillName: skill.name
++          skillName: skill.name,
++          skillType: getI18nSkillType(skill.type)
+         }
+       });
+     })();
+diff --git a/projects/app/src/pages/api/core/agentSkills/folder/create.ts b/projects/app/src/pages/api/core/agentSkills/folder/create.ts
+index c33444a281d3..a89dce9ce7b4 100644
+--- a/projects/app/src/pages/api/core/agentSkills/folder/create.ts
++++ b/projects/app/src/pages/api/core/agentSkills/folder/create.ts
+@@ -1,14 +1,19 @@
+ import { NextAPI } from '@/service/middleware/entry';
+ import { CommonErrEnum } from '@fastgpt/global/common/error/code/common';
+-import { WritePermissionVal } from '@fastgpt/global/support/permission/constant';
++import {
++  PerResourceTypeEnum,
++  WritePermissionVal
++} from '@fastgpt/global/support/permission/constant';
+ import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
+ import { createSkillFolder } from '@fastgpt/service/core/agentSkills/controller';
+ import { authSkill } from '@fastgpt/service/support/permission/agentSkill/auth';
+ import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
++import { createResourceDefaultCollaborators } from '@fastgpt/service/support/permission/controller';
+ import type { ApiRequestProps } from '@fastgpt/service/type/next';
+ import type { CreateSkillFolderBody } from '@fastgpt/global/core/agentSkills/api';
+ import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
+ import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
++import { TeamSkillCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
+ 
+ async function handler(req: ApiRequestProps<CreateSkillFolderBody>) {
+   const { name, description, parentId } = req.body;
+@@ -26,11 +31,16 @@ async function handler(req: ApiRequestProps<CreateSkillFolderBody>) {
+         authToken: true,
+         authApiKey: true
+       })
+-    : await authUserPer({ req, authToken: true, authApiKey: true });
++    : await authUserPer({
++        req,
++        authToken: true,
++        authApiKey: true,
++        per: TeamSkillCreatePermissionVal
++      });
+ 
+-  // Create the folder within a transaction
++  // Create the folder within a transaction and copy collaborators from parent
+   const folderId = await mongoSessionRun(async (session) => {
+-    return await createSkillFolder(
++    const folder = await createSkillFolder(
+       {
+         name,
+         description,
+@@ -40,6 +50,16 @@ async function handler(req: ApiRequestProps<CreateSkillFolderBody>) {
+       },
+       session
+     );
++
++    // Create default collaborators (copy from parent if exists)
++    await createResourceDefaultCollaborators({
++      tmbId,
++      session,
++      resource: folder,
++      resourceType: PerResourceTypeEnum.agentSkill
++    });
++
++    return folder._id.toString();
+   });
+ 
+   // Add audit log
+diff --git a/projects/app/src/pages/api/core/agentSkills/import.ts b/projects/app/src/pages/api/core/agentSkills/import.ts
+index a5d8944bf2cd..8f64fb1e39f6 100644
+--- a/projects/app/src/pages/api/core/agentSkills/import.ts
++++ b/projects/app/src/pages/api/core/agentSkills/import.ts
+@@ -1,6 +1,9 @@
+ import type { NextApiRequest, NextApiResponse } from 'next';
+ import { jsonRes } from '@fastgpt/service/common/response';
+ import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
++import { authSkill } from '@fastgpt/service/support/permission/agentSkill/auth';
++import { WritePermissionVal } from '@fastgpt/global/support/permission/constant';
++import { TeamSkillCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
+ import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
+ import { importSkill } from '@fastgpt/service/core/agentSkills/controller';
+ import { repackFileMapAsZip } from '@fastgpt/service/core/agentSkills/zipBuilder';
+@@ -10,11 +13,14 @@ import {
+ } from '@fastgpt/service/core/agentSkills/archiveUtils';
+ import type { ImportSkillBody, ImportSkillResponse } from '@fastgpt/global/core/agentSkills/api';
+ import type { SkillPackageType } from '@fastgpt/global/core/agentSkills/type';
+-import { AgentSkillCategoryEnum } from '@fastgpt/global/core/agentSkills/constants';
++import {
++  AgentSkillCategoryEnum,
++  AgentSkillTypeEnum
++} from '@fastgpt/global/core/agentSkills/constants';
+ import { multer } from '@fastgpt/service/common/file/multer';
+ import { getSkillSizeLimits } from '@fastgpt/service/core/agentSkills/sandboxConfig';
+ import fs from 'fs/promises';
+-import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
++import { addAuditLog, getI18nSkillType } from '@fastgpt/service/support/user/audit/util';
+ import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
+ 
+ export const config = {
+@@ -46,10 +52,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
+     const file = result.fileMetadata;
+     // Support both JSON-wrapped body ({"data": "..."}) and plain multipart form fields
+     const body: ImportSkillBody = {
++      parentId: result.data.parentId ?? (req.body?.parentId as string | undefined),
+       name: result.data.name ?? (req.body?.name as string | undefined),
+       description: result.data.description ?? (req.body?.description as string | undefined),
+-      avatar: result.data.avatar ?? (req.body?.avatar as string | undefined),
+-      parentId: result.data.parentId ?? (req.body?.parentId as string | undefined)
++      avatar: result.data.avatar ?? (req.body?.avatar as string | undefined)
+     };
+ 
+     const format = getSupportedArchiveFormat(file.originalname ?? '');
+@@ -60,11 +66,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
+       });
+     }
+ 
+-    const { teamId, tmbId, userId } = await authUserPer({
+-      req,
+-      authToken: true,
+-      authApiKey: true
+-    });
++    // Authenticate user and check permission
++    let teamId: string;
++    let tmbId: string;
++    let userId: string | undefined;
++
++    if (body.parentId) {
++      // If importing into a folder, check write permission on the parent folder
++      const authResult = await authSkill({
++        req,
++        authToken: true,
++        authApiKey: true,
++        skillId: body.parentId,
++        per: WritePermissionVal
++      });
++      teamId = authResult.teamId;
++      tmbId = authResult.tmbId;
++      userId = authResult.userId;
++    } else {
++      // If importing to root, check team-level skill create permission
++      const authResult = await authUserPer({
++        req,
++        authToken: true,
++        authApiKey: true,
++        per: TeamSkillCreatePermissionVal
++      });
++      teamId = authResult.teamId;
++      tmbId = authResult.tmbId;
++      userId = authResult.userId;
++    }
+ 
+     // Check archive size (multer already enforces the limit, this is a secondary guard)
+     const stats = await fs.stat(file.path);
+@@ -130,7 +160,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
+         teamId,
+         event: AuditEventEnum.IMPORT_SKILL,
+         params: {
+-          skillName: pkgName
++          skillName: pkgName,
++          skillType: getI18nSkillType(AgentSkillTypeEnum.skill)
+         }
+       });
+     })();
+diff --git a/projects/app/src/pages/api/core/agentSkills/list.ts b/projects/app/src/pages/api/core/agentSkills/list.ts
+index aaabb063a8e0..35c1df0f8d42 100644
+--- a/projects/app/src/pages/api/core/agentSkills/list.ts
++++ b/projects/app/src/pages/api/core/agentSkills/list.ts
+@@ -1,74 +1,254 @@
+-import type { NextApiRequest, NextApiResponse } from 'next';
+-import { jsonRes } from '@fastgpt/service/common/response';
++import { NextAPI } from '@/service/middleware/entry';
++import { MongoAgentSkills } from '@fastgpt/service/core/agentSkills/schema';
++import { MongoApp } from '@fastgpt/service/core/app/schema';
+ import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
+-import { listSkills } from '@fastgpt/service/core/agentSkills/controller';
+-import type { ListSkillsQuery, ListSkillsResponse } from '@fastgpt/global/core/agentSkills/api';
+-
+-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+-  try {
+-    // Only accept GET requests
+-    if (req.method !== 'GET') {
+-      return jsonRes(res, { code: 405, error: 'Method not allowed' });
+-    }
++import { SkillPermission } from '@fastgpt/global/support/permission/agentSkill/controller';
++import {
++  PerResourceTypeEnum,
++  ReadPermissionVal
++} from '@fastgpt/global/support/permission/constant';
++import { MongoResourcePermission } from '@fastgpt/service/support/permission/schema';
++import type { ParentIdType } from '@fastgpt/global/common/parentFolder/type';
++import { parseParentIdInMongo } from '@fastgpt/global/common/parentFolder/utils';
++import type { ApiRequestProps } from '@fastgpt/service/type/next';
++import { authSkill } from '@fastgpt/service/support/permission/agentSkill/auth';
++import { replaceRegChars } from '@fastgpt/global/common/string/tools';
++import { getGroupsByTmbId } from '@fastgpt/service/support/permission/memberGroup/controllers';
++import { getOrgIdSetWithParentByTmbId } from '@fastgpt/service/support/permission/org/controllers';
++import { addSourceMember } from '@fastgpt/service/support/user/utils';
++import { sumPer } from '@fastgpt/global/support/permission/utils';
++import {
++  AgentSkillTypeEnum,
++  AgentSkillSourceEnum
++} from '@fastgpt/global/core/agentSkills/constants';
++import { NodeInputKeyEnum } from '@fastgpt/global/core/workflow/constants';
++
++export type GetSkillListBody = {
++  parentId?: ParentIdType;
++  source?: 'store' | 'mine';
++  searchKey?: string;
++  category?: string;
++  page?: number;
++  pageSize?: number;
++};
+ 
+-    // Get query parameters
+-    const {
+-      source = 'store',
+-      searchKey,
+-      category,
+-      parentId,
+-      page = '1',
+-      pageSize = '20'
+-    } = req.query as unknown as ListSkillsQuery;
+-
+-    // Authenticate user
+-    const { teamId, tmbId } = await authUserPer({
++async function handler(req: ApiRequestProps<GetSkillListBody>) {
++  const { parentId, source, searchKey, category, page, pageSize } = req.body;
++
++  // Auth user permission
++  const [{ tmbId, teamId, permission: teamPer }] = await Promise.all([
++    authUserPer({
+       req,
+       authToken: true,
+-      authApiKey: true
+-    });
++      authApiKey: true,
++      per: ReadPermissionVal
++    }),
++    ...(parentId
++      ? [
++          authSkill({
++            req,
++            authToken: true,
++            authApiKey: true,
++            per: ReadPermissionVal,
++            skillId: parentId
++          })
++        ]
++      : [])
++  ]);
++
++  // Get team all skill permissions
++  const [roleList, myGroupMap, myOrgSet] = await Promise.all([
++    MongoResourcePermission.find({
++      resourceType: PerResourceTypeEnum.agentSkill,
++      teamId,
++      resourceId: {
++        $exists: true
++      }
++    }).lean(),
++    getGroupsByTmbId({
++      tmbId,
++      teamId
++    }).then((item) => {
++      const map = new Map<string, 1>();
++      item.forEach((item) => {
++        map.set(String(item._id), 1);
++      });
++      return map;
++    }),
++    getOrgIdSetWithParentByTmbId({
++      teamId,
++      tmbId
++    })
++  ]);
++
++  const myRoles = roleList.filter(
++    (item) =>
++      String(item.tmbId) === String(tmbId) ||
++      myGroupMap.has(String(item.groupId)) ||
++      myOrgSet.has(String(item.orgId))
++  );
++
++  const findSkillQuery = (() => {
++    // Filter skills by permission, if not owner, only get skills that I have permission to access
++    const idList = { _id: { $in: myRoles.map((item) => item.resourceId) } };
++    const skillPerQuery = teamPer.isOwner
++      ? {}
++      : parentId
++        ? {
++            $or: [idList, parseParentIdInMongo(parentId)]
++          }
++        : { $or: [idList, { parentId: null }] };
++
++    // Map API source ('store'|'mine') to DB source enum
++    const sourceQuery = (() => {
++      if (source === 'store') return { source: AgentSkillSourceEnum.system };
++      if (source === 'mine') return { source: AgentSkillSourceEnum.personal };
++      return {};
++    })();
++
++    // Only restrict by teamId for personal (mine) skills; store (system) skills are global
++    const teamIdQuery = source === 'store' ? {} : { teamId };
++
++    const searchMatch = searchKey
++      ? {
++          $or: [
++            { name: { $regex: new RegExp(`${replaceRegChars(searchKey)}`, 'i') } },
++            { description: { $regex: new RegExp(`${replaceRegChars(searchKey)}`, 'i') } }
++          ]
++        }
++      : {};
+ 
+-    // Validate source enum
+-    if (source && !['store', 'mine'].includes(source)) {
+-      return jsonRes(res, { code: 400, error: 'Invalid source value' });
++    if (searchKey) {
++      const data = {
++        ...skillPerQuery,
++        ...teamIdQuery,
++        deleteTime: null,
++        ...searchMatch,
++        ...sourceQuery,
++        ...(category ? { category: { $in: [category] } } : {})
++      };
++      // @ts-ignore
++      delete data.parentId;
++      return data;
+     }
+ 
+-    // Parse pagination — guard against NaN from non-numeric inputs
+-    const safeInt = (v: any, def: number) => {
+-      const n = parseInt(v, 10);
+-      return isNaN(n) ? def : n;
++    return {
++      ...skillPerQuery,
++      ...teamIdQuery,
++      deleteTime: null,
++      ...sourceQuery,
++      ...(category ? { category: { $in: [category] } } : {}),
++      ...parseParentIdInMongo(parentId)
+     };
+-    const pageNum = Math.max(1, safeInt(page, 1));
+-    const pageSizeNum = Math.min(100, Math.max(1, safeInt(pageSize, 20)));
++  })();
+ 
+-    // List skills
+-    const { list, total } = await listSkills({
+-      source,
+-      teamId,
+-      searchKey,
+-      category,
+-      parentId,
+-      page: pageNum,
+-      pageSize: pageSizeNum
+-    });
++  const mySkills = await MongoAgentSkills.find(findSkillQuery)
++    .sort({
++      type: -1, // Folders first
++      updateTime: -1
++    })
++    .lean();
+ 
+-    // Format response
+-    const formattedList = list.map((skill) => ({
+-      ...skill,
+-      createTime: skill.createTime?.toISOString() || new Date().toISOString(),
+-      updateTime: skill.updateTime?.toISOString() || new Date().toISOString()
+-    }));
+-
+-    jsonRes<ListSkillsResponse>(res, {
+-      data: {
+-        list: formattedList,
+-        total
+-      }
+-    });
+-  } catch (err) {
+-    jsonRes(res, {
+-      code: 500,
+-      error: err
++  const formatSkills = mySkills
++    .map((skill) => {
++      const { Per, privateSkill } = (() => {
++        const getPer = (skillId: string) => {
++          const tmbRole = myRoles.find(
++            (item) => String(item.resourceId) === skillId && !!item.tmbId
++          )?.permission;
++          const groupAndOrgRole = sumPer(
++            ...myRoles
++              .filter(
++                (item) => String(item.resourceId) === skillId && (!!item.groupId || !!item.orgId)
++              )
++              .map((item) => item.permission)
++          );
++          return new SkillPermission({
++            role: tmbRole ?? groupAndOrgRole,
++            isOwner: String(skill.tmbId) === String(tmbId) || teamPer.isOwner
++          });
++        };
++        const getClbCount = (skillId: string) => {
++          return roleList.filter((item) => String(item.resourceId) === String(skillId)).length;
++        };
++
++        // inherit
++        if (skill.inheritPermission && skill.parentId && skill.type !== AgentSkillTypeEnum.folder) {
++          return {
++            Per: getPer(String(skill.parentId)).addRole(getPer(String(skill._id)).role),
++            privateSkill: getClbCount(String(skill.parentId)) <= 1
++          };
++        }
++        return {
++          Per: getPer(String(skill._id)),
++          privateSkill: getClbCount(String(skill._id)) <= 1
++        };
++      })();
++
++      return {
++        _id: skill._id,
++        avatar: skill.avatar,
++        name: skill.name,
++        description: skill.description,
++        type: skill.type,
++        source: skill.source,
++        category: skill.category,
++        author: skill.author,
++        inheritPermission: skill.inheritPermission,
++        tmbId: skill.tmbId,
++        parentId: skill.parentId,
++        createTime: skill.createTime,
++        updateTime: skill.updateTime,
++        permission: Per,
++        private: privateSkill
++      };
++    })
++    .filter((skill) => skill.permission.hasReadPer);
++
++  // Compute appCount for non-folder skills
++  const nonFolderSkills = formatSkills.filter((s) => s.type !== AgentSkillTypeEnum.folder);
++  const appCountMap = new Map<string, number>();
++  if (nonFolderSkills.length > 0) {
++    const counts = await Promise.all(
++      nonFolderSkills.map((skill) =>
++        MongoApp.countDocuments({
++          deleteTime: null,
++          modules: {
++            $elemMatch: {
++              inputs: {
++                $elemMatch: {
++                  key: NodeInputKeyEnum.skills,
++                  'value.skillId': skill._id.toString()
++                }
++              }
++            }
++          }
++        })
++      )
++    );
++    nonFolderSkills.forEach((skill, i) => {
++      appCountMap.set(skill._id.toString(), counts[i]);
+     });
+   }
++
++  const total = formatSkills.length;
++
++  // Apply pagination if requested
++  const pagedSkills = (() => {
++    if (page && pageSize) {
++      const skip = (page - 1) * pageSize;
++      return formatSkills.slice(skip, skip + pageSize);
++    }
++    return formatSkills;
++  })();
++
++  const listWithAppCount = pagedSkills.map((skill) => ({
++    ...skill,
++    appCount: appCountMap.get(skill._id.toString()) ?? 0
++  }));
++
++  const listWithSourceMember = await addSourceMember({ list: listWithAppCount });
++  return { list: listWithSourceMember, total };
+ }
++
++export default NextAPI(handler);
+diff --git a/projects/app/src/pages/api/core/agentSkills/resumeInheritPermission.ts b/projects/app/src/pages/api/core/agentSkills/resumeInheritPermission.ts
+new file mode 100644
+index 000000000000..513fa9e6de14
+--- /dev/null
++++ b/projects/app/src/pages/api/core/agentSkills/resumeInheritPermission.ts
+@@ -0,0 +1,48 @@
++import type { ApiRequestProps } from '@fastgpt/service/type/next';
++import { NextAPI } from '@/service/middleware/entry';
++import { authSkill } from '@fastgpt/service/support/permission/agentSkill/auth';
++import {
++  ManagePermissionVal,
++  PerResourceTypeEnum
++} from '@fastgpt/global/support/permission/constant';
++import { resumeInheritPermission } from '@fastgpt/service/support/permission/inheritPermission';
++import { MongoAgentSkills } from '@fastgpt/service/core/agentSkills/schema';
++import { AgentSkillTypeEnum } from '@fastgpt/global/core/agentSkills/constants';
++
++export type ResumeInheritPermissionQuery = {
++  skillId: string;
++};
++export type ResumeInheritPermissionBody = {};
++
++// Resume the skill's inherit permission.
++async function handler(
++  req: ApiRequestProps<ResumeInheritPermissionBody, ResumeInheritPermissionQuery>
++) {
++  const { skillId } = req.query;
++  const { skill } = await authSkill({
++    skillId,
++    req,
++    authToken: true,
++    per: ManagePermissionVal
++  });
++
++  if (skill.parentId) {
++    await resumeInheritPermission({
++      resource: skill,
++      folderTypeList: [AgentSkillTypeEnum.folder],
++      resourceType: PerResourceTypeEnum.agentSkill,
++      resourceModel: MongoAgentSkills
++    });
++  } else {
++    await MongoAgentSkills.updateOne(
++      {
++        _id: skillId
++      },
++      {
++        inheritPermission: true
++      }
++    );
++  }
++}
++
++export default NextAPI(handler);
+diff --git a/projects/app/src/pages/api/core/agentSkills/save-deploy.ts b/projects/app/src/pages/api/core/agentSkills/save-deploy.ts
+index f0e40aecc38d..843e9a554e66 100644
+--- a/projects/app/src/pages/api/core/agentSkills/save-deploy.ts
++++ b/projects/app/src/pages/api/core/agentSkills/save-deploy.ts
+@@ -24,7 +24,7 @@ import type {
+   SaveDeploySkillResponse
+ } from '@fastgpt/global/core/agentSkills/api';
+ import { WritePermissionVal } from '@fastgpt/global/support/permission/constant';
+-import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
++import { addAuditLog, getI18nSkillType } from '@fastgpt/service/support/user/audit/util';
+ import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
+ import { isValidObjectId } from 'mongoose';
+ 
+@@ -177,7 +177,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
+         tmbId,
+         teamId,
+         event: AuditEventEnum.DEPLOY_SKILL,
+-        params: { skillName: skill.name }
++        params: { skillName: skill.name, skillType: getI18nSkillType(skill.type) }
+       });
+     })();
+ 
+diff --git a/projects/app/src/pages/api/core/agentSkills/update.ts b/projects/app/src/pages/api/core/agentSkills/update.ts
+index 20624556158b..94c1e9f70b8f 100644
+--- a/projects/app/src/pages/api/core/agentSkills/update.ts
++++ b/projects/app/src/pages/api/core/agentSkills/update.ts
+@@ -1,69 +1,133 @@
+-import type { NextApiRequest, NextApiResponse } from 'next';
+-import { jsonRes } from '@fastgpt/service/common/response';
++import { NextAPI } from '@/service/middleware/entry';
+ import { authSkill } from '@fastgpt/service/support/permission/agentSkill/auth';
++import { authUserPer } from '@fastgpt/service/support/permission/user/auth';
+ import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
+-import { updateSkill, checkSkillNameExists } from '@fastgpt/service/core/agentSkills/controller';
+-import type { UpdateSkillBody, UpdateSkillResponse } from '@fastgpt/global/core/agentSkills/api';
+-import { AgentSkillCategoryEnum } from '@fastgpt/global/core/agentSkills/constants';
+-import { WritePermissionVal } from '@fastgpt/global/support/permission/constant';
+-import { isValidObjectId } from 'mongoose';
+-import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
++import {
++  updateSkill,
++  checkSkillNameExists,
++  updateParentFoldersUpdateTime
++} from '@fastgpt/service/core/agentSkills/controller';
++import { MongoAgentSkills } from '@fastgpt/service/core/agentSkills/schema';
++import {
++  ManagePermissionVal,
++  PerResourceTypeEnum,
++  ReadPermissionVal
++} from '@fastgpt/global/support/permission/constant';
++import { TeamSkillCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
++import { parseParentIdInMongo } from '@fastgpt/global/common/parentFolder/utils';
++import {
++  AgentSkillTypeEnum,
++  AgentSkillCategoryEnum
++} from '@fastgpt/global/core/agentSkills/constants';
++import { SkillErrEnum } from '@fastgpt/global/common/error/code/agentSkill';
++import {
++  syncChildrenPermission,
++  syncCollaborators
++} from '@fastgpt/service/support/permission/inheritPermission';
++import { getResourceOwnedClbs } from '@fastgpt/service/support/permission/controller';
++import type { UpdateSkillBody } from '@fastgpt/global/core/agentSkills/api';
++import { addAuditLog, getI18nSkillType } from '@fastgpt/service/support/user/audit/util';
+ import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
++import { isValidObjectId } from 'mongoose';
++import type { ApiRequestProps } from '@fastgpt/service/type/next';
++import { getS3AvatarSource } from '@fastgpt/service/common/s3/sources/avatar';
+ 
+-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+-  try {
+-    if (req.method !== 'POST') {
+-      return jsonRes(res, { code: 405, error: 'Method not allowed' });
+-    }
++async function handler(req: ApiRequestProps<UpdateSkillBody>) {
++  const { skillId, name, description, category, config, avatar, parentId } =
++    req.body as UpdateSkillBody;
++
++  if (!skillId) {
++    return Promise.reject(SkillErrEnum.unExist);
++  }
+ 
+-    const { skillId, name, description, category, config, avatar } = req.body as UpdateSkillBody;
++  if (!isValidObjectId(skillId)) {
++    return Promise.reject(SkillErrEnum.unExist);
++  }
+ 
+-    if (!skillId) {
+-      return jsonRes(res, { code: 400, error: 'Skill ID is required' });
++  const isMove = parentId !== undefined;
++
++  // Fetch skill with basic read permission; finer-grained checks follow based on operation type
++  const { teamId, tmbId, skill, permission } = await authSkill({
++    req,
++    skillId,
++    per: ReadPermissionVal,
++    authToken: true,
++    authApiKey: true
++  });
++
++  if (isMove) {
++    // Move operation: check source folder, target folder, and root-level permissions
++    if (parentId) {
++      // Moving into a target folder: require manage permission on the destination folder
++      await authSkill({
++        req,
++        skillId: parentId,
++        per: ManagePermissionVal,
++        authToken: true,
++        authApiKey: true
++      });
+     }
+ 
+-    if (!isValidObjectId(skillId)) {
+-      return jsonRes(res, { code: 400, error: 'Invalid skill ID format' });
++    if (skill.parentId) {
++      // Moving out of the source folder: require manage permission on the source folder
++      await authSkill({
++        req,
++        skillId: String(skill.parentId),
++        per: ManagePermissionVal,
++        authToken: true,
++        authApiKey: true
++      });
+     }
+ 
+-    // Verify write permission via authSkill (replaces authUserPer + canModifySkill)
+-    const { teamId, tmbId, skill } = await authSkill({
+-      req,
+-      skillId,
+-      per: WritePermissionVal,
+-      authToken: true,
+-      authApiKey: true
+-    });
++    if (parentId === null || !skill.parentId) {
++      // Involves root directory (moving into or out of root): require team-level skill create permission
++      await authUserPer({
++        req,
++        authToken: true,
++        authApiKey: true,
++        per: TeamSkillCreatePermissionVal
++      });
++    }
++  } else {
++    // Non-move operation: require write permission
++    if (!permission.hasWritePer) {
++      return Promise.reject(SkillErrEnum.unAuthSkill);
++    }
++  }
+ 
++  if (!isMove) {
++    // Field validation for normal update
+     if (name !== undefined) {
+       if (typeof name !== 'string' || name.trim().length === 0) {
+-        return jsonRes(res, { code: 400, error: 'Skill name cannot be empty' });
++        return Promise.reject({ code: 400, error: 'Skill name cannot be empty' });
+       }
+-
+       if (name.length > 50) {
+-        return jsonRes(res, { code: 400, error: 'Skill name must be less than 50 characters' });
++        return Promise.reject({ code: 400, error: 'Skill name must be less than 50 characters' });
+       }
+-
+-      // Check for name uniqueness (excluding current skill)
+-      const nameExists = await checkSkillNameExists(name.trim(), teamId, skillId);
++      const nameExists = await checkSkillNameExists(
++        name.trim(),
++        teamId,
++        skill.parentId ?? null,
++        skillId
++      );
+       if (nameExists) {
+-        return jsonRes(res, { code: 409, error: 'Skill name already exists' });
++        return Promise.reject({ code: 409, error: 'Skill name already exists' });
+       }
+     }
+ 
+     if (description !== undefined && description.length > 500) {
+-      return jsonRes(res, { code: 400, error: 'Description must be less than 500 characters' });
++      return Promise.reject({ code: 400, error: 'Description must be less than 500 characters' });
+     }
+ 
+     if (category !== undefined) {
+       const validCategories = Object.values(AgentSkillCategoryEnum) as string[];
+       if (category.some((c) => !validCategories.includes(c))) {
+-        return jsonRes(res, { code: 400, error: 'Invalid category value' });
++        return Promise.reject({ code: 400, error: 'Invalid category value' });
+       }
+     }
+ 
+     if (config !== undefined && JSON.stringify(config).length > 50_000) {
+-      return jsonRes(res, { code: 400, error: 'Config exceeds maximum allowed size (50KB)' });
++      return Promise.reject({ code: 400, error: 'Config exceeds maximum allowed size (50KB)' });
+     }
+ 
+     const updateData: Record<string, any> = {};
+@@ -74,28 +138,85 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
+     if (avatar !== undefined) updateData.avatar = avatar;
+ 
+     if (Object.keys(updateData).length === 0) {
+-      return jsonRes(res, { code: 400, error: 'No fields to update' });
++      return Promise.reject({ code: 400, error: 'No fields to update' });
+     }
+ 
+     await mongoSessionRun(async (session) => {
+-      return updateSkill(skillId, updateData, session);
++      await updateSkill(skillId, updateData, session);
++      await getS3AvatarSource().refreshAvatar(avatar, skill.avatar, session);
+     });
+ 
++    updateParentFoldersUpdateTime({ parentId: skill.parentId ?? null });
++
+     (async () => {
+       addAuditLog({
+         tmbId,
+         teamId,
+         event: AuditEventEnum.UPDATE_SKILL,
+-        params: { skillName: skill.name }
++        params: { skillName: skill.name, skillType: getI18nSkillType(skill.type) }
+       });
+     })();
+-
+-    jsonRes<UpdateSkillResponse>(res, { data: undefined });
+-  } catch (err: any) {
+-    // E11000: unique index violation (concurrent duplicate name update)
+-    if (err.code === 11000 || err.codeName === 'DuplicateKey') {
+-      return jsonRes(res, { code: 409, error: 'Skill name already exists' });
++  } else {
++    // Move operation: sync permissions and update parentId
++    let targetFolderName = 'root';
++    if (parentId) {
++      const targetFolder = await MongoAgentSkills.findById(parentId, 'name').lean();
++      if (targetFolder) targetFolderName = targetFolder.name;
+     }
+-    jsonRes(res, { code: 500, error: err });
++
++    await mongoSessionRun(async (session) => {
++      // Fetch collaborators of the target folder (null = root has no collaborators)
++      const parentClbs = await getResourceOwnedClbs({
++        teamId,
++        resourceId: parentId,
++        resourceType: PerResourceTypeEnum.agentSkill,
++        session
++      });
++
++      // Sync permission records for the skill itself
++      await syncCollaborators({
++        resourceId: skillId,
++        resourceType: PerResourceTypeEnum.agentSkill,
++        collaborators: parentClbs,
++        session,
++        teamId
++      });
++
++      // Sync subtree permissions (only effective when the skill is a folder)
++      await syncChildrenPermission({
++        resource: skill,
++        resourceType: PerResourceTypeEnum.agentSkill,
++        resourceModel: MongoAgentSkills,
++        folderTypeList: [AgentSkillTypeEnum.folder],
++        collaborators: parentClbs,
++        session
++      });
++
++      // Update parentId and mark permission as inherited
++      await MongoAgentSkills.findByIdAndUpdate(
++        skillId,
++        {
++          ...parseParentIdInMongo(parentId),
++          inheritPermission: true,
++          updateTime: new Date()
++        },
++        { session }
++      );
++    });
++
++    // Update updateTime on both old and new parent folders
++    updateParentFoldersUpdateTime({ parentId: skill.parentId ?? null });
++    updateParentFoldersUpdateTime({ parentId });
++
++    (async () => {
++      addAuditLog({
++        tmbId,
++        teamId,
++        event: AuditEventEnum.MOVE_SKILL,
++        params: { skillName: skill.name, skillType: getI18nSkillType(skill.type), targetFolderName }
++      });
++    })();
+   }
+ }
++
++export default NextAPI(handler);
+diff --git a/test/cases/service/core/agentSkills/controller.test.ts b/test/cases/service/core/agentSkills/controller.test.ts
+index f2a4b321509c..e6002a8e6783 100644
+--- a/test/cases/service/core/agentSkills/controller.test.ts
++++ b/test/cases/service/core/agentSkills/controller.test.ts
+@@ -6,7 +6,6 @@ import {
+   updateSkill,
+   deleteSkill,
+   getSkillById,
+-  listSkills,
+   canModifySkill,
+   checkSkillNameExists,
+   importSkill
+@@ -261,127 +260,6 @@ describe('AgentSkill Controller', () => {
+     });
+   });
+ 
+-  // ==================== List Skills ====================
+-  describe('listSkills', () => {
+-    beforeEach(async () => {
+-      // Create test skills
+-      const skills = [
+-        {
+-          source: AgentSkillSourceEnum.system,
+-          name: 'System Skill 1',
+-          description: 'A system skill about search',
+-          author: 'system',
+-          category: [AgentSkillCategoryEnum.search],
+-          config: {},
+-          teamId: null,
+-          tmbId: null,
+-          createTime: new Date(),
+-          updateTime: new Date(),
+-          deleteTime: null
+-        },
+-        {
+-          source: AgentSkillSourceEnum.system,
+-          name: 'System Skill 2',
+-          description: 'A system skill about coding',
+-          author: 'system',
+-          category: [AgentSkillCategoryEnum.coding],
+-          config: {},
+-          teamId: null,
+-          tmbId: null,
+-          createTime: new Date(),
+-          updateTime: new Date(),
+-          deleteTime: null
+-        },
+-        {
+-          source: AgentSkillSourceEnum.personal,
+-          name: 'Personal Skill 1',
+-          description: 'My personal search skill',
+-          author: testUserId,
+-          category: [AgentSkillCategoryEnum.search],
+-          config: {},
+-          teamId: testTeamId,
+-          tmbId: testTmbId,
+-          createTime: new Date(),
+-          updateTime: new Date(),
+-          deleteTime: null
+-        }
+-      ];
+-
+-      await MongoAgentSkills.insertMany(skills);
+-    });
+-
+-    it('should list system skills (store)', async () => {
+-      const result = await listSkills({
+-        source: 'store',
+-        page: 1,
+-        pageSize: 10
+-      });
+-
+-      expect(result.total).toBeGreaterThanOrEqual(2);
+-      expect(result.list.every((s) => s.source === AgentSkillSourceEnum.system)).toBe(true);
+-    });
+-
+-    it('should list personal skills (mine)', async () => {
+-      const result = await listSkills({
+-        source: 'mine',
+-        teamId: testTeamId,
+-        page: 1,
+-        pageSize: 10
+-      });
+-
+-      expect(result.total).toBeGreaterThanOrEqual(1);
+-      expect(result.list.every((s) => s.source === AgentSkillSourceEnum.personal)).toBe(true);
+-      expect(result.list.every((s) => s.author === testUserId)).toBe(true);
+-    });
+-
+-    it('should filter by category', async () => {
+-      const result = await listSkills({
+-        source: 'store',
+-        category: AgentSkillCategoryEnum.search,
+-        page: 1,
+-        pageSize: 10
+-      });
+-
+-      expect(result.list.every((s) => s.category.includes(AgentSkillCategoryEnum.search))).toBe(
+-        true
+-      );
+-    });
+-
+-    it('should search by keyword', async () => {
+-      const result = await listSkills({
+-        searchKey: 'search',
+-        page: 1,
+-        pageSize: 10
+-      });
+-
+-      // Should match skills with "search" in name or description
+-      expect(result.list.length).toBeGreaterThanOrEqual(1);
+-      const hasSearchKeyword = result.list.some(
+-        (s) =>
+-          s.name.toLowerCase().includes('search') || s.description.toLowerCase().includes('search')
+-      );
+-      expect(hasSearchKeyword).toBe(true);
+-    });
+-
+-    it('should paginate results', async () => {
+-      const result1 = await listSkills({
+-        source: 'store',
+-        page: 1,
+-        pageSize: 1
+-      });
+-
+-      expect(result1.list.length).toBe(1);
+-
+-      const result2 = await listSkills({
+-        source: 'store',
+-        page: 2,
+-        pageSize: 1
+-      });
+-
+-      expect(result2.list.length).toBeLessThanOrEqual(1);
+-    });
+-  });
+-
+   // ==================== Permission Checks ====================
+   describe('canModifySkill', () => {
+     it('should return true for skill owner', async () => {

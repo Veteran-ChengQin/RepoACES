@@ -1,0 +1,2 @@
+M	document/content/self-host/config/model/minimax.en.mdx
+M	document/content/self-host/config/model/minimax.mdx

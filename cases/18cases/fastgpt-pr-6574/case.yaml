@@ -1,0 +1,24 @@
+id: fastgpt-pr-6574
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "b431801b48d086e3aedc6a046fd00a81aa92339e"
+  pr_number: 6574
+  pr_url: https://github.com/labring/FastGPT/pull/6574
+  pr_title_raw: "feat: add skill permission management"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    This commit introduces a comprehensive permission management system for AgentSkill, enabling fine-grained access control with support for permission inheritance, collaborator management, and ownership transfer.
+
+validation:
+  head_commit: "2f48223aa3f8f6f5404a576ef5b44d75fe42ea9a"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-6574.patch"
+  patch_sha256: "f7eae514ba1a684b975aad5de53a95559553a09986e001f8d908bcb49527859a"
+  changed_files_file: "patches/fastgpt-pr-6574.changed_files.txt"
+  manual_functionality_description: |
+    Check that AgentSkill access is controlled by a permission system rather than only by ownership.
+    Manual evaluation should cover owner access, collaborator access, permission inheritance, collaborator management, ownership transfer, and denial for users without sufficient permission across the relevant AgentSkill API operations.

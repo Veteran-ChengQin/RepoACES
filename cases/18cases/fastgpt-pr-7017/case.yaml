@@ -1,0 +1,27 @@
+id: fastgpt-pr-7017
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "0415311979e729e25ff62c20ac2c6462e566d968"
+  pr_number: 7017
+  pr_url: https://github.com/labring/FastGPT/pull/7017
+  pr_title_raw: "feat: add browser sandbox image packaging"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    - register `pro/browser-sandbox` as a workspace package
+    - add lockfile entries for browser-sandbox dependencies
+    - add manual GitHub Actions workflow to build and publish multi-arch `fastgpt-browser-sandbox` images
+    - update the `pro` submodule pointer to include the browser-sandbox service
+
+validation:
+  head_commit: "91d3c276216e5f80603e1caf8b9ef54961fdc88a"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-7017.patch"
+  patch_sha256: "3dc4d50ced114b887a9381ef34e96b179fc39df7ebe2ec9138a7ec83e5bcf19b"
+  changed_files_file: "patches/fastgpt-pr-7017.changed_files.txt"
+  manual_functionality_description: |
+    Check that the browser sandbox service is registered as a workspace package and can be packaged into Docker images.
+    The manual GitHub Actions workflow should build and publish multi-architecture fastgpt-browser-sandbox images, the lockfile/workspace entries should include browser-sandbox dependencies, and the pro submodule pointer should include the browser-sandbox service.

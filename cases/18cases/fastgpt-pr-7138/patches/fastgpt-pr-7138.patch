@@ -1,0 +1,316 @@
+diff --git a/packages/global/core/app/tool/systemTool/type/base.ts b/packages/global/core/app/tool/systemTool/type/base.ts
+index d2a1eb2785a7..6cd30cfe7a7a 100644
+--- a/packages/global/core/app/tool/systemTool/type/base.ts
++++ b/packages/global/core/app/tool/systemTool/type/base.ts
+@@ -68,6 +68,7 @@ export type SystemToolListItemType = z.infer<typeof SystemToolListItemSchema>;
+ export const SystemToolChildDetailSchema = z.object({
+   id: z.string(),
+   name: z.string(),
++  status: PluginStatusSchema.meta({ description: '工具的状态' }),
+   description: z.string().optional(),
+   toolDescription: z.string().optional(),
+   icon: z.string().optional(),
+diff --git a/packages/global/core/workflow/type/node.ts b/packages/global/core/workflow/type/node.ts
+index 38d2fe2c7b8d..1873468f1f53 100644
+--- a/packages/global/core/workflow/type/node.ts
++++ b/packages/global/core/workflow/type/node.ts
+@@ -237,6 +237,7 @@ export const NodeTemplateListItemTypeSchema = z.object({
+   currentCost: NumSchema.optional(), // 当前积分消耗
+   systemKeyCost: NumSchema.optional(), // 系统密钥费用，统一为数字
+   hasTokenFee: BoolSchema.optional(),
++  status: PluginStatusSchema.optional(),
+   instructions: z.string().optional(), // 使用说明
+   courseUrl: z.string().optional(),
+   readmeUrl: z.string().optional(),
+diff --git a/packages/service/core/app/tool/systemTool/systemTool.repo.ts b/packages/service/core/app/tool/systemTool/systemTool.repo.ts
+index 420bff132484..e626ce0028da 100644
+--- a/packages/service/core/app/tool/systemTool/systemTool.repo.ts
++++ b/packages/service/core/app/tool/systemTool/systemTool.repo.ts
+@@ -51,7 +51,14 @@ type SystemToolRuntimeType = {
+ 
+ type SystemToolDisplayChildType = Pick<
+   SystemToolChildDetailType,
+-  'id' | 'name' | 'description' | 'toolDescription' | 'icon' | 'currentCost' | 'systemKeyCost'
++  | 'id'
++  | 'name'
++  | 'status'
++  | 'description'
++  | 'toolDescription'
++  | 'icon'
++  | 'currentCost'
++  | 'systemKeyCost'
+ >;
+ 
+ type SystemToolDisplayInfoType = Pick<
+@@ -292,6 +299,7 @@ export class SystemToolRepo {
+           return {
+             id: item.id,
+             name: parseI18nString(item.name, lang),
++            status: dbChild?.status ?? PluginStatusEnum.Normal,
+             description: parseI18nString(item.description, lang),
+             systemKeyCost: dbChild?.systemKeyCost ?? 0,
+             currentCost: dbChild?.currentCost ?? 0,
+@@ -460,6 +468,7 @@ export class SystemToolRepo {
+         return {
+           id: item.id,
+           name: parseI18nString(item.name, lang),
++          status: childConfig?.status ?? PluginStatusEnum.Normal,
+           description: parseI18nString(item.description, lang),
+           toolDescription: childConfig?.customConfig?.toolDescription ?? item.toolDescription,
+           icon: childIcon,
+diff --git a/projects/app/src/pages/api/core/app/tool/getSystemToolTemplates.ts b/projects/app/src/pages/api/core/app/tool/getSystemToolTemplates.ts
+index f44be7e3b8ee..59359fa50f1c 100644
+--- a/projects/app/src/pages/api/core/app/tool/getSystemToolTemplates.ts
++++ b/projects/app/src/pages/api/core/app/tool/getSystemToolTemplates.ts
+@@ -14,6 +14,7 @@ import {
+   type GetSystemToolTemplatesBodyType
+ } from '@fastgpt/global/openapi/core/app/tool/api';
+ import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
++import { PluginStatusEnum, type PluginStatusType } from '@fastgpt/global/core/plugin/type';
+ 
+ export type GetSystemPluginTemplatesBody = GetSystemToolTemplatesBodyType;
+ 
+@@ -42,24 +43,30 @@ export async function handler(
+       lang,
+       source: 'system'
+     });
++    if (!isSelectableToolStatus(parent.status)) {
++      return GetSystemToolTemplatesResponseSchema.parse([]);
++    }
+ 
+     const childTemplates =
+-      parent.children?.map((child) => ({
+-        ...parent,
+-        templateType: FlowNodeTemplateTypeEnum.tools,
+-        // templateType: tool.isToolSet
+-        //   ? FlowNodeTemplateTypeEnum.tools
+-        //   : FlowNodeTemplateTypeEnum.other,
+-        flowNodeType: FlowNodeTypeEnum.tool,
+-        name: child.name,
+-        intro: child.description,
+-        toolDescription: child.toolDescription,
+-        id: `${parentId}/${child.id}`,
+-        avatar: child.icon ?? parent.avatar,
+-        currentCost: child.currentCost,
+-        systemKeyCost: child.systemKeyCost,
+-        hasTokenFee: parent.hasTokenFee
+-      })) ?? [];
++      parent.children
++        ?.filter((child) => isSelectableToolStatus(child.status))
++        .map((child) => ({
++          ...parent,
++          templateType: FlowNodeTemplateTypeEnum.tools,
++          // templateType: tool.isToolSet
++          //   ? FlowNodeTemplateTypeEnum.tools
++          //   : FlowNodeTemplateTypeEnum.other,
++          flowNodeType: FlowNodeTypeEnum.tool,
++          name: child.name,
++          intro: child.description,
++          toolDescription: child.toolDescription,
++          id: `${parentId}/${child.id}`,
++          avatar: child.icon ?? parent.avatar,
++          currentCost: child.currentCost,
++          systemKeyCost: child.systemKeyCost,
++          hasTokenFee: parent.hasTokenFee,
++          status: child.status
++        })) ?? [];
+ 
+     return GetSystemToolTemplatesResponseSchema.parse(
+       filterTemplatesBySearchKey(childTemplates, searchRegex)
+@@ -74,6 +81,7 @@ export async function handler(
+ 
+   const templates = tools
+     .filter((item) => {
++      if (!isSelectableToolStatus(item.status)) return false;
+       if (isRoot) return true;
+       if (item.hideTags && item.hideTags.some((tag) => userTags.includes(tag))) return false;
+       return true;
+@@ -101,6 +109,13 @@ function getSearchRegex(searchKey?: string) {
+   return new RegExp(replaceRegChars(trimmedSearchKey), 'i');
+ }
+ 
++/**
++ * Agent 工具选择列表只展示仍可新增配置的工具；旧应用中已选中的下线工具由节点/表单卡片继续显示状态。
++ */
++function isSelectableToolStatus(status?: PluginStatusType) {
++  return status === undefined || status === PluginStatusEnum.Normal;
++}
++
+ function filterTemplatesBySearchKey<T extends NodeTemplateListItemType>(
+   templates: T[],
+   searchRegex?: RegExp
+diff --git a/projects/app/test/api/core/app/tool/getSystemToolTemplates.test.ts b/projects/app/test/api/core/app/tool/getSystemToolTemplates.test.ts
+index 8986deacd9d9..f78ddd656247 100644
+--- a/projects/app/test/api/core/app/tool/getSystemToolTemplates.test.ts
++++ b/projects/app/test/api/core/app/tool/getSystemToolTemplates.test.ts
+@@ -1,5 +1,6 @@
+ import { describe, it, expect, vi, beforeEach } from 'vitest';
+ import type { ApiRequestProps } from '@fastgpt/service/type/next';
++import { PluginStatusEnum } from '@fastgpt/global/core/plugin/type';
+ 
+ const mocks = vi.hoisted(() => ({
+   authCert: vi.fn(),
+@@ -59,6 +60,7 @@ describe('get system tool templates handler', () => {
+         intro: 'Forecast lookup',
+         toolDescription: 'Get weather',
+         isToolSet: false,
++        status: PluginStatusEnum.Normal,
+         tags: ['life']
+       },
+       {
+@@ -67,6 +69,7 @@ describe('get system tool templates handler', () => {
+         intro: 'Calculator',
+         toolDescription: 'Compute numbers',
+         isToolSet: false,
++        status: PluginStatusEnum.Normal,
+         tags: ['calc']
+       },
+       {
+@@ -75,6 +78,7 @@ describe('get system tool templates handler', () => {
+         intro: 'Forecast lookup',
+         toolDescription: 'Get weather',
+         isToolSet: false,
++        status: PluginStatusEnum.Normal,
+         tags: ['life'],
+         hideTags: ['hidden-user']
+       }
+@@ -101,10 +105,12 @@ describe('get system tool templates handler', () => {
+       name: 'Toolset',
+       intro: 'Parent intro',
+       avatar: 'parent-icon',
++      status: PluginStatusEnum.Normal,
+       children: [
+         {
+           id: 'plus',
+           name: 'A+B Tool',
++          status: PluginStatusEnum.Normal,
+           description: 'Exact plus',
+           toolDescription: 'Use literal plus',
+           currentCost: 2,
+@@ -113,6 +119,7 @@ describe('get system tool templates handler', () => {
+         {
+           id: 'regex-like',
+           name: 'AxxB Tool',
++          status: PluginStatusEnum.Normal,
+           description: 'Would match an unescaped regex',
+           toolDescription: 'No literal plus',
+           currentCost: 3,
+@@ -142,4 +149,118 @@ describe('get system tool templates handler', () => {
+     });
+     expect(mocks.getSystemToolDetail).not.toHaveBeenCalled();
+   });
++
++  it('filters soon offline and offline tools from root system tool candidates', async () => {
++    mocks.getSystemToolList.mockResolvedValue([
++      {
++        id: 'normal-tool',
++        name: 'Normal Tool',
++        intro: '',
++        toolDescription: '',
++        isToolSet: false,
++        status: PluginStatusEnum.Normal,
++        tags: []
++      },
++      {
++        id: 'soon-offline-tool',
++        name: 'Soon Offline Tool',
++        intro: '',
++        toolDescription: '',
++        isToolSet: false,
++        status: PluginStatusEnum.SoonOffline,
++        tags: []
++      },
++      {
++        id: 'offline-tool',
++        name: 'Offline Tool',
++        intro: '',
++        toolDescription: '',
++        isToolSet: false,
++        status: PluginStatusEnum.Offline,
++        tags: []
++      }
++    ]);
++
++    const result = await handler({
++      body: {}
++    } as ApiRequestProps<GetSystemPluginTemplatesBody>);
++
++    expect(result.map((item) => item.id)).toEqual(['normal-tool']);
++  });
++
++  it('filters unavailable toolset children from system tool candidates', async () => {
++    mocks.getSystemToolDisplayInfo.mockResolvedValue({
++      id: 'toolset',
++      name: 'Toolset',
++      intro: 'Parent intro',
++      avatar: 'parent-icon',
++      status: PluginStatusEnum.Normal,
++      children: [
++        {
++          id: 'normal-child',
++          name: 'Normal Child',
++          status: PluginStatusEnum.Normal,
++          description: '',
++          currentCost: 1,
++          systemKeyCost: 0
++        },
++        {
++          id: 'soon-offline-child',
++          name: 'Soon Offline Child',
++          status: PluginStatusEnum.SoonOffline,
++          description: '',
++          currentCost: 1,
++          systemKeyCost: 0
++        },
++        {
++          id: 'offline-child',
++          name: 'Offline Child',
++          status: PluginStatusEnum.Offline,
++          description: '',
++          currentCost: 1,
++          systemKeyCost: 0
++        }
++      ],
++      hasTokenFee: false
++    });
++
++    const result = await handler({
++      body: {
++        parentId: 'toolset'
++      }
++    } as ApiRequestProps<GetSystemPluginTemplatesBody>);
++
++    expect(result.map((item) => item.id)).toEqual(['toolset/normal-child']);
++    expect(mocks.getSystemToolDetail).not.toHaveBeenCalled();
++  });
++
++  it('returns no children when parent toolset is unavailable', async () => {
++    mocks.getSystemToolDisplayInfo.mockResolvedValue({
++      id: 'toolset',
++      name: 'Toolset',
++      intro: 'Parent intro',
++      avatar: 'parent-icon',
++      status: PluginStatusEnum.Offline,
++      children: [
++        {
++          id: 'normal-child',
++          name: 'Normal Child',
++          status: PluginStatusEnum.Normal,
++          description: '',
++          currentCost: 1,
++          systemKeyCost: 0
++        }
++      ],
++      hasTokenFee: false
++    });
++
++    const result = await handler({
++      body: {
++        parentId: 'toolset'
++      }
++    } as ApiRequestProps<GetSystemPluginTemplatesBody>);
++
++    expect(result).toEqual([]);
++    expect(mocks.getSystemToolDetail).not.toHaveBeenCalled();
++  });
+ });

@@ -1,0 +1,851 @@
+diff --git a/packages/global/core/app/type.ts b/packages/global/core/app/type.ts
+index c2d46f08dc72..34e7eabcd6af 100644
+--- a/packages/global/core/app/type.ts
++++ b/packages/global/core/app/type.ts
+@@ -1,7 +1,6 @@
+ import { StoreNodeItemTypeSchema } from '../workflow/type/node';
+ import { AppTypeEnum } from './constants';
+-import type { NodeInputKeyEnum } from '../workflow/constants';
+-import { VariableInputEnum } from '../workflow/constants';
++import { NodeInputKeyEnum, VariableInputEnum } from '../workflow/constants';
+ import { InputComponentPropsTypeSchema } from '../workflow/type/io';
+ import { DatasetSearchModeEnum } from '../dataset/constants';
+ import type { ReasoningEffort } from '../ai/llm/type';
+@@ -260,6 +259,7 @@ export const AppDatasetSearchParamsTypeSchema = z.object({
+   datasetSearchUsingExtensionQuery: BoolSchema.optional(),
+   datasetSearchExtensionModel: z.string().optional(),
+   datasetSearchExtensionBg: z.string().optional(),
++  [NodeInputKeyEnum.authTmbId]: BoolSchema.optional(),
+ 
+   collectionFilterMatch: z.string().optional()
+ });
+diff --git a/packages/global/core/app/utils.ts b/packages/global/core/app/utils.ts
+index ae61f918dab7..18aa1e47deff 100644
+--- a/packages/global/core/app/utils.ts
++++ b/packages/global/core/app/utils.ts
+@@ -1,5 +1,6 @@
+ import type { AppFormEditFormType } from './formEdit/type';
+ import { DatasetSearchModeEnum } from '../dataset/constants';
++import { NodeInputKeyEnum } from '../workflow/constants';
+ import { type WorkflowTemplateBasicType } from '../workflow/type';
+ import { AppTypeEnum } from './constants';
+ import appErrList from '../../common/error/code/app';
+@@ -21,7 +22,8 @@ export const getDefaultAppForm = (): AppFormEditFormType => {
+       rerankModel: '',
+       rerankWeight: 0.5,
+       datasetSearchUsingExtensionQuery: true,
+-      datasetSearchExtensionBg: ''
++      datasetSearchExtensionBg: '',
++      [NodeInputKeyEnum.authTmbId]: false
+     },
+     selectedTools: [],
+     selectedAgentSkills: [],
+diff --git a/packages/global/test/core/app/utils.test.ts b/packages/global/test/core/app/utils.test.ts
+index 7374fabc47df..9285d3184d5f 100644
+--- a/packages/global/test/core/app/utils.test.ts
++++ b/packages/global/test/core/app/utils.test.ts
+@@ -35,7 +35,8 @@ describe('getDefaultAppForm', () => {
+       rerankModel: '',
+       rerankWeight: 0.5,
+       datasetSearchUsingExtensionQuery: true,
+-      datasetSearchExtensionBg: ''
++      datasetSearchExtensionBg: '',
++      authTmbId: false
+     });
+   });
+ 
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/adapter/userContext.ts b/packages/service/core/workflow/dispatch/ai/agent/adapter/userContext.ts
+index 22b75bceb347..7a292f4a97a7 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/adapter/userContext.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/adapter/userContext.ts
+@@ -163,15 +163,18 @@ export function buildCurrentAgentInputFiles({
+  */
+ export const loadAgentDatasetContext = async (
+   selectedDataset: AgentSelectedDatasetInput[] = [],
+-  tmbId: string
++  tmbId: string,
++  authTmbId = false
+ ): Promise<AgentSelectedDatasetContext[]> => {
+   if (selectedDataset.length === 0) return [];
+ 
+   const datasetIds = selectedDataset.map((item) => item.datasetId);
+-  const authorizedDatasetIds = await filterDatasetsByTmbId({
+-    datasetIds,
+-    tmbId
+-  });
++  const authorizedDatasetIds = authTmbId
++    ? await filterDatasetsByTmbId({
++        datasetIds,
++        tmbId
++      })
++    : datasetIds;
+   if (authorizedDatasetIds.length === 0) return [];
+ 
+   const datasets = await MongoDataset.find(
+@@ -345,6 +348,7 @@ export const useUserContext = async ({
+   requestOrigin,
+   maxFiles,
+   selectedDataset,
++  authTmbId,
+   tmbId,
+   timezone
+ }: {
+@@ -357,6 +361,7 @@ export const useUserContext = async ({
+   requestOrigin?: string;
+   maxFiles: number;
+   selectedDataset?: AgentSelectedDatasetInput[];
++  authTmbId?: boolean;
+   tmbId: string;
+   timezone: string;
+ }): Promise<UseUserContextResult> => {
+@@ -433,7 +438,7 @@ export const useUserContext = async ({
+   registerFiles(currentInputFiles);
+ 
+   // 获取知识库
+-  const selectedDatasetWithIntro = await loadAgentDatasetContext(selectedDataset, tmbId);
++  const selectedDatasetWithIntro = await loadAgentDatasetContext(selectedDataset, tmbId, authTmbId);
+ 
+   return {
+     chatHistories,
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/index.ts b/packages/service/core/workflow/dispatch/ai/agent/index.ts
+index 7c7797d93929..10e9aa489423 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/index.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/index.ts
+@@ -15,7 +15,7 @@ import { SANDBOX_SYSTEM_PROMPT } from '@fastgpt/global/core/ai/sandbox/constants
+ import type { SkillToolType } from '@fastgpt/global/core/ai/skill/type';
+ import type { ReasoningEffort } from '@fastgpt/global/core/ai/llm/type';
+ import type { SelectedAgentSkillItemType } from '@fastgpt/global/core/app/formEdit/type';
+-import { getSubapps } from './utils';
++import { getAgentDatasetParams, getSubapps } from './utils';
+ import { parseUserSystemPrompt } from './adapter/prompt';
+ import { useUserContext } from './adapter/userContext';
+ import type { AppFormEditFormType } from '@fastgpt/global/core/app/formEdit/type';
+@@ -57,6 +57,18 @@ export type DispatchAgentModuleProps = ModuleDispatchProps<{
+   [NodeInputKeyEnum.editSkillId]?: string;
+ 
+   [NodeInputKeyEnum.datasetParams]?: AppFormEditFormType['dataset'];
++  [NodeInputKeyEnum.datasetSelectList]?: AppFormEditFormType['dataset']['datasets'];
++  [NodeInputKeyEnum.datasetSimilarity]?: number;
++  [NodeInputKeyEnum.datasetMaxTokens]?: number;
++  [NodeInputKeyEnum.datasetSearchMode]?: AppFormEditFormType['dataset']['searchMode'];
++  [NodeInputKeyEnum.datasetSearchEmbeddingWeight]?: number;
++  [NodeInputKeyEnum.datasetSearchUsingReRank]?: boolean;
++  [NodeInputKeyEnum.datasetSearchRerankModel]?: string;
++  [NodeInputKeyEnum.datasetSearchRerankWeight]?: number;
++  [NodeInputKeyEnum.datasetSearchUsingExtensionQuery]?: boolean;
++  [NodeInputKeyEnum.datasetSearchExtensionModel]?: string;
++  [NodeInputKeyEnum.datasetSearchExtensionBg]?: string;
++  [NodeInputKeyEnum.authTmbId]?: boolean;
+   [NodeInputKeyEnum.useAgentSandbox]?: boolean;
+ }> & {
+   nodeResponseWriter?: WorkflowNodeResponseWriter;
+@@ -132,12 +144,12 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+       agent_selectedTools: selectedTools = [],
+       skills: selectedSkills = [],
+       editSkillId,
+-      agent_datasetParams: datasetParams,
+       useAgentSandbox = false,
+       model,
+       aiChatReasoning
+     }
+   } = props;
++  const datasetParams = getAgentDatasetParams(props.params);
+   const agentModel = getLLMModel(model);
+   props.params.aiChatVision = !!(props.params.aiChatVision && agentModel.vision);
+   props.params.aiChatAudio = !!(props.params.aiChatAudio && agentModel.audio);
+@@ -167,6 +179,7 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+       currentQuery: query,
+       currentDataId: responseChatItemId,
+       selectedDataset: datasetParams?.datasets,
++      authTmbId: datasetParams?.authTmbId,
+       tmbId: runningUserInfo.tmbId,
+       timezone,
+       requestOrigin,
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/piAgent/index.ts b/packages/service/core/workflow/dispatch/ai/agent/piAgent/index.ts
+index 0103b8218613..d250bbadb6d6 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/piAgent/index.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/piAgent/index.ts
+@@ -16,7 +16,7 @@ import type { DispatchAgentModuleProps } from '..';
+ import { parseUserSystemPrompt } from '../adapter/prompt';
+ import { useUserContext } from '../adapter/userContext';
+ import { useSandbox } from '../sub/sandbox';
+-import { getSubapps, type ToolDispatchContext } from '../utils';
++import { getAgentDatasetParams, getSubapps, type ToolDispatchContext } from '../utils';
+ import {
+   createPiAgentWorkflowRuntime,
+   normalizePiAgentMessages,
+@@ -59,13 +59,13 @@ export const dispatchPiAgent = async (props: DispatchAgentModuleProps): Promise<
+       agent_selectedTools: selectedTools = [],
+       skills: selectedSkills = [],
+       editSkillId,
+-      agent_datasetParams: datasetParams,
+       useAgentSandbox = false,
+       aiChatVision,
+       aiChatReasoning,
+       aiChatReasoningEffort
+     }
+   } = props;
++  const datasetParams = getAgentDatasetParams(props.params);
+ 
+   const piMessagesKey = `piMessages-${nodeId}`;
+ 
+@@ -121,6 +121,7 @@ export const dispatchPiAgent = async (props: DispatchAgentModuleProps): Promise<
+       currentQuery: query,
+       currentDataId: responseChatItemId,
+       selectedDataset: datasetParams?.datasets,
++      authTmbId: datasetParams?.authTmbId,
+       tmbId: runningUserInfo.tmbId,
+       timezone,
+       requestOrigin,
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/sub/dataset/index.ts b/packages/service/core/workflow/dispatch/ai/agent/sub/dataset/index.ts
+index 0529358fb068..ed8152ddd135 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/sub/dataset/index.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/sub/dataset/index.ts
+@@ -25,6 +25,7 @@ import {
+   createChunkSelectionChildNodeResponse,
+   createQueryExtensionChildNodeResponse
+ } from '../../../../dataset/nodeResponse';
++import { filterDatasetsByTmbId } from '../../../../../../dataset/utils';
+ const logger = getLogger(LogCategories.MODULE.AI.AGENT);
+ 
+ type DatasetSearchParams = {
+@@ -162,6 +163,7 @@ export const dispatchAgentDatasetSearch = async ({
+   args,
+   datasetParams,
+   teamId,
++  tmbId,
+   llmModel,
+   userKey
+ }: DatasetSearchParams): Promise<DispatchSubAppResponse> => {
+@@ -192,7 +194,18 @@ export const dispatchAgentDatasetSearch = async ({
+   });
+ 
+   try {
+-    const datasetIds = await Promise.resolve(datasetParams.datasets.map((item) => item.datasetId));
++    const datasetIds = datasetParams.authTmbId
++      ? await filterDatasetsByTmbId({
++          datasetIds: datasetParams.datasets.map((item) => item.datasetId),
++          tmbId
++        })
++      : datasetParams.datasets.map((item) => item.datasetId);
++
++    if (datasetIds.length === 0) {
++      return {
++        response: 'No authorized dataset selected'
++      };
++    }
+ 
+     // Get vector model
+     const vectorModel = getEmbeddingModel(
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/utils.ts b/packages/service/core/workflow/dispatch/ai/agent/utils.ts
+index 8e8c7be72c6e..efb872b669dd 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/utils.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/utils.ts
+@@ -13,6 +13,7 @@ import type { DispatchAgentModuleProps } from '.';
+ import { dispatchAgentDatasetSearch } from './sub/dataset';
+ import { dispatchSandboxTool } from './sub/sandbox';
+ import { FlowNodeTypeEnum } from '@fastgpt/global/core/workflow/node/constant';
++import { NodeInputKeyEnum } from '@fastgpt/global/core/workflow/constants';
+ import { parseJsonArgs } from '../../../../ai/utils';
+ import { getErrText } from '@fastgpt/global/common/error/utils';
+ import { dispatchTool } from './sub/tool';
+@@ -21,6 +22,8 @@ import { dispatchApp, dispatchPlugin } from './sub/app';
+ import type { SandboxClient } from '../../../../ai/sandbox/service/runtime';
+ import { SystemToolRepo } from '../../../../app/tool/systemTool/systemTool.repo';
+ import type { WorkflowNodeResponseWriter } from '../../../../chat/nodeResponseStorage';
++import type { AppFormEditFormType } from '@fastgpt/global/core/app/formEdit/type';
++import { DatasetSearchModeEnum } from '@fastgpt/global/core/dataset/constants';
+ 
+ /**
+  * 收集 Agent 节点可用的系统工具和用户选择的子应用工具。
+@@ -162,6 +165,38 @@ export const replaceAgentFileIdsWithUrls = <T>(value: T, fileUrlMap: Record<stri
+   return replaceValue(value) as T;
+ };
+ 
++/**
++ * 统一 Agent 的知识库配置来源。
++ *
++ * ChatAgent 保存的是 agent_datasetParams；Workflow Agent 节点模板保存的是
++ * datasets/similarity/authTmbId 等独立输入。runtime 内部收敛成 datasetParams，
++ * 保证上下文提示、工具暴露和真实检索使用同一组知识库权限配置。
++ */
++export const getAgentDatasetParams = (
++  params: DispatchAgentModuleProps['params']
++): AppFormEditFormType['dataset'] | undefined => {
++  const datasetParams = params[NodeInputKeyEnum.datasetParams];
++  if (datasetParams) return datasetParams;
++
++  const datasets = params[NodeInputKeyEnum.datasetSelectList];
++  if (!Array.isArray(datasets) || datasets.length === 0) return;
++
++  return {
++    datasets,
++    similarity: params[NodeInputKeyEnum.datasetSimilarity],
++    limit: params[NodeInputKeyEnum.datasetMaxTokens],
++    searchMode: params[NodeInputKeyEnum.datasetSearchMode] || DatasetSearchModeEnum.embedding,
++    embeddingWeight: params[NodeInputKeyEnum.datasetSearchEmbeddingWeight],
++    usingReRank: params[NodeInputKeyEnum.datasetSearchUsingReRank],
++    rerankModel: params[NodeInputKeyEnum.datasetSearchRerankModel],
++    rerankWeight: params[NodeInputKeyEnum.datasetSearchRerankWeight],
++    datasetSearchUsingExtensionQuery: params[NodeInputKeyEnum.datasetSearchUsingExtensionQuery],
++    datasetSearchExtensionModel: params[NodeInputKeyEnum.datasetSearchExtensionModel],
++    datasetSearchExtensionBg: params[NodeInputKeyEnum.datasetSearchExtensionBg],
++    [NodeInputKeyEnum.authTmbId]: params[NodeInputKeyEnum.authTmbId]
++  };
++};
++
+ /**
+  * 创建 workflow 工具执行器。
+  * 该执行器屏蔽工具来源差异，将沙盒、文件读取、知识库搜索和用户子应用统一成 agentLoop 可消费的工具结果。
+@@ -183,11 +218,7 @@ export const getExecuteTool = ({
+   variableState,
+   externalProvider,
+   streamResponseFn,
+-  params: {
+-    model,
+-    // Dataset search configuration
+-    agent_datasetParams: datasetParams
+-  },
++  params,
+   lang,
+   requestOrigin,
+   mode,
+@@ -197,6 +228,9 @@ export const getExecuteTool = ({
+   workflowDispatchDeep,
+   nodeResponseWriter
+ }: ToolDispatchContext) => {
++  const { model } = params;
++  const datasetParams = getAgentDatasetParams(params);
++
+   /**
+    * 执行单次工具调用，并补齐节点响应的 id、运行时间和计费信息。
+    */
+diff --git a/packages/service/test/core/workflow/dispatch/ai/agent/adapter/userContext.test.ts b/packages/service/test/core/workflow/dispatch/ai/agent/adapter/userContext.test.ts
+index f6df0fdad58e..1c6429318d8b 100644
+--- a/packages/service/test/core/workflow/dispatch/ai/agent/adapter/userContext.test.ts
++++ b/packages/service/test/core/workflow/dispatch/ai/agent/adapter/userContext.test.ts
+@@ -466,6 +466,7 @@ describe('useUserContext', () => {
+   });
+ 
+   it('loads dataset name and description from backend when selected state only keeps id', async () => {
++    vi.mocked(filterDatasetsByTmbId).mockClear();
+     vi.mocked(MongoDataset.find).mockReturnValueOnce({
+       lean: vi.fn(async () => [
+         {
+@@ -497,10 +498,7 @@ describe('useUserContext', () => {
+           maxFiles: 20
+         });
+ 
+-        expect(filterDatasetsByTmbId).toHaveBeenCalledWith({
+-          datasetIds: ['dataset_1'],
+-          tmbId: 'tmb_1'
+-        });
++        expect(filterDatasetsByTmbId).not.toHaveBeenCalled();
+         expect(MongoDataset.find).toHaveBeenCalledWith(
+           {
+             _id: {
+@@ -519,6 +517,7 @@ describe('useUserContext', () => {
+   });
+ 
+   it('filters unauthorized datasets before loading backend metadata', async () => {
++    vi.mocked(filterDatasetsByTmbId).mockClear();
+     vi.mocked(filterDatasetsByTmbId).mockResolvedValueOnce(['dataset_1']);
+     vi.mocked(MongoDataset.find).mockReturnValueOnce({
+       lean: vi.fn(async () => [
+@@ -549,11 +548,16 @@ describe('useUserContext', () => {
+               datasetId: 'dataset_2'
+             }
+           ],
++          authTmbId: true,
+           tmbId: 'tmb_1',
+           timezone: 'Asia/Shanghai',
+           maxFiles: 20
+         });
+ 
++        expect(filterDatasetsByTmbId).toHaveBeenCalledWith({
++          datasetIds: ['dataset_1', 'dataset_2'],
++          tmbId: 'tmb_1'
++        });
+         expect(MongoDataset.find).toHaveBeenCalledWith(
+           {
+             _id: {
+diff --git a/packages/service/test/core/workflow/dispatch/ai/agent/sub/dataset.test.ts b/packages/service/test/core/workflow/dispatch/ai/agent/sub/dataset.test.ts
+index c00e558ec5a0..bfae190c2964 100644
+--- a/packages/service/test/core/workflow/dispatch/ai/agent/sub/dataset.test.ts
++++ b/packages/service/test/core/workflow/dispatch/ai/agent/sub/dataset.test.ts
+@@ -6,12 +6,14 @@ const {
+   countPromptTokensMock,
+   createLLMResponseMock,
+   defaultSearchDatasetDataMock,
++  filterDatasetsByTmbIdMock,
+   findDatasetByIdMock,
+   formatModelChars2PointsMock
+ } = vi.hoisted(() => ({
+   countPromptTokensMock: vi.fn(),
+   createLLMResponseMock: vi.fn(),
+   defaultSearchDatasetDataMock: vi.fn(),
++  filterDatasetsByTmbIdMock: vi.fn(),
+   findDatasetByIdMock: vi.fn(),
+   formatModelChars2PointsMock: vi.fn()
+ }));
+@@ -26,6 +28,10 @@ vi.mock('@fastgpt/service/core/dataset/schema', () => ({
+   }
+ }));
+ 
++vi.mock('@fastgpt/service/core/dataset/utils', () => ({
++  filterDatasetsByTmbId: filterDatasetsByTmbIdMock
++}));
++
+ vi.mock('@fastgpt/service/core/ai/model', () => ({
+   getEmbeddingModel: vi.fn(() => ({
+     model: 'embedding-model',
+@@ -67,6 +73,7 @@ describe('dispatchAgentDatasetSearch', () => {
+         vectorModel: 'embedding-model'
+       })
+     });
++    filterDatasetsByTmbIdMock.mockImplementation(async ({ datasetIds }) => datasetIds);
+     countPromptTokensMock.mockResolvedValue(100);
+     createLLMResponseMock.mockResolvedValue({
+       answerText: '[chunk_2]',
+@@ -331,4 +338,59 @@ describe('dispatchAgentDatasetSearch', () => {
+     );
+     expect(result.nodeResponse?.datasetQueries).toEqual(['legacy query']);
+   });
++
++  it('filters dataset ids by tmbId when dataset auth is enabled', async () => {
++    filterDatasetsByTmbIdMock.mockResolvedValueOnce(['dataset_2']);
++    defaultSearchDatasetDataMock.mockResolvedValue({
++      searchRes: [],
++      embeddingTokens: 0,
++      reRankInputTokens: 0,
++      usingSimilarityFilter: true,
++      usingReRank: false
++    });
++
++    await dispatchAgentDatasetSearch({
++      args: JSON.stringify({ query: ['origin'] }),
++      teamId: 'team_1',
++      tmbId: 'tmb_1',
++      llmModel: 'gpt-main',
++      datasetParams: {
++        datasets: [{ datasetId: 'dataset_1' }, { datasetId: 'dataset_2' }],
++        searchMode: DatasetSearchModeEnum.embedding,
++        authTmbId: true
++      } as any
++    });
++
++    expect(filterDatasetsByTmbIdMock).toHaveBeenCalledWith({
++      datasetIds: ['dataset_1', 'dataset_2'],
++      tmbId: 'tmb_1'
++    });
++    expect(defaultSearchDatasetDataMock).toHaveBeenCalledWith(
++      expect.objectContaining({
++        datasetIds: ['dataset_2']
++      })
++    );
++  });
++
++  it('stops dataset search when auth filtering removes all datasets', async () => {
++    filterDatasetsByTmbIdMock.mockResolvedValueOnce([]);
++
++    const result = await dispatchAgentDatasetSearch({
++      args: JSON.stringify({ query: ['origin'] }),
++      teamId: 'team_1',
++      tmbId: 'tmb_1',
++      llmModel: 'gpt-main',
++      datasetParams: {
++        datasets: [{ datasetId: 'dataset_1' }],
++        searchMode: DatasetSearchModeEnum.embedding,
++        authTmbId: true
++      } as any
++    });
++
++    expect(result).toEqual({
++      response: 'No authorized dataset selected'
++    });
++    expect(findDatasetByIdMock).not.toHaveBeenCalled();
++    expect(defaultSearchDatasetDataMock).not.toHaveBeenCalled();
++  });
+ });
+diff --git a/packages/service/test/core/workflow/dispatch/ai/agent/utils.test.ts b/packages/service/test/core/workflow/dispatch/ai/agent/utils.test.ts
+index bea4cc45e1e7..e5094496e96a 100644
+--- a/packages/service/test/core/workflow/dispatch/ai/agent/utils.test.ts
++++ b/packages/service/test/core/workflow/dispatch/ai/agent/utils.test.ts
+@@ -1,6 +1,7 @@
+ import { beforeEach, describe, expect, it, vi } from 'vitest';
+ import { SubAppIds } from '@fastgpt/global/core/workflow/node/agent/constants';
+ import {
++  getAgentDatasetParams,
+   getSubapps,
+   getExecuteTool,
+   replaceAgentFileIdsWithUrls
+@@ -414,7 +415,103 @@ describe('Agent read_files tool protocol', () => {
+ 
+     expect(dispatchAgentDatasetSearchMock).toHaveBeenCalledWith(
+       expect.objectContaining({
+-        userKey
++        userKey,
++        datasetParams: {
++          datasets: [{ datasetId: 'dataset_1' }]
++        }
++      })
++    );
++  });
++
++  it('normalizes workflow agent dataset inputs for dataset search tool', async () => {
++    dispatchAgentDatasetSearchMock.mockResolvedValue({
++      response: 'dataset content',
++      usages: [],
++      nodeResponse: {
++        moduleName: 'Dataset Search'
++      }
++    });
++
++    const params = {
++      model: 'gpt-4',
++      datasets: [{ datasetId: 'dataset_1' }],
++      similarity: 0.55,
++      limit: 1800,
++      searchMode: 'mixedRecall',
++      embeddingWeight: 0.65,
++      usingReRank: true,
++      rerankModel: 'rerank-model',
++      rerankWeight: 0.4,
++      datasetSearchUsingExtensionQuery: true,
++      datasetSearchExtensionModel: 'query-model',
++      datasetSearchExtensionBg: 'query bg',
++      authTmbId: true
++    };
++
++    expect(getAgentDatasetParams(params as any)).toEqual({
++      datasets: [{ datasetId: 'dataset_1' }],
++      similarity: 0.55,
++      limit: 1800,
++      searchMode: 'mixedRecall',
++      embeddingWeight: 0.65,
++      usingReRank: true,
++      rerankModel: 'rerank-model',
++      rerankWeight: 0.4,
++      datasetSearchUsingExtensionQuery: true,
++      datasetSearchExtensionModel: 'query-model',
++      datasetSearchExtensionBg: 'query bg',
++      authTmbId: true
++    });
++
++    const executeTool = getExecuteTool({
++      checkIsStopping: vi.fn(),
++      chatConfig: {},
++      runningUserInfo: {
++        teamId: 'team_1',
++        tmbId: 'tmb_1'
++      },
++      runningAppInfo: {
++        id: 'app_1'
++      },
++      chatId: 'chat_1',
++      uid: 'user_1',
++      variableState: {} as any,
++      externalProvider: {
++        openaiAccount: undefined
++      } as any,
++      lang: 'zh-CN',
++      requestOrigin: '',
++      mode: 'chat',
++      timezone: 'Asia/Shanghai',
++      retainDatasetCite: false,
++      maxRunTimes: 10,
++      workflowDispatchDeep: 0,
++      params,
++      stream: false,
++      getSubAppInfo: () => ({
++        name: 'Dataset Search',
++        avatar: '',
++        toolDescription: ''
++      }),
++      getSubApp: () => undefined,
++      completionTools: [],
++      filesMap: {}
++    } as any);
++
++    await executeTool({
++      callId: 'call_dataset_search',
++      toolId: SubAppIds.datasetSearch,
++      args: '{"query":["FastGPT"]}'
++    });
++
++    expect(dispatchAgentDatasetSearchMock).toHaveBeenCalledWith(
++      expect.objectContaining({
++        teamId: 'team_1',
++        tmbId: 'tmb_1',
++        datasetParams: expect.objectContaining({
++          datasets: [{ datasetId: 'dataset_1' }],
++          authTmbId: true
++        })
+       })
+     );
+   });
+diff --git a/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/EditForm.tsx b/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/EditForm.tsx
+index b7786c584f9e..77662abd0855 100644
+--- a/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/EditForm.tsx
++++ b/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/EditForm.tsx
+@@ -438,6 +438,26 @@ const EditForm = ({
+               <MyIcon name={'core/app/simpleMode/dataset'} w={'20px'} />
+               <FormLabel ml={2}>{t('app:dataset')}</FormLabel>
+             </Flex>
++            <Flex alignItems={'center'} mr={2}>
++              <Box fontSize={'sm'} color={'myGray.600'} whiteSpace={'nowrap'}>
++                {t('workflow:auth_tmb_id')}
++              </Box>
++              <QuestionTip ml={1} label={t('workflow:auth_tmb_id_tip')} />
++              <Switch
++                ml={2}
++                size={'sm'}
++                isChecked={!!appForm.dataset.authTmbId}
++                onChange={(e) => {
++                  setAppForm((state) => ({
++                    ...state,
++                    dataset: {
++                      ...state.dataset,
++                      authTmbId: e.target.checked
++                    }
++                  }));
++                }}
++              />
++            </Flex>
+             <Button
+               variant={'transparentBase'}
+               leftIcon={<MyIcon name={'edit'} w={'14px'} />}
+diff --git a/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/utils.ts b/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/utils.ts
+index 79f9800de89c..950d0433af2b 100644
+--- a/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/utils.ts
++++ b/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/utils.ts
+@@ -333,7 +333,8 @@ export function agentForm2AppWorkflow(
+                 rerankWeight: data.dataset.rerankWeight,
+                 datasetSearchUsingExtensionQuery: data.dataset.datasetSearchUsingExtensionQuery,
+                 datasetSearchExtensionModel: data.dataset.datasetSearchExtensionModel,
+-                datasetSearchExtensionBg: data.dataset.datasetSearchExtensionBg
++                datasetSearchExtensionBg: data.dataset.datasetSearchExtensionBg,
++                [NodeInputKeyEnum.authTmbId]: data.dataset.authTmbId
+               })
+             },
+             // agent sandbox
+diff --git a/projects/app/src/pageComponents/app/detail/Edit/SimpleApp/EditForm.tsx b/projects/app/src/pageComponents/app/detail/Edit/SimpleApp/EditForm.tsx
+index 0f16f56d1715..f9fad26a61a9 100644
+--- a/projects/app/src/pageComponents/app/detail/Edit/SimpleApp/EditForm.tsx
++++ b/projects/app/src/pageComponents/app/detail/Edit/SimpleApp/EditForm.tsx
+@@ -320,6 +320,26 @@ const EditForm = ({
+               <MyIcon name={'core/app/simpleMode/dataset'} w={'20px'} />
+               <FormLabel ml={2}>{t('app:dataset')}</FormLabel>
+             </Flex>
++            <Flex alignItems={'center'} mr={2}>
++              <Box fontSize={'sm'} color={'myGray.600'} whiteSpace={'nowrap'}>
++                {t('workflow:auth_tmb_id')}
++              </Box>
++              <QuestionTip ml={1} label={t('workflow:auth_tmb_id_tip')} />
++              <Switch
++                ml={2}
++                size={'sm'}
++                isChecked={!!appForm.dataset.authTmbId}
++                onChange={(e) => {
++                  setAppForm((state) => ({
++                    ...state,
++                    dataset: {
++                      ...state.dataset,
++                      authTmbId: e.target.checked
++                    }
++                  }));
++                }}
++              />
++            </Flex>
+             <Button
+               variant={'transparentBase'}
+               leftIcon={<MyIcon name={'edit'} w={'14px'} />}
+diff --git a/projects/app/src/pageComponents/app/detail/Edit/SimpleApp/utils.ts b/projects/app/src/pageComponents/app/detail/Edit/SimpleApp/utils.ts
+index d9539a70ebc7..5727e6e3627b 100644
+--- a/projects/app/src/pageComponents/app/detail/Edit/SimpleApp/utils.ts
++++ b/projects/app/src/pageComponents/app/detail/Edit/SimpleApp/utils.ts
+@@ -152,6 +152,10 @@ export const appWorkflow2Form = ({
+         node.inputs,
+         NodeInputKeyEnum.datasetSearchExtensionBg
+       );
++      defaultAppForm.dataset.authTmbId = findInputValueByKey(
++        node.inputs,
++        NodeInputKeyEnum.authTmbId
++      );
+     } else if (
+       node.flowNodeType === FlowNodeTypeEnum.pluginModule ||
+       node.flowNodeType === FlowNodeTypeEnum.appModule ||
+@@ -519,6 +523,13 @@ export function form2AppWorkflow(
+           valueType: WorkflowIOValueTypeEnum.string,
+           value: formData.dataset.datasetSearchExtensionBg
+         },
++        {
++          key: NodeInputKeyEnum.authTmbId,
++          renderTypeList: [FlowNodeInputTypeEnum.hidden],
++          label: '',
++          valueType: WorkflowIOValueTypeEnum.boolean,
++          value: formData.dataset.authTmbId
++        },
+         {
+           ...Input_Template_UserChatInput,
+           key: NodeInputKeyEnum.datasetSearchInput,
+diff --git a/projects/app/src/pageComponents/app/detail/WorkflowComponents/Flow/nodes/NodeAgent/index.tsx b/projects/app/src/pageComponents/app/detail/WorkflowComponents/Flow/nodes/NodeAgent/index.tsx
+index 907fd70160e4..79dca3d4c371 100644
+--- a/projects/app/src/pageComponents/app/detail/WorkflowComponents/Flow/nodes/NodeAgent/index.tsx
++++ b/projects/app/src/pageComponents/app/detail/WorkflowComponents/Flow/nodes/NodeAgent/index.tsx
+@@ -47,6 +47,7 @@ import { RechargeModal } from '@/components/support/wallet/NotSufficientModal';
+ import { useToast } from '@fastgpt/web/hooks/useToast';
+ import MyTag from '@fastgpt/web/components/common/Tag/index';
+ import DatasetCard from '@/components/core/app/DatasetCard';
++import QuestionTip from '@fastgpt/web/components/common/MyTooltip/QuestionTip';
+ 
+ const PromptEditor = dynamic(() => import('@fastgpt/web/components/common/Textarea/PromptEditor'));
+ const SkillSelectModal = dynamic(
+@@ -313,10 +314,15 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
+         (i) =>
+           i.key !== NodeInputKeyEnum.datasetSelectList &&
+           i.key !== NodeInputKeyEnum.datasetParams &&
+-          i.key !== NodeInputKeyEnum.datasetSimilarity
++          i.key !== NodeInputKeyEnum.datasetSimilarity &&
++          i.key !== NodeInputKeyEnum.authTmbId
+       ),
+     [datasetInputs]
+   );
++  const authTmbIdInput = useMemo(
++    () => datasetInputs.find((i) => i.key === NodeInputKeyEnum.authTmbId),
++    [datasetInputs]
++  );
+ 
+   // ---- Dataset select render type (for mode switch) ----
+   const datasetSelectRenderType = useMemo(
+@@ -336,6 +342,21 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
+     },
+     [datasetSelectInput, nodeId, onChangeNode]
+   );
++  const onChangeAuthTmbId = useCallback(
++    (checked: boolean) => {
++      if (!authTmbIdInput) return;
++      onChangeNode({
++        nodeId,
++        type: 'updateInput',
++        key: NodeInputKeyEnum.authTmbId,
++        value: {
++          ...authTmbIdInput,
++          value: checked
++        }
++      });
++    },
++    [authTmbIdInput, nodeId, onChangeNode]
++  );
+ 
+   // ---- Prompt ----
+   const onPromptChange = useCallback(
+@@ -824,6 +845,20 @@ const NodeAgent = ({ data, selected }: NodeProps<FlowNodeItemType>) => {
+           <Box mb={5}>
+             <Flex className="nodrag" cursor={'default'} alignItems={'center'}>
+               <FormLabel color={'myGray.600'}>{t('common:core.dataset.Dataset')}</FormLabel>
++              {authTmbIdInput && (
++                <Flex ml={2} alignItems={'center'}>
++                  <Box fontSize={'sm'} color={'myGray.600'} whiteSpace={'nowrap'}>
++                    {t('workflow:auth_tmb_id')}
++                  </Box>
++                  <QuestionTip ml={1} label={t('workflow:auth_tmb_id_tip')} />
++                  <Switch
++                    ml={1}
++                    size={'sm'}
++                    isChecked={!!authTmbIdInput.value}
++                    onChange={(e) => onChangeAuthTmbId(e.target.checked)}
++                  />
++                </Flex>
++              )}
+               {datasetSelectInput.renderTypeList &&
+                 datasetSelectInput.renderTypeList.length > 1 && (
+                   <Box ml={2}>
+diff --git a/projects/app/test/web/core/app/utils.test.ts b/projects/app/test/web/core/app/utils.test.ts
+index a38a97906006..ab1d9783d545 100644
+--- a/projects/app/test/web/core/app/utils.test.ts
++++ b/projects/app/test/web/core/app/utils.test.ts
+@@ -1,6 +1,9 @@
+ import { describe, expect, it } from 'vitest';
+ import { filterSensitiveFormData, getAppQGuideCustomURL } from '@/web/core/app/utils';
+-import { form2AppWorkflow } from '@/pageComponents/app/detail/Edit/SimpleApp/utils';
++import {
++  appWorkflow2Form,
++  form2AppWorkflow
++} from '@/pageComponents/app/detail/Edit/SimpleApp/utils';
+ import {
+   agentForm2AppWorkflow,
+   appWorkflow2AgentForm
+@@ -109,6 +112,41 @@ describe('form2AppWorkflow', () => {
+       )
+     ).toBe(true);
+   });
++
++  it('should roundtrip dataset auth setting through dataset search node', () => {
++    const form = getDefaultAppForm();
++    form.aiSettings = {
++      [NodeInputKeyEnum.aiModel]: 'gpt-3.5',
++      [NodeInputKeyEnum.aiSystemPrompt]: 'You are a helpful assistant',
++      maxHistories: 5,
++      [NodeInputKeyEnum.aiChatIsResponseText]: true
++    };
++    form.dataset.datasets = [
++      {
++        datasetId: 'dataset1',
++        avatar: '',
++        name: 'Test Dataset',
++        vectorModel: { model: 'text-embedding-ada-002' } as any
++      }
++    ];
++    form.dataset.authTmbId = true;
++
++    const workflow = form2AppWorkflow(form, mockT);
++    const datasetNode = workflow.nodes.find(
++      (node) => node.flowNodeType === FlowNodeTypeEnum.datasetSearchNode
++    );
++
++    expect(
++      datasetNode?.inputs.find((input) => input.key === NodeInputKeyEnum.authTmbId)?.value
++    ).toBe(true);
++
++    const restored = appWorkflow2Form({
++      nodes: workflow.nodes,
++      chatConfig: workflow.chatConfig
++    });
++
++    expect(restored.dataset.authTmbId).toBe(true);
++  });
+ });
+ 
+ describe('filterSensitiveFormData', () => {
+@@ -304,4 +342,30 @@ describe('appWorkflow2AgentForm', () => {
+     expect(restored.aiSettings.aiChatReasoning).toBe(false);
+     expect(restored.aiSettings.aiChatReasoningEffort).toBe('high');
+   });
++
++  it('should persist dataset auth setting in agent dataset params', () => {
++    const form = getDefaultAppForm();
++    form.aiSettings = {
++      [NodeInputKeyEnum.aiModel]: 'qwen-3.6-flash',
++      [NodeInputKeyEnum.aiSystemPrompt]: 'You are a helpful agent.',
++      maxHistories: 6,
++      [NodeInputKeyEnum.aiChatIsResponseText]: true
++    };
++    form.dataset.authTmbId = true;
++
++    const workflow = agentForm2AppWorkflow(form, mockT);
++    const agentNode = workflow.nodes.find((node) => node.flowNodeType === FlowNodeTypeEnum.agent);
++
++    expect(
++      agentNode?.inputs.find((input) => input.key === NodeInputKeyEnum.datasetParams)?.value
++        ?.authTmbId
++    ).toBe(true);
++
++    const restored = appWorkflow2AgentForm({
++      nodes: workflow.nodes,
++      chatConfig: workflow.chatConfig
++    });
++
++    expect(restored.dataset.authTmbId).toBe(true);
++  });
+ });

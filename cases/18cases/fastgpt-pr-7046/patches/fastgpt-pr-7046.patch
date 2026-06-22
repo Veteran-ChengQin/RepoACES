@@ -1,0 +1,38 @@
+diff --git a/document/content/self-host/config/model/minimax.en.mdx b/document/content/self-host/config/model/minimax.en.mdx
+index 8085cc596f92..ff1c7b57d80f 100644
+--- a/document/content/self-host/config/model/minimax.en.mdx
++++ b/document/content/self-host/config/model/minimax.en.mdx
+@@ -16,6 +16,14 @@ Before reading this guide, make sure you've read the [Model Configuration Guide]
+ 
+ The system includes built-in MiniMax models. Simply search for `MiniMax` on the `Model Configuration` page and enable the models you need. If you need additional models, you can [add them manually](./intro.en.mdx#add-a-custom-model).
+ 
++### Built-in Model List
++
++| Model ID | Context | Max Output | Description |
++|----------|---------|------------|-------------|
++| `MiniMax-M3` | 512K | 128K | Latest flagship model with image input support (**default**) |
++| `MiniMax-M2.7` | 128K | 8K | Previous generation model |
++| `MiniMax-M2.7-highspeed` | 128K | 8K | Previous generation low-latency variant |
++
+ ## 3. Add a Model Channel
+ 
+ On the Model Channels page, add a new MiniMax channel:
+diff --git a/document/content/self-host/config/model/minimax.mdx b/document/content/self-host/config/model/minimax.mdx
+index 45ac96721ea9..02d13c888059 100644
+--- a/document/content/self-host/config/model/minimax.mdx
++++ b/document/content/self-host/config/model/minimax.mdx
+@@ -16,6 +16,14 @@ description: MiniMax 接入示例
+ 
+ 系统内置了 MiniMax 的模型，直接在`模型配置`页面搜索 `MiniMax` 并启用即可。如果需要其他模型，可以[手动添加](./intro.mdx#新增自定义模型)。
+ 
++### 内置模型列表
++
++| 模型 ID | 上下文 | 最大输出 | 说明 |
++|---------|--------|----------|------|
++| `MiniMax-M3` | 512K | 128K | 最新一代旗舰模型，支持图片输入（**默认**） |
++| `MiniMax-M2.7` | 128K | 8K | 上一代模型 |
++| `MiniMax-M2.7-highspeed` | 128K | 8K | 上一代低延迟版本 |
++
+ ## 3. 新增模型渠道
+ 
+ 在模型渠道页，新增一个 MiniMax 的渠道：

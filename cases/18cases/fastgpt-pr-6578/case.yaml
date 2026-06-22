@@ -1,0 +1,24 @@
+id: fastgpt-pr-6578
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "af6861df98324a6e0f6d66b1c1501fb0c9b235e2"
+  pr_number: 6578
+  pr_url: https://github.com/labring/FastGPT/pull/6578
+  pr_title_raw: "feat(agent): add skill reference logging and display"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    Add the ability to track and display skill references when an Agent invokes sandbox skills during conversation. This provides visibility into which skills are being used and when.
+
+validation:
+  head_commit: "daf5ba228434a76e8bd8d723802c97191db898cb"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-6578.patch"
+  patch_sha256: "d4ccb181fe774e6935222892ff28b2bd88808ad8193d7dbfcc3cde25b605c9a4"
+  changed_files_file: "patches/fastgpt-pr-6578.changed_files.txt"
+  manual_functionality_description: |
+    Check that when an Agent invokes sandbox skills during a conversation, the used skills are recorded as skill references.
+    The references should flow through runtime/chat/outlink data structures and become visible in the chat response UI so users can see which skills were used, while conversations without sandbox skill calls remain unchanged.

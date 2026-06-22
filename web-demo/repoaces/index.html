@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RepoACES</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">RA</div>
+          <div>
+            <h1>RepoACES</h1>
+            <p>仓库级智能化代码工程系统</p>
+          </div>
+        </div>
+        <nav class="nav-list" aria-label="功能模块">
+          <button class="nav-item active" data-target="requirement">1. 需求拆解</button>
+          <button class="nav-item" data-target="graph">2. 代码知识图谱</button>
+          <button class="nav-item" data-target="agents">3. 多智能体编排</button>
+          <button class="nav-item" data-target="coding">4. 编码智能体工作</button>
+          <button class="nav-item" data-target="patch">5. 代码修改与补丁</button>
+          <button class="nav-item" data-target="testplan">6. 测试计划</button>
+          <button class="nav-item" data-target="evaluation">7. PR案例评测</button>
+        </nav>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <span class="eyebrow">智能化软件工程</span>
+            <h2 id="section-title">需求理解与任务拆解</h2>
+          </div>
+        </header>
+
+        <section class="panel active" id="requirement" data-title="需求理解与任务拆解">
+          <div class="hero-grid">
+            <div class="work-card span-7">
+              <div class="card-header">
+                <div>
+                  <span class="eyebrow">输入</span>
+                  <h3>需求与仓库</h3>
+                </div>
+                <span class="status-pill ready">就绪</span>
+              </div>
+              <label class="field-label" for="repo-url">GitHub 仓库</label>
+              <input id="repo-url" class="text-input" value="https://github.com/labring/FastGPT" />
+              <label class="field-label" for="requirement-text">需求描述</label>
+              <textarea id="requirement-text" class="requirement-box">为 FastGPT code-sandbox 的 /sandbox/js 与 /sandbox/python 执行接口增加可选 queueId 字段，并通过 SANDBOX_QUEUE_ID_CONCURRENCY 控制同一 queueId 的并发进入执行流程数量。默认不启用，未传 queueId 时保持历史行为；同一 queueId 超限时 FIFO 排队，不同 queueId 之间互不阻塞；同时补充类型、调用端透传和测试验证。</textarea>
+              <div class="button-row">
+                <label class="upload-btn">
+                  <input type="file" id="requirement-file" accept=".txt,.md,.json" />
+                  上传需求文件
+                </label>
+                <button class="primary-btn" id="analyze-btn">分析与拆解</button>
+              </div>
+            </div>
+            <div class="work-card span-5">
+              <div class="card-header">
+                <div>
+                  <span class="eyebrow">案例信号</span>
+                  <h3>PR #7008 关键上下文</h3>
+                </div>
+              </div>
+              <div id="case-signal-output">
+                <p class="muted">点击“分析与拆解”后加载 PR #7008 的上下文信号。</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="analysis-grid" id="analysis-output">
+            <article class="work-card">
+              <span class="eyebrow">摘要</span>
+              <h3>需求摘要</h3>
+              <p>等待点击“分析与拆解”。</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel" id="graph" data-title="与当前需求相关的代码知识图谱">
+          <div class="split-layout">
+            <div class="work-card graph-shell">
+              <div class="card-header">
+                <div>
+                  <span class="eyebrow">仓库智能分析</span>
+                  <h3>PR #7008 结构化代码知识图谱</h3>
+                </div>
+                <div class="segmented">
+                  <button class="seg active" data-graph-filter="all">全部</button>
+                  <button class="seg" data-graph-filter="api">API</button>
+                  <button class="seg" data-graph-filter="test">测试</button>
+                  <button class="seg" data-graph-filter="client">调用端</button>
+                </div>
+              </div>
+              <svg id="knowledge-graph" viewBox="0 0 1080 620" role="img" aria-label="代码知识图谱"></svg>
+            </div>
+            <aside class="work-card node-detail">
+              <span class="eyebrow">当前节点</span>
+              <h3 id="node-title">需求节点</h3>
+              <p id="node-path">queueId 并发需求</p>
+              <p id="node-desc">点击图谱节点查看职责、路径和风险。</p>
+              <div class="tag-row" id="node-tags"></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="panel" id="agents" data-title="多智能体编排展示">
+          <div class="work-card">
+            <div class="card-header">
+              <div>
+                <span class="eyebrow">编排</span>
+                <h3>研发流程状态机与智能体分工</h3>
+              </div>
+              <button class="primary-btn" id="start-agents">启动编排</button>
+            </div>
+            <div class="agent-grid" id="agent-grid"></div>
+          </div>
+          <div class="work-card timeline-card">
+            <div class="card-header">
+              <div>
+                <span class="eyebrow">时间线</span>
+                <h3>协作事件流</h3>
+              </div>
+            </div>
+            <div class="timeline" id="agent-timeline"></div>
+          </div>
+        </section>
+
+        <section class="panel" id="coding" data-title="编码智能体工作视图">
+          <div class="panel-toolbar">
+            <div class="segmented run-toggle">
+              <button class="seg active" data-run="openhands">naive openhands</button>
+              <button class="seg" data-run="codex">RepoACES</button>
+            </div>
+            <button class="ghost-btn" id="replay-run">重新播放</button>
+          </div>
+          <div class="coding-grid">
+            <div class="work-card terminal-card">
+              <div class="terminal-title">
+                <span></span><span></span><span></span>
+                <strong id="terminal-heading">naive openhands 智能体画布</strong>
+              </div>
+              <div class="terminal" id="terminal-log"></div>
+            </div>
+            <div class="work-card">
+              <span class="eyebrow">运行诊断</span>
+              <h3 id="run-summary-title">naive openhands</h3>
+              <div id="run-summary"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="patch" data-title="代码修改与补丁视图">
+          <div class="panel-toolbar">
+            <div class="segmented patch-toggle">
+              <button class="seg active" data-patch="codex">RepoACES</button>
+              <button class="seg" data-patch="openhands">naive openhands</button>
+              <button class="seg" data-patch="golden">基准PR</button>
+            </div>
+          </div>
+          <div class="patch-layout">
+            <aside class="work-card file-list" id="file-list"></aside>
+            <div class="work-card diff-card">
+              <div class="card-header">
+                <div>
+                  <span class="eyebrow">补丁差异</span>
+                  <h3 id="patch-title">RepoACES 补丁</h3>
+                </div>
+                <span class="status-pill pass" id="patch-status">与基准PR对齐</span>
+              </div>
+              <pre class="diff-view" id="diff-view"></pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="testplan" data-title="测试计划生成与展示">
+          <div class="work-card">
+            <div class="card-header">
+              <div>
+                <span class="eyebrow">借鉴 AutoTestPlan</span>
+                <h3>PR #7008 结构化测试计划</h3>
+              </div>
+              <button class="primary-btn" id="generate-testplan">生成测试计划</button>
+            </div>
+            <div class="prompt-note">
+              <strong>提示词依据：</strong> 测试目的、测试范围、测试环境、测试用例、预期结果，以及按风险排序的正向与负向测试。
+            </div>
+            <div class="testplan-grid" id="testplan-output"></div>
+          </div>
+        </section>
+
+        <section class="panel" id="evaluation" data-title="PR案例评测">
+          <div class="work-card">
+            <div class="card-header">
+              <div>
+                <span class="eyebrow">评测</span>
+                <h3>测试 / 构建 / 基准PR差异评测</h3>
+              </div>
+              <button class="primary-btn" id="run-evaluation">运行评测</button>
+            </div>
+            <div class="eval-grid" id="eval-grid"></div>
+          </div>
+          <div class="work-card">
+            <div class="card-header">
+              <div>
+                <span class="eyebrow">评分卡</span>
+                <h3>候选补丁质量门禁</h3>
+              </div>
+              <span class="status-pill ready" id="score-status">就绪</span>
+            </div>
+            <div class="scoreboard" id="scoreboard"></div>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>

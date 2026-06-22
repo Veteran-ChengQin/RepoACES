@@ -1,0 +1,158 @@
+diff --git a/packages/global/openapi/core/agentSkills/api.ts b/packages/global/openapi/core/agentSkills/api.ts
+index 38a6c95aa715..890cf376a4d9 100644
+--- a/packages/global/openapi/core/agentSkills/api.ts
++++ b/packages/global/openapi/core/agentSkills/api.ts
+@@ -333,6 +333,25 @@ export const ListSkillVersionsResponseSchema = z.object({
+ });
+ export type ListSkillVersionsResponse = z.infer<typeof ListSkillVersionsResponseSchema>;
+ 
++export const UpdateSkillVersionBodySchema = z.object({
++  skillId: IdSchema,
++  versionId: IdSchema,
++  versionName: z.string().describe('版本名称')
++});
++export type UpdateSkillVersionBody = z.infer<typeof UpdateSkillVersionBodySchema>;
++
++export const UpdateSkillVersionResponseSchema = z.void();
++export type UpdateSkillVersionResponse = z.infer<typeof UpdateSkillVersionResponseSchema>;
++
++export const SwitchSkillVersionBodySchema = z.object({
++  skillId: IdSchema,
++  versionId: IdSchema
++});
++export type SwitchSkillVersionBody = z.infer<typeof SwitchSkillVersionBodySchema>;
++
++export const SwitchSkillVersionResponseSchema = z.void();
++export type SwitchSkillVersionResponse = z.infer<typeof SwitchSkillVersionResponseSchema>;
++
+ export const ImportSkillMultipartRequestSchema = {
+   type: 'object' as const,
+   properties: {
+diff --git a/packages/global/openapi/core/agentSkills/index.ts b/packages/global/openapi/core/agentSkills/index.ts
+index 4775f1da9971..b87ffc706335 100644
+--- a/packages/global/openapi/core/agentSkills/index.ts
++++ b/packages/global/openapi/core/agentSkills/index.ts
+@@ -29,7 +29,9 @@ import {
+   SkillDebugSessionDeleteBodySchema,
+   SkillDebugSessionListQuerySchema,
+   SkillDebugSessionListResponseSchema,
+-  UpdateSkillBodySchema
++  SwitchSkillVersionBodySchema,
++  UpdateSkillBodySchema,
++  UpdateSkillVersionBodySchema
+ } from './api';
+ 
+ export const AgentSkillsPath: OpenAPIPath = {
+@@ -406,5 +408,43 @@ export const AgentSkillsPath: OpenAPIPath = {
+         }
+       }
+     }
++  },
++  '/core/agentSkills/version/update': {
++    post: {
++      summary: '更新技能版本名称',
++      description: '更新指定技能版本的名称',
++      tags: [TagsMap.aiSkill],
++      requestBody: {
++        content: {
++          'application/json': {
++            schema: UpdateSkillVersionBodySchema
++          }
++        }
++      },
++      responses: {
++        200: {
++          description: '成功更新版本名称'
++        }
++      }
++    }
++  },
++  '/core/agentSkills/version/switch': {
++    post: {
++      summary: '切换技能活跃版本',
++      description: '将指定版本设置为活跃版本，同时取消其他版本的活跃状态',
++      tags: [TagsMap.aiSkill],
++      requestBody: {
++        content: {
++          'application/json': {
++            schema: SwitchSkillVersionBodySchema
++          }
++        }
++      },
++      responses: {
++        200: {
++          description: '成功切换活跃版本'
++        }
++      }
++    }
+   }
+ };
+diff --git a/projects/app/src/pages/api/core/agentSkills/version/switch.ts b/projects/app/src/pages/api/core/agentSkills/version/switch.ts
+new file mode 100644
+index 000000000000..af9e39f63ab5
+--- /dev/null
++++ b/projects/app/src/pages/api/core/agentSkills/version/switch.ts
+@@ -0,0 +1,33 @@
++import { NextAPI } from '@/service/middleware/entry';
++import { authSkill } from '@fastgpt/service/support/permission/agentSkill/auth';
++import { WritePermissionVal } from '@fastgpt/global/support/permission/constant';
++import { type ApiRequestProps } from '@fastgpt/service/type/next';
++import { MongoAgentSkillsVersion } from '@fastgpt/service/core/agentSkills/version/schema';
++import { mongoSessionRun } from '@fastgpt/service/common/mongo/sessionRun';
++import {
++  type SwitchSkillVersionBody,
++  type SwitchSkillVersionResponse
++} from '@fastgpt/global/openapi/core/agentSkills/api';
++
++export type { SwitchSkillVersionBody, SwitchSkillVersionResponse };
++
++async function handler(
++  req: ApiRequestProps<SwitchSkillVersionBody>
++): Promise<SwitchSkillVersionResponse> {
++  const { skillId, versionId } = req.body;
++  await authSkill({ skillId, req, per: WritePermissionVal, authToken: true, authApiKey: true });
++
++  await mongoSessionRun(async (session) => {
++    await MongoAgentSkillsVersion.updateMany(
++      { skillId, isActive: true },
++      { isActive: false },
++      { session }
++    );
++
++    await MongoAgentSkillsVersion.findByIdAndUpdate(versionId, { isActive: true }, { session });
++  });
++
++  return;
++}
++
++export default NextAPI(handler);
+diff --git a/projects/app/src/pages/api/core/agentSkills/version/update.ts b/projects/app/src/pages/api/core/agentSkills/version/update.ts
+new file mode 100644
+index 000000000000..3f46243d1484
+--- /dev/null
++++ b/projects/app/src/pages/api/core/agentSkills/version/update.ts
+@@ -0,0 +1,24 @@
++import { NextAPI } from '@/service/middleware/entry';
++import { authSkill } from '@fastgpt/service/support/permission/agentSkill/auth';
++import { WritePermissionVal } from '@fastgpt/global/support/permission/constant';
++import { type ApiRequestProps } from '@fastgpt/service/type/next';
++import { MongoAgentSkillsVersion } from '@fastgpt/service/core/agentSkills/version/schema';
++import {
++  type UpdateSkillVersionBody,
++  type UpdateSkillVersionResponse
++} from '@fastgpt/global/openapi/core/agentSkills/api';
++
++export type { UpdateSkillVersionBody, UpdateSkillVersionResponse };
++
++async function handler(
++  req: ApiRequestProps<UpdateSkillVersionBody>
++): Promise<UpdateSkillVersionResponse> {
++  const { skillId, versionId, versionName } = req.body;
++  await authSkill({ skillId, req, per: WritePermissionVal, authToken: true, authApiKey: true });
++
++  await MongoAgentSkillsVersion.findByIdAndUpdate(versionId, { versionName });
++
++  return;
++}
++
++export default NextAPI(handler);

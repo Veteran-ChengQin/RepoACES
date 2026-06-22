@@ -1,0 +1,3187 @@
+diff --git a/document/content/guide/build/publish/openapi.en.mdx b/document/content/guide/build/publish/openapi.en.mdx
+index 452ff546366c..ad5d791ada0f 100644
+--- a/document/content/guide/build/publish/openapi.en.mdx
++++ b/document/content/guide/build/publish/openapi.en.mdx
+@@ -5,14 +5,17 @@ description: Access FastGPT app via API
+ 
+ import { Alert } from '@/components/docs/Alert';
+ 
+-In FastGPT, you can create multiple API keys for each app to access the app's API endpoints. Each key can only access one app. For complete endpoint documentation, [see the Chat API reference](../../../openapi/intro.en.mdx).
++In FastGPT, the API entry under Publish Channels only creates **App API Keys**. App API Keys are isolated by app: each key belongs to the current app only and can only access that app's chat endpoint.
+ 
+-## Get API Key
++If you need to call general OpenAPI endpoints such as Knowledge Base or app management APIs, or use `authProxy` in `chat/completions` to proxy a team member identity, create a **Global API Key** in account settings. For the full distinction, [see the OpenAPI Introduction](../../../openapi/intro.en.mdx).
+ 
+-Go to App -> "API Access", then click "API Key" to create a key.
++## Get an App API Key
++
++Go to App -> "Publish Channels" -> "API", then click "New" to create a key.
+ 
+ <Alert context="warning">
+-  Keep your key safe. Once the dialog is closed, you cannot copy the key again -- you can only create a new key and copy it.
++  App API Keys can only access the current app. Keep your key safe. To copy it again later, use the
++  copy button in this app's API publish channel list.
+ </Alert>
+ 
+ ![](/imgs/fastgpt-api1.jpg)
+diff --git a/document/content/guide/build/publish/openapi.mdx b/document/content/guide/build/publish/openapi.mdx
+index 6bc0aeb75285..87a092b53863 100644
+--- a/document/content/guide/build/publish/openapi.mdx
++++ b/document/content/guide/build/publish/openapi.mdx
+@@ -5,14 +5,17 @@ description: 通过 API 访问 FastGPT 应用
+ 
+ import { Alert } from '@/components/docs/Alert';
+ 
+-在 FastGPT 中，你可以为每一个应用创建多个 API 密钥，用于访问应用的 API 接口。每个密钥仅能访问一个应用。完整的接口可以[查看应用对话接口](../../../openapi/intro.mdx)。
++在 FastGPT 中，发布渠道里的 API 入口只能创建 **应用 APIKey**。应用 APIKey 按应用隔离，每个密钥只属于当前应用，只能用于访问该应用的对话接口。
+ 
+-## 获取 API 密钥
++如果你需要调用知识库、应用管理等通用 OpenAPI，或需要在 `chat/completions` 中使用 `authProxy` 代理团队成员身份，请到账号设置里创建 **全局 APIKey**。完整的概念区分可以[查看 OpenAPI 介绍](../../../openapi/intro.mdx)。
+ 
+-依次选择应用 -> 「API访问」，然后点击「API 密钥」来创建密钥。
++## 获取应用 APIKey
++
++依次选择应用 ->「发布渠道」->「API」，然后点击「新建」创建密钥。
+ 
+ <Alert context="warning">
+-  密钥需要自己保管好，一旦关闭就无法再复制密钥，只能创建新密钥再复制。
++  应用 APIKey 只能访问当前应用。请妥善保管密钥；如需再次复制，可在当前应用的 API
++  发布渠道列表中点击复制按钮。
+ </Alert>
+ 
+ ![](/imgs/fastgpt-api1.jpg)
+diff --git a/document/content/openapi/chat.en.mdx b/document/content/openapi/chat.en.mdx
+index f77ed1a17961..3c1f1f309c5d 100644
+--- a/document/content/openapi/chat.en.mdx
++++ b/document/content/openapi/chat.en.mdx
+@@ -11,7 +11,9 @@ You can find the AppId in your application details URL.
+ 
+ # Start a Conversation
+ 
+-- This API requires an application-specific API key, or it will return an error.
++- This API supports two API Key types:
++  - `App API Key`: created in the app's publish channel. It is already bound to the app and can directly call that app's chat endpoint.
++  - `Global API Key`: created in account settings. Pass `appId` in the request body when calling this endpoint. To proxy a team member identity through `authProxy`, the team owner must enable `authProxy` when creating or editing the key.
+ - Some packages require adding `v1` to the `BaseUrl`. If you get a 404 error, try adding `v1` and retry.
+ 
+ {/* * 对话现在有`v1`和`v2`两个接口，可以按需使用，v2 自 4.9.4 版本新增，v1 接口同时不再维护 */}
+diff --git a/document/content/openapi/chat.mdx b/document/content/openapi/chat.mdx
+index ba519127166e..4feb0d72362c 100644
+--- a/document/content/openapi/chat.mdx
++++ b/document/content/openapi/chat.mdx
+@@ -11,7 +11,9 @@ description: FastGPT OpenAPI 对话接口
+ 
+ # 发起对话
+ 
+-- 该接口的 API Key 需使用 `应用特定的 key`，否则会报错。
++- 该接口支持两类 APIKey：
++  - `应用 APIKey`：在应用发布渠道生成，已绑定当前应用，可直接调用该应用的对话接口。
++  - `全局 APIKey`：在账号设置中生成。调用时需要在请求体传入 `appId`；如需通过 `authProxy` 代理团队成员身份，需要团队所有者在创建或编辑该 key 时开启 `authProxy`。
+ - 有些包调用时，`BaseUrl` 需要添加 `v1` 路径，有些不需要，如果出现 404 情况，可补充 `v1` 重试。
+ 
+ {/* * 对话现在有`v1`和`v2`两个接口，可以按需使用，v2 自 4.9.4 版本新增，v1 接口同时不再维护 */}
+diff --git a/document/content/openapi/intro.en.mdx b/document/content/openapi/intro.en.mdx
+index 3b55320d96dc..043bbdf59360 100644
+--- a/document/content/openapi/intro.en.mdx
++++ b/document/content/openapi/intro.en.mdx
+@@ -22,16 +22,20 @@ FastGPT OpenAPI lets you authenticate with an API Key to access FastGPT services
+ 
+ ![](../../public/imgs/fastgpt-api-baseurl.png)
+ 
+-## How to Get an API Key
++## API Key Types
+ 
+-FastGPT has **2 types** of API Keys: a global key (cannot directly call app chat) and an app-specific key that includes an AppId (can directly call app chat).
++FastGPT has **two types of API Keys**: **Global API Keys** and **App API Keys**. They are created in different places, have different isolation boundaries, and support different APIs.
+ 
+-We recommend using `app-specific keys` only for app or chat-related endpoints, and `global keys` for everything else.
++| Type           | Where to create it             | Isolation                                        | Typical use                                                                                                                                                                                                                                                           |
++| -------------- | ------------------------------ | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| Global API Key | Account settings -> API Keys   | Team-level key that is not bound to a single app | Call general OpenAPI endpoints that support API Key authentication. To call `chat/completions`, pass `appId` in the request body. Since `v4.15.0`, the team owner can enable `authProxy` for the key to proxy a team member identity, and the request body must include `authProxy`. |
++| App API Key    | App -> Publish Channels -> API | App-scoped key. Each key belongs to one app only | Call the `chat/completions` endpoint for that app. The key is already bound to the app, so you do not need to pass `appId`. App API Keys do not support `authProxy`.                                                                                                  |
+ 
+-|        Global Key               |           App-Specific Key            |
+-| --------------------- | --------------------- |
+-| ![](../../public/imgs/fastgpt-api2.jpg) | ![](../../public/imgs/fastgpt-api1.jpg) |
++Use an `App API Key` when a third-party client or external system only needs to chat with one app. Use a `Global API Key` for server-side integrations that manage shared resources such as Knowledge Bases or apps, or when `chat/completions` needs `authProxy`.
+ 
++| Global API Key                          | App API Key                             |
++| --------------------------------------- | --------------------------------------- |
++| ![](../../public/imgs/fastgpt-api2.jpg) | ![](../../public/imgs/fastgpt-api1.jpg) |
+ 
+ ## Basic Configuration
+ 
+diff --git a/document/content/openapi/intro.mdx b/document/content/openapi/intro.mdx
+index a65698954592..90d4de593124 100644
+--- a/document/content/openapi/intro.mdx
++++ b/document/content/openapi/intro.mdx
+@@ -14,7 +14,7 @@ description: FastGPT OpenAPI 介绍
+ 
+ ## 使用说明
+ 
+-FasGPT OpenAPI 接口允许你使用 Api Key 进行鉴权，从而操作 FastGPT 上的相关服务和资源，例如：调用应用对话接口、上传知识库数据、搜索测试等等。出于兼容性和安全考虑，并不是所有的接口都允许通过 Api Key 访问。
++FastGPT OpenAPI 接口允许你使用 API Key 进行鉴权，从而操作 FastGPT 上的相关服务和资源，例如：调用应用对话接口、上传知识库数据、搜索测试等等。出于兼容性和安全考虑，并不是所有的接口都允许通过 API Key 访问。
+ 
+ ## 如何查看 BaseURL
+ 
+@@ -22,16 +22,20 @@ FasGPT OpenAPI 接口允许你使用 Api Key 进行鉴权，从而操作 FastGPT
+ 
+ ![](../../public/imgs/fastgpt-api-baseurl.png)
+ 
+-## 如何获取 Api Key
++## API Key 类型
+ 
+-FastGPT 的 API Key **有 2 类**，一类是全局通用的 key (无法直接调用应用对话)；一类是携带了 AppId 也就是有应用标记的 key (可直接调用应用对话)。
++FastGPT 的 API Key 分为 **全局 APIKey** 和 **应用 APIKey**。这两个概念的生成位置、隔离范围和可调用接口不同，请按实际场景选择。
+ 
+-我们建议，仅操作应用或者对话的相关接口使用 `应用特定key`，其他接口使用 `通用key`。
++| 类型        | 生成位置                | 隔离范围                           | 典型用途                                                                                                                                                                                  |
++| ----------- | ----------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| 全局 APIKey | 账号设置 -> API 密钥    | 团队级全局密钥，不绑定单个应用     | 调用支持 API Key 鉴权的通用 OpenAPI。调用 `chat/completions` 时需要在请求体传入 `appId`；如需代理团队成员身份，`v4.15.0` 版本后可由团队所有者为该 key 开启 `authProxy`，再在请求体传入 `authProxy`。 |
++| 应用 APIKey | 应用 -> 发布渠道 -> API | 按应用隔离，每个密钥只属于一个应用 | 只能调用该应用的 `chat/completions` 对话接口。密钥内已绑定应用，无需额外传 `appId`，也不支持 `authProxy`。                                                                                |
+ 
+-|        通用key               |           应用特定 key            |
+-| --------------------- | --------------------- |
+-| ![](../../public/imgs/fastgpt-api2.jpg) | ![](../../public/imgs/fastgpt-api1.jpg) |
++我们建议：第三方客户端或外部系统只需要对接单个应用对话时，使用 `应用 APIKey`；服务端需要操作知识库、应用管理等通用资源，或需要在对话接口中使用 `authProxy` 代理身份时，使用 `全局 APIKey`。
+ 
++| 全局 APIKey                             | 应用 APIKey                             |
++| --------------------------------------- | --------------------------------------- |
++| ![](../../public/imgs/fastgpt-api2.jpg) | ![](../../public/imgs/fastgpt-api1.jpg) |
+ 
+ ## 基本配置
+ 
+@@ -65,7 +69,7 @@ curl --location --request POST 'http://localhost:3000/api/v1/chat/completions' \
+ 
+ ## 自定义用户 ID
+ 
+-`v4.8.13`后支持传入自定义的用户 ID, 并且存入历史记录中。
++`v4.8.13` 后支持传入自定义的用户 ID, 并且存入历史记录中。
+ 
+ ```sh
+ curl --location --request POST 'http://localhost:3000/api/v1/chat/completions' \
+diff --git a/document/content/openapi/translate_chat.py b/document/content/openapi/translate_chat.py
+index a861b114853f..25f2e7f240f0 100644
+--- a/document/content/openapi/translate_chat.py
++++ b/document/content/openapi/translate_chat.py
+@@ -11,9 +11,9 @@
+     '如何获取': 'How to Get',
+     '可在应用详情的路径里获取': 'You can find the AppId in your application details URL',
+     '发起对话': 'Start a Conversation',
+-    '该接口的 API Key 需使用': 'This API requires',
+-    '应用特定的 key': 'an application-specific API key',
+-    '否则会报错': 'or it will return an error',
++    '该接口支持两类 APIKey': 'This API supports two API Key types',
++    '应用 APIKey': 'App API Key',
++    '全局 APIKey': 'Global API Key',
+     '有些包调用时': 'Some packages require',
+     '需要添加': 'adding',
+     '路径，有些不需要，如果出现404情况，可补充': 'to the path. If you get a 404 error, try adding',
+@@ -195,7 +195,7 @@
+     translated = line
+     
+     # Common translations
+-    translated = translated.replace('该接口的 API Key 需使用`应用特定的 key`，否则会报错。', 'This API requires an application-specific API key, or it will return an error.')
++    translated = translated.replace('该接口支持两类 APIKey：', 'This API supports two API Key types:')
+     translated = translated.replace('有些包调用时，`BaseUrl`需要添加`v1`路径，有些不需要，如果出现404情况，可补充`v1`重试。', 'Some packages require adding `v1` to the `BaseUrl`. If you get a 404 error, try adding `v1` and retry.')
+     translated = translated.replace('可在应用详情的路径里获取 AppId。', 'You can find the AppId in your application details URL.')
+     translated = translated.replace('`v1`对话接口兼容`GPT`的接口！如果你的项目使用的是标准的`GPT`官方接口，可以直接通过修改`BaseUrl`和 `Authorization`来访问 FastGpt 应用，不过需要注意下面几个规则：', 'The `v1` chat API is compatible with the `GPT` interface! If you\'re using the standard `GPT` official API, you can access FastGPT by simply changing the `BaseUrl` and `Authorization`. However, note these rules:')
+diff --git a/packages/global/openapi/core/chat/completion/api.ts b/packages/global/openapi/core/chat/completion/api.ts
+index b80c2c17726b..98a068cd5fc8 100644
+--- a/packages/global/openapi/core/chat/completion/api.ts
++++ b/packages/global/openapi/core/chat/completion/api.ts
+@@ -34,9 +34,32 @@ const ChatCompletionCreateParamsSchema = z.object({
+   })
+ });
+ 
++export const ChatCompletionAuthProxySchema = z
++  .object({
++    username: nullishToUndefined(z.string().trim().min(1).max(128).optional()).meta({
++      example: 'user@example.com',
++      description: 'API Key 代理调用的团队成员用户名'
++    }),
++    tmbId: nullishToUndefined(ObjectIdSchema.optional()).meta({
++      description: 'API Key 代理调用的团队成员 ID'
++    })
++  })
++  .strict()
++  .refine(({ username, tmbId }) => !!username || !!tmbId, {
++    message: 'authProxy.username or authProxy.tmbId is required'
++  })
++  .meta({
++    description:
++      'API Key 代理调用身份。仅开启 authProxy 的团队级 API Key 可用，username 与 tmbId 同时传入时必须指向同一团队成员'
++  });
++export type ChatCompletionAuthProxy = z.infer<typeof ChatCompletionAuthProxySchema>;
++
+ export const CompletionsPropsSchema = OutLinkChatAuthSchema.extend(WebCompletionsSchema.shape)
+   .extend(ChatCompletionCreateParamsSchema.shape)
+   .extend({
++    authProxy: nullishToUndefined(ChatCompletionAuthProxySchema.optional()).meta({
++      description: 'API Key 代理调用身份'
++    }),
+     variables: nullishToUndefined(z.record(z.string(), z.any()).default({})).meta({
+       description: '全局变量或插件输入'
+     }),
+diff --git a/packages/global/openapi/support/openapi/api.ts b/packages/global/openapi/support/openapi/api.ts
+index 456c228e6e25..f9b734cb5bbe 100644
+--- a/packages/global/openapi/support/openapi/api.ts
++++ b/packages/global/openapi/support/openapi/api.ts
+@@ -11,7 +11,7 @@ const OptionalDateSchema = z.preprocess((value) => {
+ export const ApiKeyLimitSchema = z
+   .object({
+     expiredTime: OptionalDateSchema.meta({ description: '过期时间' }),
+-    maxUsagePoints: z.number().optional().default(-1).meta({
++    maxUsagePoints: z.number().default(-1).meta({
+       example: -1,
+       description: '最大积分用量限制'
+     })
+@@ -25,10 +25,18 @@ export const OpenApiKeySchema = z.object({
+   tmbId: ObjectIdSchema.meta({ description: '团队成员 ID' }),
+   createTime: z.coerce.date().meta({ description: '创建时间' }),
+   lastUsedTime: z.coerce.date().optional().meta({ description: '最后使用时间' }),
+-  apiKey: z.string().meta({ description: 'API Key，列表接口返回脱敏值' }),
++  apiKey: z.string().meta({
++    description: 'API Key 脱敏值；复制明文请调用复制接口'
++  }),
++  canCopy: z.boolean().default(false).meta({
++    description: '当前用户是否可以复制该 API Key 明文'
++  }),
+   appId: ObjectIdSchema.optional().meta({ description: '绑定应用 ID' }),
+-  name: z.string().optional().default('Api Key').meta({ description: 'API Key 名称' }),
+-  usagePoints: z.number().optional().default(0).meta({ description: '累计使用积分' }),
++  authProxy: z.boolean().default(false).meta({
++    description: '是否允许团队级 API Key 在 chat/completions 请求中通过 authProxy 代理团队成员身份'
++  }),
++  name: z.string().default('Api Key').meta({ description: 'API Key 名称' }),
++  usagePoints: z.number().default(0).meta({ description: '累计使用积分' }),
+   limit: ApiKeyLimitSchema.meta({
+     description: 'API Key 使用限制，未配置时表示不限制过期时间和积分用量'
+   })
+@@ -46,6 +54,11 @@ export type OpenApiKeySchemaType = z.infer<typeof OpenApiKeySchema>;
+ export const CreateApiKeyBodySchema = z.object({
+   appId: ObjectIdSchema.optional().meta({ description: '绑定应用 ID，不传则创建团队级 API Key' }),
+   name: z.string().min(1).meta({ example: '生产环境 Key', description: 'API Key 名称' }),
++  authProxy: z.boolean().optional().meta({
++    example: false,
++    description:
++      '是否允许团队级 API Key 在 chat/completions 请求中代理团队成员身份；仅团队 owner 可开启'
++  }),
+   limit: ApiKeyLimitSchema.meta({
+     description: 'API Key 使用限制，未配置时表示不限制过期时间和积分用量'
+   })
+@@ -87,9 +100,13 @@ export const UpdateApiKeyBodySchema = CreateApiKeyBodySchema.partial()
+   .extend({
+     _id: ObjectIdSchema.meta({ description: 'API Key 记录 ID' })
+   })
+-  .refine(({ name, limit }) => name !== undefined || limit !== undefined, {
+-    message: 'name or limit is required'
+-  });
++  .refine(
++    ({ name, limit, authProxy }) =>
++      name !== undefined || limit !== undefined || authProxy !== undefined,
++    {
++      message: 'name, limit or authProxy is required'
++    }
++  );
+ export type UpdateApiKeyBodyType = z.infer<typeof UpdateApiKeyBodySchema>;
+ 
+ export const UpdateApiKeyResponseSchema = z.undefined().meta({
+@@ -120,6 +137,24 @@ export const DeleteApiKeyResponseSchema = z.undefined().meta({
+ });
+ export type DeleteApiKeyResponseType = z.infer<typeof DeleteApiKeyResponseSchema>;
+ 
++/* ============================================================================
++ * API: 复制 API Key
++ * Route: POST /api/support/openapi/copy
++ * Method: POST
++ * Description: 返回 API Key 明文并记录用户复制审计日志。
++ * Tags: ['API Key 管理']
++ * ============================================================================ */
++
++export const CopyApiKeyBodySchema = z.object({
++  id: ObjectIdSchema.meta({ description: 'API Key 记录 ID' })
++});
++export type CopyApiKeyBodyType = z.infer<typeof CopyApiKeyBodySchema>;
++
++export const CopyApiKeyResponseSchema = z.string().meta({
++  description: 'API Key 明文'
++});
++export type CopyApiKeyResponseType = z.infer<typeof CopyApiKeyResponseSchema>;
++
+ export const ApiKeyHealthParamsSchema = z.object({
+   apiKey: z.string().nonempty().meta({
+     example: 'fastgpt-xxxxxxxx',
+diff --git a/packages/global/openapi/support/openapi/index.ts b/packages/global/openapi/support/openapi/index.ts
+index 63633f47b19b..5e7640202c7d 100644
+--- a/packages/global/openapi/support/openapi/index.ts
++++ b/packages/global/openapi/support/openapi/index.ts
+@@ -3,6 +3,8 @@ import {
+   ApiKeyHealthParamsSchema,
+   ApiKeyHealthErrorResponseSchema,
+   ApiKeyHealthResponseSchema,
++  CopyApiKeyBodySchema,
++  CopyApiKeyResponseSchema,
+   CreateApiKeyBodySchema,
+   CreateApiKeyResponseSchema,
+   DeleteApiKeyQuerySchema,
+@@ -103,6 +105,30 @@ export const ApiKeyPath: OpenAPIPath = {
+       }
+     }
+   },
++  '/support/openapi/copy': {
++    post: {
++      summary: '复制 API Key',
++      description: '返回 API Key 明文并记录用户复制审计日志',
++      tags: [TagsMap.apiKey],
++      requestBody: {
++        content: {
++          'application/json': {
++            schema: CopyApiKeyBodySchema
++          }
++        }
++      },
++      responses: {
++        200: {
++          description: '成功复制 API Key',
++          content: {
++            'application/json': {
++              schema: CopyApiKeyResponseSchema
++            }
++          }
++        }
++      }
++    }
++  },
+   '/support/openapi/health': {
+     get: {
+       summary: '检查 API Key 是否健康',
+diff --git a/packages/global/support/openapi/type.ts b/packages/global/support/openapi/type.ts
+index 0f5dca701ffb..276934a60cc7 100644
+--- a/packages/global/support/openapi/type.ts
++++ b/packages/global/support/openapi/type.ts
+@@ -6,6 +6,7 @@ export type OpenApiSchema = {
+   lastUsedTime?: Date;
+   apiKey: string;
+   appId?: string;
++  authProxy?: boolean;
+   name: string;
+   usagePoints: number;
+   limit?: {
+diff --git a/packages/global/support/user/audit/constants.ts b/packages/global/support/user/audit/constants.ts
+index e631186655a6..a03c3b4a3ac4 100644
+--- a/packages/global/support/user/audit/constants.ts
++++ b/packages/global/support/user/audit/constants.ts
+@@ -93,6 +93,7 @@ export enum AuditEventEnum {
+   SET_INVOICE_HEADER = 'SET_INVOICE_HEADER',
+   CREATE_API_KEY = 'CREATE_API_KEY',
+   UPDATE_API_KEY = 'UPDATE_API_KEY',
++  COPY_API_KEY = 'COPY_API_KEY',
+   DELETE_API_KEY = 'DELETE_API_KEY',
+   //Agent Skills
+   CREATE_SKILL = 'CREATE_SKILL',
+diff --git a/packages/service/support/openapi/auth.ts b/packages/service/support/openapi/auth.ts
+index 883f58b4a2d3..d3089da33a28 100644
+--- a/packages/service/support/openapi/auth.ts
++++ b/packages/service/support/openapi/auth.ts
+@@ -2,10 +2,45 @@ import { ERROR_ENUM } from '@fastgpt/global/common/error/errorCode';
+ import { updateApiKeyUsedTime } from './tools';
+ import { MongoOpenApi } from './schema';
+ import type { OpenApiSchema } from '@fastgpt/global/support/openapi/type';
++import type { ApiRequestProps } from '../../type/next';
+ 
+ export type AuthOpenApiLimitProps = { openApi: OpenApiSchema };
+ 
+-export async function authOpenApiKey({ apikey }: { apikey: string }) {
++type ApiKeyRequest = Pick<ApiRequestProps, 'method' | 'url'>;
++
++const AppApiKeyChatCompletionPaths = new Set([
++  '/api/v1/chat/completions',
++  '/v1/chat/completions',
++  '/api/v2/chat/completions',
++  '/v2/chat/completions'
++]);
++
++const getRequestPath = (url?: string) => {
++  if (!url) return '';
++
++  const path = new URL(url, 'http://fastgpt.local').pathname;
++  return path.replace(/\/+$/, '') || '/';
++};
++
++/**
++ * 判断当前请求是否为 app 级 APIKey 允许的应用对话调用入口。
++ * app 级 APIKey 只绑定单个应用，不能复用团队级 APIKey 的其它开放 API 权限面。
++ */
++export const isAppApiKeyChatCompletionsRequest = (req?: ApiKeyRequest) => {
++  if (req?.method?.toUpperCase() !== 'POST') return false;
++
++  return AppApiKeyChatCompletionPaths.has(getRequestPath(req.url));
++};
++
++export async function authOpenApiKey({
++  apikey,
++  req,
++  authorizationAppId
++}: {
++  apikey: string;
++  req?: ApiKeyRequest;
++  authorizationAppId?: string;
++}) {
+   if (!apikey) {
+     return Promise.reject(ERROR_ENUM.unAuthApiKey);
+   }
+@@ -15,6 +50,10 @@ export async function authOpenApiKey({ apikey }: { apikey: string }) {
+       return Promise.reject(ERROR_ENUM.unAuthApiKey);
+     }
+ 
++    if ((openApi.appId || authorizationAppId) && !isAppApiKeyChatCompletionsRequest(req)) {
++      return Promise.reject(ERROR_ENUM.unAuthApiKey);
++    }
++
+     // auth limit
+     await global.authOpenApiHandler({
+       openApi
+@@ -27,6 +66,7 @@ export async function authOpenApiKey({ apikey }: { apikey: string }) {
+       teamId: String(openApi.teamId),
+       tmbId: String(openApi.tmbId),
+       appId: openApi.appId || '',
++      authProxy: !!openApi.authProxy,
+       sourceName: openApi.name
+     };
+   } catch (error) {
+diff --git a/packages/service/support/openapi/schema.ts b/packages/service/support/openapi/schema.ts
+index 31c0fa345508..a77d57e077b6 100644
+--- a/packages/service/support/openapi/schema.ts
++++ b/packages/service/support/openapi/schema.ts
+@@ -35,6 +35,10 @@ const OpenApiSchema = new Schema(
+       type: String,
+       required: false
+     },
++    authProxy: {
++      type: Boolean,
++      default: false
++    },
+     name: {
+       type: String,
+       default: 'Api Key'
+diff --git a/packages/service/support/permission/auth/common.ts b/packages/service/support/permission/auth/common.ts
+index 5a9623d7b751..1c0ed5e2a8dc 100644
+--- a/packages/service/support/permission/auth/common.ts
++++ b/packages/service/support/permission/auth/common.ts
+@@ -75,7 +75,17 @@ export async function parseHeaderCert({
+     })();
+ 
+     // auth apikey
+-    const { teamId, tmbId, appId: apiKeyAppId = '', sourceName } = await authOpenApiKey({ apikey });
++    const {
++      teamId,
++      tmbId,
++      appId: apiKeyAppId = '',
++      authProxy,
++      sourceName
++    } = await authOpenApiKey({
++      apikey,
++      req,
++      authorizationAppId: authorizationAppid
++    });
+ 
+     return {
+       uid: '',
+@@ -83,6 +93,8 @@ export async function parseHeaderCert({
+       tmbId,
+       apikey,
+       appId: apiKeyAppId || authorizationAppid,
++      apiKeyAppId,
++      apiKeyAuthProxy: authProxy,
+       sourceName
+     };
+   }
+@@ -95,52 +107,65 @@ export async function parseHeaderCert({
+ 
+   const { cookie, token, rootkey, authorization } = (req.headers || {}) as ReqHeaderAuthType;
+ 
+-  const { uid, teamId, tmbId, appId, openApiKey, authType, isRoot, sourceName, sessionId } =
+-    await (async () => {
+-      if (authApiKey && authorization) {
+-        // apikey from authorization
+-        const authResponse = await parseAuthorization(authorization);
+-        return {
+-          uid: authResponse.uid,
+-          teamId: authResponse.teamId,
+-          tmbId: authResponse.tmbId,
+-          appId: authResponse.appId,
+-          openApiKey: authResponse.apikey,
+-          authType: AuthUserTypeEnum.apikey,
+-          sourceName: authResponse.sourceName
+-        };
+-      }
+-      if (authToken && (token || cookie)) {
+-        // user token(from fastgpt web)
+-        const res = await authCookieToken(cookie, token);
+-
+-        return {
+-          uid: res.userId,
+-          teamId: res.teamId,
+-          tmbId: res.tmbId,
+-          appId: '',
+-          openApiKey: '',
+-          authType: AuthUserTypeEnum.token,
+-          isRoot: res.isRoot,
+-          sessionId: res.sessionId
+-        };
+-      }
+-      if (authRoot && rootkey) {
+-        await parseRootKey(rootkey);
+-        // root user
+-        return {
+-          uid: '',
+-          teamId: '',
+-          tmbId: '',
+-          appId: '',
+-          openApiKey: '',
+-          authType: AuthUserTypeEnum.root,
+-          isRoot: true
+-        };
+-      }
++  const {
++    uid,
++    teamId,
++    tmbId,
++    appId,
++    openApiKey,
++    authType,
++    isRoot,
++    sourceName,
++    sessionId,
++    apiKeyAppId,
++    apiKeyAuthProxy
++  } = await (async () => {
++    if (authApiKey && authorization) {
++      // apikey from authorization
++      const authResponse = await parseAuthorization(authorization);
++      return {
++        uid: authResponse.uid,
++        teamId: authResponse.teamId,
++        tmbId: authResponse.tmbId,
++        appId: authResponse.appId,
++        apiKeyAppId: authResponse.apiKeyAppId,
++        openApiKey: authResponse.apikey,
++        authType: AuthUserTypeEnum.apikey,
++        apiKeyAuthProxy: authResponse.apiKeyAuthProxy,
++        sourceName: authResponse.sourceName
++      };
++    }
++    if (authToken && (token || cookie)) {
++      // user token(from fastgpt web)
++      const res = await authCookieToken(cookie, token);
++
++      return {
++        uid: res.userId,
++        teamId: res.teamId,
++        tmbId: res.tmbId,
++        appId: '',
++        openApiKey: '',
++        authType: AuthUserTypeEnum.token,
++        isRoot: res.isRoot,
++        sessionId: res.sessionId
++      };
++    }
++    if (authRoot && rootkey) {
++      await parseRootKey(rootkey);
++      // root user
++      return {
++        uid: '',
++        teamId: '',
++        tmbId: '',
++        appId: '',
++        openApiKey: '',
++        authType: AuthUserTypeEnum.root,
++        isRoot: true
++      };
++    }
+ 
+-      return Promise.reject(ERROR_ENUM.unAuthorization);
+-    })();
++    return Promise.reject(ERROR_ENUM.unAuthorization);
++  })();
+ 
+   if (!authRoot && (!teamId || !tmbId)) {
+     return Promise.reject(ERROR_ENUM.unAuthorization);
+@@ -153,6 +178,8 @@ export async function parseHeaderCert({
+     appId,
+     authType,
+     sourceName,
++    apiKeyAppId,
++    apiKeyAuthProxy,
+     apikey: openApiKey,
+     isRoot: !!isRoot,
+     sessionId
+diff --git a/packages/service/support/permission/type.ts b/packages/service/support/permission/type.ts
+index 464fb7965c12..be6889daa67c 100644
+--- a/packages/service/support/permission/type.ts
++++ b/packages/service/support/permission/type.ts
+@@ -29,7 +29,11 @@ export type AuthResponseType<T extends Permission = Permission> = {
+   tmbId: string;
+   authType?: `${AuthUserTypeEnum}`;
+   appId?: string;
++  apiKeyAppId?: string;
+   apikey?: string;
++  apiKeyAuthProxy?: boolean;
++  sourceName?: string;
++  sessionId?: string;
+   isRoot: boolean;
+   permission: T;
+ };
+diff --git a/packages/service/support/user/audit/util.ts b/packages/service/support/user/audit/util.ts
+index 4a7c4cdea5e4..d5cc0bd1b470 100644
+--- a/packages/service/support/user/audit/util.ts
++++ b/packages/service/support/user/audit/util.ts
+@@ -70,7 +70,7 @@ export function addAuditLog<T extends AuditEventEnum>({
+   teamId: string;
+   event: T;
+   params?: AuditEventParamsType[T];
+-}): void;
++}): Promise<void>;
+ 
+ export function addAuditLog<T extends AdminAuditEventEnum>({
+   teamId,
+@@ -82,7 +82,7 @@ export function addAuditLog<T extends AdminAuditEventEnum>({
+   teamId: string;
+   event: T;
+   params?: AdminAuditEventParamsType[T];
+-}): void;
++}): Promise<void>;
+ export function addAuditLog<T extends AuditEventEnum | AdminAuditEventEnum>({
+   teamId,
+   tmbId,
+@@ -93,13 +93,13 @@ export function addAuditLog<T extends AuditEventEnum | AdminAuditEventEnum>({
+   teamId: string;
+   event: T;
+   params?: any;
+-}) {
+-  retryFn(() =>
+-    MongoTeamAudit.create({
++}): Promise<void> {
++  return retryFn(async () => {
++    await MongoTeamAudit.create({
+       tmbId: tmbId,
+       teamId: teamId,
+       event,
+       metadata: params
+-    })
+-  );
++    });
++  });
+ }
+diff --git a/packages/service/test/support/openapi/auth.test.ts b/packages/service/test/support/openapi/auth.test.ts
+new file mode 100644
+index 000000000000..49a5f85f82f2
+--- /dev/null
++++ b/packages/service/test/support/openapi/auth.test.ts
+@@ -0,0 +1,176 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++import { ERROR_ENUM } from '@fastgpt/global/common/error/errorCode';
++import { MongoOpenApi } from '@fastgpt/service/support/openapi/schema';
++import { Types } from 'mongoose';
++
++const { mockAuthOpenApiHandler } = vi.hoisted(() => ({
++  mockAuthOpenApiHandler: vi.fn()
++}));
++
++import {
++  authOpenApiKey,
++  isAppApiKeyChatCompletionsRequest
++} from '@fastgpt/service/support/openapi/auth';
++
++const teamId = new Types.ObjectId().toString();
++const tmbId = new Types.ObjectId().toString();
++
++const teamApiKey = {
++  teamId,
++  tmbId,
++  apiKey: 'fastgpt-team',
++  name: 'team key'
++};
++
++const appApiKey = {
++  ...teamApiKey,
++  apiKey: 'fastgpt-app',
++  appId: 'app-1',
++  name: 'app key'
++};
++
++describe('openapi auth', () => {
++  beforeEach(async () => {
++    vi.clearAllMocks();
++    global.authOpenApiHandler = mockAuthOpenApiHandler;
++    mockAuthOpenApiHandler.mockResolvedValue(undefined);
++    await MongoOpenApi.deleteMany({});
++  });
++
++  describe('isAppApiKeyChatCompletionsRequest', () => {
++    it('app 级 APIKey 允许 POST chat/completions', () => {
++      expect(
++        isAppApiKeyChatCompletionsRequest({
++          method: 'POST',
++          url: '/api/v1/chat/completions'
++        })
++      ).toBe(true);
++      expect(
++        isAppApiKeyChatCompletionsRequest({
++          method: 'post',
++          url: '/api/v2/chat/completions?stream=true'
++        })
++      ).toBe(true);
++    });
++
++    it('app 级 APIKey 拒绝非 chat/completions 路径和非 POST 方法', () => {
++      expect(
++        isAppApiKeyChatCompletionsRequest({
++          method: 'POST',
++          url: '/api/core/chat/init'
++        })
++      ).toBe(false);
++      expect(
++        isAppApiKeyChatCompletionsRequest({
++          method: 'GET',
++          url: '/api/v1/chat/completions'
++        })
++      ).toBe(false);
++      expect(isAppApiKeyChatCompletionsRequest(undefined)).toBe(false);
++    });
++  });
++
++  it('团队级 APIKey 保持原有开放 API 权限面', async () => {
++    const openApi = await MongoOpenApi.create(teamApiKey);
++
++    const result = await authOpenApiKey({
++      apikey: 'fastgpt-team',
++      req: {
++        method: 'POST',
++        url: '/api/core/dataset/list'
++      } as any
++    });
++
++    expect(result).toEqual({
++      apikey: 'fastgpt-team',
++      teamId,
++      tmbId,
++      appId: '',
++      authProxy: false,
++      sourceName: 'team key'
++    });
++    expect(mockAuthOpenApiHandler).toHaveBeenCalledTimes(1);
++    const [{ openApi: authedOpenApi }] = mockAuthOpenApiHandler.mock.calls[0];
++    expect(String(authedOpenApi._id)).toBe(String(openApi._id));
++    expect(authedOpenApi.apiKey).toBe('fastgpt-team');
++    expect(authedOpenApi.name).toBe('team key');
++  });
++
++  it('app 级 APIKey 仅允许 chat/completions', async () => {
++    const openApi = await MongoOpenApi.create(appApiKey);
++
++    const result = await authOpenApiKey({
++      apikey: 'fastgpt-app',
++      req: {
++        method: 'POST',
++        url: '/api/v1/chat/completions'
++      } as any
++    });
++
++    expect(result).toEqual({
++      apikey: 'fastgpt-app',
++      teamId,
++      tmbId,
++      appId: 'app-1',
++      authProxy: false,
++      sourceName: 'app key'
++    });
++    expect(mockAuthOpenApiHandler).toHaveBeenCalledTimes(1);
++    const [{ openApi: authedOpenApi }] = mockAuthOpenApiHandler.mock.calls[0];
++    expect(String(authedOpenApi._id)).toBe(String(openApi._id));
++    expect(authedOpenApi.apiKey).toBe('fastgpt-app');
++    expect(authedOpenApi.appId).toBe('app-1');
++    expect(authedOpenApi.name).toBe('app key');
++  });
++
++  it('app 级 APIKey 调用其它开放 API 时拒绝且不消耗额度', async () => {
++    await MongoOpenApi.create(appApiKey);
++
++    await expect(
++      authOpenApiKey({
++        apikey: 'fastgpt-app',
++        req: {
++          method: 'GET',
++          url: '/api/core/chat/init'
++        } as any
++      })
++    ).rejects.toBe(ERROR_ENUM.unAuthApiKey);
++
++    expect(mockAuthOpenApiHandler).not.toHaveBeenCalled();
++  });
++
++  it('旧版 Authorization 里附带 appId 时同样只能调用 chat/completions', async () => {
++    await MongoOpenApi.create(teamApiKey);
++
++    await expect(
++      authOpenApiKey({
++        apikey: 'fastgpt-team',
++        authorizationAppId: 'app-1',
++        req: {
++          method: 'POST',
++          url: '/api/core/dataset/list'
++        } as any
++      })
++    ).rejects.toBe(ERROR_ENUM.unAuthApiKey);
++
++    expect(mockAuthOpenApiHandler).not.toHaveBeenCalled();
++  });
++
++  it('返回 APIKey 是否开启 authProxy', async () => {
++    await MongoOpenApi.create({
++      ...teamApiKey,
++      apiKey: 'fastgpt-team-auth-proxy',
++      authProxy: true
++    });
++
++    const result = await authOpenApiKey({
++      apikey: 'fastgpt-team-auth-proxy',
++      req: {
++        method: 'POST',
++        url: '/api/core/dataset/list'
++      } as any
++    });
++
++    expect(result.authProxy).toBe(true);
++  });
++});
+diff --git a/packages/web/i18n/en/account_team.json b/packages/web/i18n/en/account_team.json
+index f21cd3dc5bbb..bc6622218379 100644
+--- a/packages/web/i18n/en/account_team.json
++++ b/packages/web/i18n/en/account_team.json
+@@ -40,6 +40,7 @@
+   "confirm_delete_org": "Confirm to delete organization?",
+   "confirm_forbidden": "Confirm forbidden",
+   "confirm_leave_team": "Confirmed to leave the team?  \nAfter exiting, all your resources in the team are transferred to the team owner.",
++  "copy_api_key": "Copy API key",
+   "copy_link": "Copy link",
+   "create_api_key": "Create API key",
+   "create_app": "Create an application",
+@@ -147,6 +148,7 @@
+   "log_change_member_name_self": "【{{name}}】Change your member name to 【{{newName}}】",
+   "log_change_notification_settings": "【{{name}}】A change notification receiving method operation was carried out",
+   "log_change_password": "【{{name}}】The password change operation was performed",
++  "log_copy_api_key": "【{{name}}】Copied the API key named [{{keyName}}]",
+   "log_create_api_key": "【{{name}}】Create an API key named [{{keyName}}]",
+   "log_create_app": "【{{name}}】Created [{{appType}}] named [{{appName}}]",
+   "log_create_app_copy": "【{{name}}] Created a copy of [{{appType}}] named [{{appName}}]",
+diff --git a/packages/web/i18n/en/common.json b/packages/web/i18n/en/common.json
+index aa6280c71b0a..43fe5ccb2104 100644
+--- a/packages/web/i18n/en/common.json
++++ b/packages/web/i18n/en/common.json
+@@ -983,8 +983,12 @@
+   "support.openapi.Api baseurl": "API Base URL",
+   "support.openapi.Api manager": "API Key Management",
+   "support.openapi.Copy success": "API Address Copied",
++  "support.openapi.Copy api key": "Copy API Key",
++  "support.openapi.Copy api key tip": "Keep your key safe and do not share it with others.",
++  "support.openapi.Auth proxy": "Auth proxy",
++  "support.openapi.Auth proxy tip": "Allow a team-level API key to proxy a team member identity through authProxy in chat/completions requests. Only team owners can enable it.",
+   "support.openapi.New api key": "New API Key",
+-  "support.openapi.New api key tip": "Please keep your key safe, it will not be displayed again",
++  "support.openapi.New api key tip": "Keep your key safe and do not share it with others.",
+   "support.outlink.Delete link tip": "Confirm to Delete This Login-Free Link? The link will become invalid immediately after deletion, but the chat logs will be retained. Please confirm!",
+   "support.outlink.Max usage points": "Points Limit",
+   "support.outlink.Max usage points tip": "The maximum number of points allowed for this link. It cannot be used after exceeding the limit. -1 means unlimited.",
+diff --git a/packages/web/i18n/zh-CN/account_team.json b/packages/web/i18n/zh-CN/account_team.json
+index d356fb5cee1a..653273ed3cfe 100644
+--- a/packages/web/i18n/zh-CN/account_team.json
++++ b/packages/web/i18n/zh-CN/account_team.json
+@@ -40,6 +40,7 @@
+   "confirm_delete_org": "确认删除该部门？",
+   "confirm_forbidden": "确认停用",
+   "confirm_leave_team": "确认离开该团队？  \n退出后，您在该团队所有的资源均转让给团队所有者。",
++  "copy_api_key": "复制api密钥",
+   "copy_link": "复制链接",
+   "create_api_key": "创建api密钥",
+   "create_app": "创建应用",
+@@ -145,6 +146,7 @@
+   "log_change_member_name_self": "【{{name}}】把自己的成员名从【{{oldName}}】变更为【{{newName}}】",
+   "log_change_notification_settings": "【{{name}}】进行了变更通知接收途径操作",
+   "log_change_password": "【{{name}}】进行了变更密码操作",
++  "log_copy_api_key": "【{{name}}】复制了名为【{{keyName}}】的api密钥",
+   "log_create_api_key": "【{{name}}】创建了名为【{{keyName}}】的api密钥",
+   "log_create_app": "【{{name}}】创建了名为【{{appName}}】的【{{appType}}】",
+   "log_create_app_copy": "【{{name}}】给名为【{{appName}}】的【{{appType}}】创建了一个副本",
+diff --git a/packages/web/i18n/zh-CN/common.json b/packages/web/i18n/zh-CN/common.json
+index b50381db2510..e613f06a04ae 100644
+--- a/packages/web/i18n/zh-CN/common.json
++++ b/packages/web/i18n/zh-CN/common.json
+@@ -983,8 +983,12 @@
+   "support.openapi.Api baseurl": "API 根地址",
+   "support.openapi.Api manager": "API 密钥管理",
+   "support.openapi.Copy success": "已复制 API 地址",
++  "support.openapi.Copy api key": "复制 API 密钥",
++  "support.openapi.Copy api key tip": "请保管好你的密钥，不要泄露给他人。",
++  "support.openapi.Auth proxy": "身份代理",
++  "support.openapi.Auth proxy tip": "允许团队级 API 密钥在 chat/completions 请求中通过 authProxy 代理团队成员身份。仅团队所有者可开启。",
+   "support.openapi.New api key": "新的 API 密钥",
+-  "support.openapi.New api key tip": "请保管好你的密钥，密钥不会再次展示~",
++  "support.openapi.New api key tip": "请保管好你的密钥，不要泄露给他人。",
+   "support.outlink.Delete link tip": "确认删除该免登录链接？删除后，该链接将会立即失效，对话日志仍会保留，请确认！",
+   "support.outlink.Max usage points": "积分上限",
+   "support.outlink.Max usage points tip": "该链接最多允许使用多少积分，超出后将无法使用。-1 代表无限制。",
+diff --git a/packages/web/i18n/zh-Hant/account_team.json b/packages/web/i18n/zh-Hant/account_team.json
+index a72e38e4acb2..ed3f550a6ded 100644
+--- a/packages/web/i18n/zh-Hant/account_team.json
++++ b/packages/web/i18n/zh-Hant/account_team.json
+@@ -40,6 +40,7 @@
+   "confirm_delete_org": "確認刪除該部門？",
+   "confirm_forbidden": "確認停用",
+   "confirm_leave_team": "確認離開該團隊？  \n結束後，您在該團隊所有的資源轉讓給團隊所有者。",
++  "copy_api_key": "複製api密鑰",
+   "copy_link": "複製連結",
+   "create_api_key": "創建api密鑰",
+   "create_app": "創建應用",
+@@ -145,6 +146,7 @@
+   "log_change_member_name_self": "【{{name}}】變更自己的成員名為【{{newName}}】",
+   "log_change_notification_settings": "【{{name}}】進行了變更通知接收途徑操作",
+   "log_change_password": "【{{name}}】進行了變更密碼操作",
++  "log_copy_api_key": "【{{name}}】複製了名為【{{keyName}}】的api密鑰",
+   "log_create_api_key": "【{{name}}】創建了名為【{{keyName}}】的api密鑰",
+   "log_create_app": "【{{name}}】創建了名為【{{appName}}】的【{{appType}}】",
+   "log_create_app_copy": "【{{name}}】給名為【{{appName}}】的【{{appType}}】創建了一個副本",
+diff --git a/packages/web/i18n/zh-Hant/common.json b/packages/web/i18n/zh-Hant/common.json
+index ba9186d2f2a4..99315c05588c 100644
+--- a/packages/web/i18n/zh-Hant/common.json
++++ b/packages/web/i18n/zh-Hant/common.json
+@@ -972,8 +972,12 @@
+   "support.openapi.Api baseurl": "API 根網址",
+   "support.openapi.Api manager": "API 金鑰管理",
+   "support.openapi.Copy success": "已複製 API 網址",
++  "support.openapi.Copy api key": "複製 API 金鑰",
++  "support.openapi.Copy api key tip": "請妥善保管您的金鑰，不要洩露給他人。",
++  "support.openapi.Auth proxy": "身份代理",
++  "support.openapi.Auth proxy tip": "允許團隊級 API 金鑰在 chat/completions 請求中透過 authProxy 代理團隊成員身份。僅團隊擁有者可開啟。",
+   "support.openapi.New api key": "新的 API 金鑰",
+-  "support.openapi.New api key tip": "請妥善保管您的金鑰，金鑰將不會再次顯示",
++  "support.openapi.New api key tip": "請妥善保管您的金鑰，不要洩露給他人。",
+   "support.outlink.Delete link tip": "確認刪除此免登入連結？刪除後，該連結將立即失效，對話記錄仍會保留，請確認！",
+   "support.outlink.Max usage points": "點數上限",
+   "support.outlink.Max usage points tip": "此連結最多允許使用多少點數，超出後將無法使用。-1 代表無限制。",
+diff --git a/packages/web/support/user/audit/constants.ts b/packages/web/support/user/audit/constants.ts
+index f38fd0dcd4f5..e22df17bc562 100644
+--- a/packages/web/support/user/audit/constants.ts
++++ b/packages/web/support/user/audit/constants.ts
+@@ -506,6 +506,11 @@ export const auditLogMap = {
+     typeLabel: i18nT('account_team:update_api_key'),
+     params: {} as { name?: string; keyName: string }
+   },
++  [AuditEventEnum.COPY_API_KEY]: {
++    content: i18nT('account_team:log_copy_api_key'),
++    typeLabel: i18nT('account_team:copy_api_key'),
++    params: {} as { name?: string; keyName: string }
++  },
+   [AuditEventEnum.DELETE_API_KEY]: {
+     content: i18nT('account_team:log_delete_api_key'),
+     typeLabel: i18nT('account_team:delete_api_key'),
+diff --git a/pro b/pro
+index 87fa826b7522..336c7cc6988a 160000
+--- a/pro
++++ b/pro
+@@ -1 +1 @@
+-Subproject commit 87fa826b752283252de740099a7d4cc242338cde
++Subproject commit 336c7cc6988acea74d38f123b44680cff5064c27
+diff --git a/projects/app/src/components/support/apikey/Table.tsx b/projects/app/src/components/support/apikey/Table.tsx
+index 7818db187c50..d97ead4c6791 100644
+--- a/projects/app/src/components/support/apikey/Table.tsx
++++ b/projects/app/src/components/support/apikey/Table.tsx
+@@ -1,10 +1,8 @@
+-import React, { useEffect, useMemo, useState } from 'react';
++import React, { useMemo, useState } from 'react';
+ import {
+   Box,
+   Button,
+   Flex,
+-  ModalFooter,
+-  ModalBody,
+   Table,
+   Thead,
+   Tbody,
+@@ -15,13 +13,15 @@ import {
+   useTheme,
+   Link,
+   Input,
+-  IconButton
++  IconButton,
++  Switch
+ } from '@chakra-ui/react';
+ import {
+   getOpenApiKeys,
+   createAOpenApiKey,
+   delOpenApiById,
+-  putOpenApiKey
++  putOpenApiKey,
++  copyOpenApiKey
+ } from '@/web/support/openapi/api';
+ import type { EditApiKeyProps } from '@/global/support/openapi/api';
+ import dayjs from 'dayjs';
+@@ -30,8 +30,8 @@ import { useCopyData } from '@fastgpt/web/hooks/useCopyData';
+ import { useSystemStore } from '@/web/common/system/useSystemStore';
+ import { useTranslation } from 'next-i18next';
+ import MyIcon from '@fastgpt/web/components/common/Icon';
+-import MyModal from '@fastgpt/web/components/common/MyModal';
+-import { useForm } from 'react-hook-form';
++import MyModalV2 from '@fastgpt/web/components/v2/common/MyModal';
++import { Controller, useForm } from 'react-hook-form';
+ import { useRequest } from '@fastgpt/web/hooks/useRequest';
+ import { getDocPath } from '@/web/common/system/doc';
+ import MyMenu from '@fastgpt/web/components/common/MyMenu';
+@@ -43,19 +43,34 @@ import MyBox from '@fastgpt/web/components/common/MyBox';
+ type EditProps = EditApiKeyProps & { _id?: string };
+ const defaultEditData: EditProps = {
+   name: '',
++  authProxy: false,
+   limit: {
+     maxUsagePoints: -1
+   }
+ };
+ 
+-const ApiKeyTable = ({ tips, appId }: { tips: string; appId?: string }) => {
++const maskApiKey = (apiKey: string) => {
++  if (apiKey.startsWith('******')) return apiKey;
++  return `******${apiKey.slice(-4)}`;
++};
++
++type ApiKeyTableProps = {
++  tips: string;
++  appId?: string;
++  mode?: 'account' | 'publish';
++};
++
++const ApiKeyTable = ({ tips, appId, mode = 'account' }: ApiKeyTableProps) => {
+   const { t } = useTranslation();
+   const theme = useTheme();
+   const { copyData } = useCopyData();
+   const { feConfigs } = useSystemStore();
+-  const [baseUrl, setBaseUrl] = useState('https://fastgpt.io/api');
++  const isPublishMode = mode === 'publish';
++  const baseUrl =
++    feConfigs?.customApiDomain || (typeof location !== 'undefined' ? `${location.origin}/api` : '');
+   const [editData, setEditData] = useState<EditProps>();
+   const [apiKey, setApiKey] = useState('');
++  const [copyingApiKeyId, setCopyingApiKeyId] = useState<string>();
+ 
+   const { ConfirmModal, openConfirm } = useConfirm({
+     type: 'delete',
+@@ -67,6 +82,19 @@ const ApiKeyTable = ({ tips, appId }: { tips: string; appId?: string }) => {
+       refetch();
+     }
+   });
++  const { runAsync: copyApiKey } = useRequest(copyOpenApiKey, {
++    errorToast: 'Error'
++  });
++
++  const onCopyApiKey = async (id: string) => {
++    setCopyingApiKeyId(id);
++    try {
++      const plainApiKey = await copyApiKey({ id });
++      await copyData(plainApiKey);
++    } finally {
++      setCopyingApiKeyId(undefined);
++    }
++  };
+ 
+   const {
+     data: apiKeys = [],
+@@ -77,10 +105,6 @@ const ApiKeyTable = ({ tips, appId }: { tips: string; appId?: string }) => {
+     refreshDeps: [appId]
+   });
+ 
+-  useEffect(() => {
+-    setBaseUrl(feConfigs?.customApiDomain || `${location.origin}/api`);
+-  }, [feConfigs?.customApiDomain]);
+-
+   return (
+     <MyBox
+       isLoading={isGetting}
+@@ -88,22 +112,36 @@ const ApiKeyTable = ({ tips, appId }: { tips: string; appId?: string }) => {
+       flexDirection={'column'}
+       h={'100%'}
+       position={'relative'}
++      pt={isPublishMode ? 3 : 0}
++      px={isPublishMode ? 5 : 0}
++      minH={isPublishMode ? '50vh' : undefined}
+     >
+       <Box display={['block', 'flex']} alignItems={'center'}>
+         <Box flex={1}>
+-          <Flex alignItems={'flex-end'}>
+-            <Box color={'myGray.900'} fontSize={'lg'}>
++          <Flex alignItems={'center'}>
++            <Box
++              color={'myGray.900'}
++              fontSize={isPublishMode ? ['md', 'lg'] : 'lg'}
++              fontWeight={isPublishMode ? 'bold' : 'normal'}
++            >
+               {t('common:support.openapi.Api manager')}
+             </Box>
+             {feConfigs?.docUrl && (
+               <Link
+                 href={feConfigs.openAPIDocUrl || getDocPath('/openapi/intro')}
+                 target={'_blank'}
+-                ml={1}
++                ml={isPublishMode ? 2 : 1}
+                 color={'primary.500'}
+                 fontSize={'sm'}
+               >
+-                {t('common:read_doc')}
++                {isPublishMode ? (
++                  <Flex alignItems={'center'}>
++                    <MyIcon name="book" w={'17px'} h={'17px'} mr="1" />
++                    {t('common:read_doc')}
++                  </Flex>
++                ) : (
++                  t('common:read_doc')
++                )}
+               </Link>
+             )}
+           </Flex>
+@@ -132,7 +170,7 @@ const ApiKeyTable = ({ tips, appId }: { tips: string; appId?: string }) => {
+           <Button
+             ml={3}
+             leftIcon={<AddIcon fontSize={'md'} />}
+-            variant={'whitePrimary'}
++            variant={isPublishMode ? 'primary' : 'whitePrimary'}
+             onClick={() =>
+               setEditData({
+                 ...defaultEditData,
+@@ -149,7 +187,7 @@ const ApiKeyTable = ({ tips, appId }: { tips: string; appId?: string }) => {
+           <Thead>
+             <Tr>
+               <Th>{t('common:Name')}</Th>
+-              <Th>Api Key</Th>
++              <Th>API KEY</Th>
+               <Th>{t('common:support.outlink.Usage points')}</Th>
+               {feConfigs?.isPlus && (
+                 <>
+@@ -163,70 +201,99 @@ const ApiKeyTable = ({ tips, appId }: { tips: string; appId?: string }) => {
+             </Tr>
+           </Thead>
+           <Tbody fontSize={'sm'}>
+-            {apiKeys.map(({ _id, name, usagePoints, limit, apiKey, createTime, lastUsedTime }) => (
+-              <Tr key={_id}>
+-                <Td>{name}</Td>
+-                <Td>{apiKey}</Td>
+-                <Td>
+-                  {Math.round(usagePoints)}/
+-                  {feConfigs?.isPlus && limit?.maxUsagePoints && limit?.maxUsagePoints > -1
+-                    ? `${limit?.maxUsagePoints}`
+-                    : t('common:Unlimited')}
+-                </Td>
+-                {feConfigs?.isPlus && (
+-                  <>
+-                    <Td whiteSpace={'pre-wrap'}>
+-                      {limit?.expiredTime
+-                        ? dayjs(limit?.expiredTime).format('YYYY/MM/DD\nHH:mm')
+-                        : '-'}
+-                    </Td>
+-                  </>
+-                )}
+-                <Td whiteSpace={'pre-wrap'}>{dayjs(createTime).format('YYYY/MM/DD\nHH:mm:ss')}</Td>
+-                <Td whiteSpace={'pre-wrap'}>
+-                  {lastUsedTime
+-                    ? dayjs(lastUsedTime).format('YYYY/MM/DD\nHH:mm:ss')
+-                    : t('common:un_used')}
+-                </Td>
+-                <Td>
+-                  <MyMenu
+-                    offset={[-50, 5]}
+-                    Button={
+-                      <IconButton
+-                        icon={<MyIcon name={'more'} w={'14px'} />}
+-                        name={'more'}
+-                        variant={'whitePrimary'}
+-                        size={'sm'}
+-                        aria-label={''}
+-                      />
+-                    }
+-                    menuList={[
+-                      {
+-                        children: [
+-                          {
+-                            label: t('common:Edit'),
+-                            icon: 'edit',
+-                            onClick: () =>
+-                              setEditData({
+-                                _id,
+-                                name,
+-                                limit,
+-                                appId
+-                              })
+-                          },
+-                          {
+-                            label: t('common:Delete'),
+-                            icon: 'delete',
+-                            type: 'danger',
+-                            onClick: () => openConfirm({ onConfirm: () => onclickRemove(_id) })()
+-                          }
+-                        ]
++            {apiKeys.map(
++              ({
++                _id,
++                name,
++                usagePoints,
++                limit,
++                apiKey,
++                canCopy,
++                createTime,
++                lastUsedTime,
++                authProxy
++              }) => (
++                <Tr key={_id}>
++                  <Td>{name}</Td>
++                  <Td>
++                    <Flex alignItems={'center'} gap={2}>
++                      <Box>{maskApiKey(apiKey)}</Box>
++                      {canCopy && (
++                        <IconButton
++                          aria-label={t('common:Copy')}
++                          icon={<MyIcon name={'copy'} w={'15px'} />}
++                          size={'xs'}
++                          variant={'whiteBase'}
++                          isLoading={copyingApiKeyId === _id}
++                          onClick={() => onCopyApiKey(_id)}
++                        />
++                      )}
++                    </Flex>
++                  </Td>
++                  <Td>
++                    {Math.round(usagePoints)}/
++                    {feConfigs?.isPlus && limit?.maxUsagePoints && limit?.maxUsagePoints > -1
++                      ? `${limit?.maxUsagePoints}`
++                      : t('common:Unlimited')}
++                  </Td>
++                  {feConfigs?.isPlus && (
++                    <>
++                      <Td whiteSpace={'pre-wrap'}>
++                        {limit?.expiredTime
++                          ? dayjs(limit?.expiredTime).format('YYYY/MM/DD\nHH:mm')
++                          : '-'}
++                      </Td>
++                    </>
++                  )}
++                  <Td whiteSpace={'pre-wrap'}>
++                    {dayjs(createTime).format('YYYY/MM/DD\nHH:mm:ss')}
++                  </Td>
++                  <Td whiteSpace={'pre-wrap'}>
++                    {lastUsedTime
++                      ? dayjs(lastUsedTime).format('YYYY/MM/DD\nHH:mm:ss')
++                      : t('common:un_used')}
++                  </Td>
++                  <Td>
++                    <MyMenu
++                      offset={[-50, 5]}
++                      Button={
++                        <IconButton
++                          icon={<MyIcon name={'more'} w={'14px'} />}
++                          name={'more'}
++                          variant={'whitePrimary'}
++                          size={'sm'}
++                          aria-label={''}
++                        />
+                       }
+-                    ]}
+-                  />
+-                </Td>
+-              </Tr>
+-            ))}
++                      menuList={[
++                        {
++                          children: [
++                            {
++                              label: t('common:Edit'),
++                              icon: 'edit',
++                              onClick: () =>
++                                setEditData({
++                                  _id,
++                                  name,
++                                  limit,
++                                  authProxy,
++                                  appId
++                                })
++                            },
++                            {
++                              label: t('common:Delete'),
++                              icon: 'delete',
++                              type: 'danger',
++                              onClick: () => openConfirm({ onConfirm: () => onclickRemove(_id) })()
++                            }
++                          ]
++                        }
++                      ]}
++                    />
++                  </Td>
++                </Tr>
++              )
++            )}
+           </Tbody>
+         </Table>
+       </TableContainer>
+@@ -247,10 +314,8 @@ const ApiKeyTable = ({ tips, appId }: { tips: string; appId?: string }) => {
+         />
+       )}
+       <ConfirmModal />
+-      <MyModal
++      <MyModalV2
+         isOpen={!!apiKey}
+-        w={['400px', '600px']}
+-        iconSrc="keyPrimary"
+         title={
+           <Box>
+             <Box fontWeight={'bold'}>{t('common:support.openapi.New api key')}</Box>
+@@ -259,30 +324,29 @@ const ApiKeyTable = ({ tips, appId }: { tips: string; appId?: string }) => {
+             </Box>
+           </Box>
+         }
++        size="md"
+         onClose={() => setApiKey('')}
+-      >
+-        <ModalBody pt={5}>
+-          <Flex
+-            bg={'myGray.100'}
+-            px={3}
+-            py={2}
+-            whiteSpace={'pre-wrap'}
+-            wordBreak={'break-all'}
+-            cursor={'pointer'}
+-            borderRadius={'md'}
+-            userSelect={'all'}
+-            onClick={() => copyData(apiKey)}
+-          >
+-            <Box flex={1}>{apiKey}</Box>
+-            <MyIcon ml={1} name={'copy'} w={'16px'}></MyIcon>
+-          </Flex>
+-        </ModalBody>
+-        <ModalFooter>
++        footer={
+           <Button variant="whiteBase" onClick={() => setApiKey('')}>
+             {t('common:OK')}
+           </Button>
+-        </ModalFooter>
+-      </MyModal>
++        }
++      >
++        <Flex
++          bg={'myGray.100'}
++          px={3}
++          py={2}
++          whiteSpace={'pre-wrap'}
++          wordBreak={'break-all'}
++          cursor={'pointer'}
++          borderRadius={'md'}
++          userSelect={'all'}
++          onClick={() => copyData(apiKey)}
++        >
++          <Box flex={1}>{apiKey}</Box>
++          <MyIcon ml={1} name={'copy'} w={'16px'}></MyIcon>
++        </Flex>
++      </MyModalV2>
+     </MyBox>
+   );
+ };
+@@ -306,10 +370,11 @@ function EditKeyModal({
+   const { feConfigs } = useSystemStore();
+ 
+   const {
++    control,
+     register,
+     setValue,
+     handleSubmit: submitShareChat
+-  } = useForm({
++  } = useForm<EditProps>({
+     defaultValues: defaultData
+   });
+ 
+@@ -333,13 +398,30 @@ function EditKeyModal({
+   );
+ 
+   return (
+-    <MyModal
++    <MyModalV2
+       isOpen={true}
+-      iconSrc="keyPrimary"
+       title={isEdit ? t('publish:edit_api_key') : t('publish:create_api_key')}
++      size="md"
++      onClose={onClose}
++      footer={
++        <>
++          <Button variant={'whiteBase'} onClick={onClose}>
++            {t('common:Close')}
++          </Button>
++
++          <Button
++            isLoading={creating || updating}
++            onClick={submitShareChat((data) =>
++              isEdit ? onclickUpdate(data) : onclickCreate(data)
++            )}
++          >
++            {t('common:Confirm')}
++          </Button>
++        </>
++      }
+     >
+-      <ModalBody>
+-        <Flex alignItems={'center'}>
++      <Flex flexDirection={'column'} gap={4}>
++        <Flex alignItems={'center'} gap={4}>
+           <FormLabel flex={'0 0 90px'}>{t('common:Name')}</FormLabel>
+           <Input
+             placeholder={t('publish:key_alias') || 'key_alias'}
+@@ -351,7 +433,7 @@ function EditKeyModal({
+         </Flex>
+         {feConfigs?.isPlus && (
+           <>
+-            <Flex alignItems={'center'} mt={4}>
++            <Flex alignItems={'center'} gap={4}>
+               <FormLabel display={'flex'} flex={'0 0 90px'} alignItems={'center'}>
+                 {t('common:support.outlink.Max usage points')}
+                 <QuestionTip
+@@ -368,7 +450,7 @@ function EditKeyModal({
+                 })}
+               />
+             </Flex>
+-            <Flex alignItems={'center'} mt={4}>
++            <Flex alignItems={'center'} gap={4}>
+               <FormLabel flex={'0 0 90px'}>{t('common:expired_time')}</FormLabel>
+               <Input
+                 type="datetime-local"
+@@ -384,20 +466,25 @@ function EditKeyModal({
+             </Flex>
+           </>
+         )}
+-      </ModalBody>
+-
+-      <ModalFooter>
+-        <Button variant={'whiteBase'} mr={3} onClick={onClose}>
+-          {t('common:Close')}
+-        </Button>
+-
+-        <Button
+-          isLoading={creating || updating}
+-          onClick={submitShareChat((data) => (isEdit ? onclickUpdate(data) : onclickCreate(data)))}
+-        >
+-          {t('common:Confirm')}
+-        </Button>
+-      </ModalFooter>
+-    </MyModal>
++        {!defaultData.appId && (
++          <Flex alignItems={'center'} mt={4}>
++            <FormLabel display={'flex'} flex={'0 0 90px'} alignItems={'center'}>
++              {t('common:support.openapi.Auth proxy')}
++              <QuestionTip ml={1} label={t('common:support.openapi.Auth proxy tip')}></QuestionTip>
++            </FormLabel>
++            <Controller
++              control={control}
++              name="authProxy"
++              render={({ field }) => (
++                <Switch
++                  isChecked={!!field.value}
++                  onChange={(e) => field.onChange(e.target.checked)}
++                />
++              )}
++            />
++          </Flex>
++        )}
++      </Flex>
++    </MyModalV2>
+   );
+ }
+diff --git a/projects/app/src/global/support/openapi/api.ts b/projects/app/src/global/support/openapi/api.ts
+index 20de0d835cc5..39546d0f60ce 100644
+--- a/projects/app/src/global/support/openapi/api.ts
++++ b/projects/app/src/global/support/openapi/api.ts
+@@ -7,5 +7,6 @@ export type GetApiKeyProps = {
+ export type EditApiKeyProps = {
+   appId?: string;
+   name: string;
++  authProxy?: boolean;
+   limit: OpenApiSchema['limit'];
+ };
+diff --git a/projects/app/src/pageComponents/app/detail/Publish/API/index.tsx b/projects/app/src/pageComponents/app/detail/Publish/API/index.tsx
+index 55ed788fe010..8bd47f998463 100644
+--- a/projects/app/src/pageComponents/app/detail/Publish/API/index.tsx
++++ b/projects/app/src/pageComponents/app/detail/Publish/API/index.tsx
+@@ -1,10 +1,9 @@
+-import React, { useEffect, useState } from 'react';
+ import ApiKeyTable from '@/components/support/apikey/Table';
+ import { useTranslation } from 'next-i18next';
+ 
+ const API = ({ appId }: { appId: string }) => {
+   const { t } = useTranslation();
+-  return <ApiKeyTable tips={t('publish:app_key_tips')} appId={appId} />;
++  return <ApiKeyTable tips={t('publish:app_key_tips')} appId={appId} mode="publish" />;
+ };
+ 
+ export default API;
+diff --git a/projects/app/src/pageComponents/app/detail/Publish/Link/index.tsx b/projects/app/src/pageComponents/app/detail/Publish/Link/index.tsx
+index 4130c2d71203..92e27b0748a4 100644
+--- a/projects/app/src/pageComponents/app/detail/Publish/Link/index.tsx
++++ b/projects/app/src/pageComponents/app/detail/Publish/Link/index.tsx
+@@ -72,18 +72,39 @@ const Share = ({ appId }: { appId: string; type: PublishChannelEnum }) => {
+   );
+ 
+   return (
+-    <MyBox h={'100%'} isLoading={isFetching} position={'relative'}>
+-      <Flex justifyContent={'space-between'}>
++    <MyBox h={'100%'} isLoading={isFetching} position={'relative'} pt={3} px={5} minH={'50vh'}>
++      <Flex justifyContent={'space-between'} flexDirection="row">
+         <HStack>
+-          <Box color={'myGray.900'} fontSize={'lg'}>
+-            {t('common:core.app.Share link')}
++          <Box>
++            <Flex alignItems={'center'}>
++              <Box color={'myGray.900'} fontWeight={'bold'} fontSize={['md', 'lg']}>
++                {t('common:core.app.Share link')}
++              </Box>
++              {feConfigs?.docUrl && (
++                <Link
++                  href={getDocPath('/openapi/share')}
++                  target={'_blank'}
++                  ml={2}
++                  color={'primary.500'}
++                  fontSize={'sm'}
++                >
++                  <Flex alignItems={'center'}>
++                    <MyIcon name="book" w={'17px'} h={'17px'} mr="1" />
++                    {t('common:read_doc')}
++                  </Flex>
++                </Link>
++              )}
++            </Flex>
++            <Box fontSize={'mini'} color={'myGray.600'}>
++              {t('common:core.app.Share link desc detail')}
++            </Box>
+           </Box>
+-          <QuestionTip label={t('common:core.app.Share link desc detail')} />
+         </HStack>
+         <Button
+-          variant={'whitePrimary'}
++          variant={'primary'}
+           colorScheme={'blue'}
+           size={['sm', 'md']}
++          leftIcon={<MyIcon name={'common/addLight'} w="1.25rem" color="white" />}
+           {...(shareChatList.length >= 10
+             ? {
+                 isDisabled: true,
+diff --git a/projects/app/src/pages/api/support/openapi/copy.ts b/projects/app/src/pages/api/support/openapi/copy.ts
+new file mode 100644
+index 000000000000..2fd8922f1e05
+--- /dev/null
++++ b/projects/app/src/pages/api/support/openapi/copy.ts
+@@ -0,0 +1,46 @@
++import { authOpenApiKeyCrud } from '@fastgpt/service/support/permission/auth/openapi';
++import { OwnerPermissionVal } from '@fastgpt/global/support/permission/constant';
++import type { ApiRequestProps } from '@fastgpt/service/type/next';
++import { NextAPI } from '@/service/middleware/entry';
++import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
++import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
++import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
++import {
++  CopyApiKeyBodySchema,
++  CopyApiKeyResponseSchema,
++  type CopyApiKeyBodyType,
++  type CopyApiKeyResponseType
++} from '@fastgpt/global/openapi/support/openapi/api';
++
++async function handler(req: ApiRequestProps<CopyApiKeyBodyType>): Promise<CopyApiKeyResponseType> {
++  const { id } = parseApiInput({
++    req,
++    bodySchema: CopyApiKeyBodySchema
++  }).body;
++
++  const { tmbId, teamId, openapi } = await authOpenApiKeyCrud({
++    req,
++    authToken: true,
++    id,
++    per: OwnerPermissionVal
++  });
++
++  await addAuditLog({
++    tmbId,
++    teamId,
++    event: AuditEventEnum.COPY_API_KEY,
++    params: {
++      keyName: openapi.name
++    }
++  });
++
++  const apiKey = (
++    openapi as unknown as {
++      get: (path: 'apiKey', type?: unknown, options?: { getters?: boolean }) => unknown;
++    }
++  ).get('apiKey', null, { getters: false });
++
++  return CopyApiKeyResponseSchema.parse(apiKey);
++}
++
++export default NextAPI(handler);
+diff --git a/projects/app/src/pages/api/support/openapi/create.ts b/projects/app/src/pages/api/support/openapi/create.ts
+index 88001a0a4b83..60cb46c2d5fa 100644
+--- a/projects/app/src/pages/api/support/openapi/create.ts
++++ b/projects/app/src/pages/api/support/openapi/create.ts
+@@ -6,6 +6,7 @@ import { NextAPI } from '@/service/middleware/entry';
+ import { ManagePermissionVal } from '@fastgpt/global/support/permission/constant';
+ import { authApp } from '@fastgpt/service/support/permission/app/auth';
+ import { OpenApiErrEnum } from '@fastgpt/global/common/error/code/openapi';
++import { TeamErrEnum } from '@fastgpt/global/common/error/code/team';
+ import { TeamApikeyCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
+ import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
+ import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
+@@ -20,30 +21,43 @@ import {
+ async function handler(
+   req: ApiRequestProps<CreateApiKeyBodyType>
+ ): Promise<CreateApiKeyResponseType> {
+-  const { appId, name, limit } = parseApiInput({
++  const {
++    appId,
++    name,
++    limit,
++    authProxy = false
++  } = parseApiInput({
+     req,
+     bodySchema: CreateApiKeyBodySchema
+   }).body;
+-  const { tmbId, teamId } = await (async () => {
++  const { tmbId, teamId, allowAuthProxy } = await (async () => {
+     if (!appId) {
+       // global apikey is being created, auth the tmb
+-      const { teamId, tmbId } = await authUserPer({
++      const { teamId, tmbId, permission } = await authUserPer({
+         req,
+         authToken: true,
+         per: TeamApikeyCreatePermissionVal
+       });
+-      return { teamId, tmbId };
++      return { teamId, tmbId, allowAuthProxy: permission.isOwner };
+     } else {
++      if (authProxy) {
++        return Promise.reject(OpenApiErrEnum.unAuth);
++      }
++
+       const { teamId, tmbId } = await authApp({
+         req,
+         per: ManagePermissionVal,
+         appId,
+         authToken: true
+       });
+-      return { teamId, tmbId };
++      return { teamId, tmbId, allowAuthProxy: false };
+     }
+   })();
+ 
++  if (authProxy && !allowAuthProxy) {
++    return Promise.reject(TeamErrEnum.unPermission);
++  }
++
+   const count = await MongoOpenApi.find({ tmbId, appId }).countDocuments();
+ 
+   if (count >= 10) {
+@@ -58,6 +72,7 @@ async function handler(
+     tmbId,
+     apiKey,
+     appId,
++    authProxy: !appId && authProxy,
+     name,
+     limit
+   });
+diff --git a/projects/app/src/pages/api/support/openapi/list.ts b/projects/app/src/pages/api/support/openapi/list.ts
+index 385334f2e233..78a7585000ce 100644
+--- a/projects/app/src/pages/api/support/openapi/list.ts
++++ b/projects/app/src/pages/api/support/openapi/list.ts
+@@ -22,7 +22,7 @@ async function handler(
+ 
+   if (appId) {
+     // app-level apikey
+-    await authApp({
++    const { permission } = await authApp({
+       req,
+       authToken: true,
+       appId,
+@@ -33,7 +33,16 @@ async function handler(
+       appId
+     }).sort({ _id: -1 });
+ 
+-    return GetApiKeyListResponseSchema.parse(findResponse.map((item) => item.toObject()));
++    return GetApiKeyListResponseSchema.parse(
++      findResponse.map((item) => {
++        const canCopy = permission.isOwner;
++
++        return {
++          ...item.toObject({ getters: true }),
++          canCopy
++        };
++      })
++    );
+   }
+   // global apikey
+   const { teamId, tmbId, permission } = await authUserPer({
+@@ -47,7 +56,16 @@ async function handler(
+     ...(!permission.hasManagePer && { tmbId }) // if not manager, read own key
+   }).sort({ _id: -1 });
+ 
+-  return GetApiKeyListResponseSchema.parse(findResponse.map((item) => item.toObject()));
++  return GetApiKeyListResponseSchema.parse(
++    findResponse.map((item) => {
++      const canCopy = permission.isOwner || String(item.tmbId) === tmbId;
++
++      return {
++        ...item.toObject({ getters: true }),
++        canCopy
++      };
++    })
++  );
+ }
+ 
+ export default NextAPI(handler);
+diff --git a/projects/app/src/pages/api/support/openapi/update.ts b/projects/app/src/pages/api/support/openapi/update.ts
+index 92ef95f1cbf9..a458bd6d5c7e 100644
+--- a/projects/app/src/pages/api/support/openapi/update.ts
++++ b/projects/app/src/pages/api/support/openapi/update.ts
+@@ -6,6 +6,8 @@ import { NextAPI } from '@/service/middleware/entry';
+ import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
+ import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
+ import { parseApiInput } from '@fastgpt/service/common/zod/requestParseError';
++import { OpenApiErrEnum } from '@fastgpt/global/common/error/code/openapi';
++import { TeamErrEnum } from '@fastgpt/global/common/error/code/team';
+ import {
+   UpdateApiKeyBodySchema,
+   UpdateApiKeyResponseSchema,
+@@ -16,18 +18,28 @@ import {
+ async function handler(
+   req: ApiRequestProps<UpdateApiKeyBodyType>
+ ): Promise<UpdateApiKeyResponseType> {
+-  const { _id, name, limit } = parseApiInput({
++  const { _id, name, limit, authProxy } = parseApiInput({
+     req,
+     bodySchema: UpdateApiKeyBodySchema
+   }).body;
+ 
+-  const { tmbId, teamId, openapi } = await authOpenApiKeyCrud({
++  const { tmbId, teamId, openapi, permission } = await authOpenApiKeyCrud({
+     req,
+     authToken: true,
+     id: _id,
+     per: OwnerPermissionVal
+   });
+ 
++  if (authProxy !== undefined) {
++    if (openapi.appId && authProxy) {
++      return Promise.reject(OpenApiErrEnum.unAuth);
++    }
++
++    if (authProxy && !permission.isOwner) {
++      return Promise.reject(TeamErrEnum.unPermission);
++    }
++  }
++
+   (async () => {
+     addAuditLog({
+       tmbId,
+@@ -41,7 +53,8 @@ async function handler(
+ 
+   await MongoOpenApi.findByIdAndUpdate(_id, {
+     ...(name && { name }),
+-    ...(limit && { limit })
++    ...(limit && { limit }),
++    ...(authProxy !== undefined && { authProxy })
+   });
+ 
+   return UpdateApiKeyResponseSchema.parse(undefined);
+diff --git a/projects/app/src/pages/api/v1/chat/completions.ts b/projects/app/src/pages/api/v1/chat/completions.ts
+index ab40971b4ecb..8f2a008fe6d9 100644
+--- a/projects/app/src/pages/api/v1/chat/completions.ts
++++ b/projects/app/src/pages/api/v1/chat/completions.ts
+@@ -1,6 +1,4 @@
+ import type { NextApiRequest, NextApiResponse } from 'next';
+-import { authApp } from '@fastgpt/service/support/permission/app/auth';
+-import { authCert } from '@fastgpt/service/support/permission/auth/common';
+ import { sseErrRes, jsonRes } from '@fastgpt/service/common/response';
+ import { getLogger, LogCategories } from '@fastgpt/service/common/logger';
+ import { ChatRoleEnum, ChatSourceEnum } from '@fastgpt/global/core/chat/constants';
+@@ -47,7 +45,6 @@ import type { AuthResponseType } from '@fastgpt/global/openapi/core/chat/complet
+ import { CompletionsPropsSchema } from '@fastgpt/global/openapi/core/chat/completion/api';
+ import { NextAPI } from '@/service/middleware/entry';
+ import { getAppLatestVersion } from '@fastgpt/service/core/app/version/controller';
+-import { ReadPermissionVal } from '@fastgpt/global/support/permission/constant';
+ import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
+ import {
+   serverGetWorkflowToolRunUserQuery,
+@@ -71,6 +68,7 @@ import {
+   filterWorkflowFinalResponseData,
+   getWorkflowFinalResponseData
+ } from '@/service/core/workflow/nodeResponse';
++import { authChatCompletionHeaderRequest } from '@/service/support/permission/auth/chatCompletion';
+ 
+ const logger = getLogger(LogCategories.MODULE.CHAT.ITEM);
+ 
+@@ -91,7 +89,8 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+     showSkillReferences,
+     messages = [],
+     responseChatItemId = getNanoid(),
+-    metadata
++    metadata,
++    authProxy
+   } = completionProps;
+   let { detail = false, retainDatasetCite = false, variables = {} } = completionProps;
+ 
+@@ -147,6 +146,10 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+     } = await (async () => {
+       // share chat
+       if (shareId && outLinkUid) {
++        if (authProxy) {
++          return Promise.reject(ChatErrEnum.unAuthChat);
++        }
++
+         return authShareChat({
+           shareId,
+           outLinkUid,
+@@ -157,6 +160,10 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+       }
+       // team space chat
+       if (spaceTeamId && appId && teamToken) {
++        if (authProxy) {
++          return Promise.reject(ChatErrEnum.unAuthChat);
++        }
++
+         return authTeamSpaceChat({
+           teamId: spaceTeamId,
+           teamToken,
+@@ -166,10 +173,12 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+       }
+ 
+       /* parse req: api or token */
+-      return authHeaderRequest({
++      return authChatCompletionHeaderRequest({
+         req,
+         appId,
+-        chatId
++        chatId,
++        authProxy,
++        showSkillReferences: true
+       });
+     })();
+ 
+@@ -675,89 +684,6 @@ const authTeamSpaceChat = async ({
+     outLinkUserId: uid
+   };
+ };
+-const authHeaderRequest = async ({
+-  req,
+-  appId,
+-  chatId
+-}: {
+-  req: NextApiRequest;
+-  appId?: string;
+-  chatId?: string;
+-}): Promise<AuthResponseType> => {
+-  const {
+-    appId: apiKeyAppId,
+-    teamId,
+-    tmbId,
+-    authType,
+-    sourceName,
+-    apikey
+-  } = await authCert({
+-    req,
+-    authToken: true,
+-    authApiKey: true
+-  });
+-
+-  const { app } = await (async () => {
+-    if (authType === AuthUserTypeEnum.apikey) {
+-      const currentAppId = apiKeyAppId || appId;
+-      if (!currentAppId) {
+-        return Promise.reject(
+-          'Key is error. You need to use the app key rather than the account key.'
+-        );
+-      }
+-      const app = await MongoApp.findOne({ _id: currentAppId, teamId });
+-
+-      if (!app) {
+-        return Promise.reject('app is empty');
+-      }
+-
+-      appId = String(app._id);
+-
+-      return {
+-        app
+-      };
+-    } else {
+-      // token_auth
+-      if (!appId) {
+-        return Promise.reject('appId is empty');
+-      }
+-      const { app } = await authApp({
+-        req,
+-        authToken: true,
+-        appId,
+-        per: ReadPermissionVal
+-      });
+-
+-      return {
+-        app
+-      };
+-    }
+-  })();
+-
+-  const chat = await MongoChat.findOne({ appId, chatId }).lean();
+-
+-  if (
+-    chat &&
+-    (String(chat.teamId) !== teamId ||
+-      // There's no need to distinguish who created it if it's apiKey auth
+-      (authType === AuthUserTypeEnum.token && String(chat.tmbId) !== tmbId))
+-  ) {
+-    return Promise.reject(ChatErrEnum.unAuthChat);
+-  }
+-
+-  return {
+-    teamId,
+-    tmbId,
+-    app,
+-    apikey,
+-    authType,
+-    sourceName,
+-    responseAllData: true,
+-    showCite: true,
+-    showSkillReferences: true
+-  };
+-};
+-
+ export const config = {
+   api: {
+     bodyParser: {
+diff --git a/projects/app/src/pages/api/v2/chat/completions.ts b/projects/app/src/pages/api/v2/chat/completions.ts
+index 16dcd17e5c66..bcdab61a49f6 100644
+--- a/projects/app/src/pages/api/v2/chat/completions.ts
++++ b/projects/app/src/pages/api/v2/chat/completions.ts
+@@ -1,6 +1,4 @@
+ import type { NextApiRequest, NextApiResponse } from 'next';
+-import { authApp } from '@fastgpt/service/support/permission/app/auth';
+-import { authCert } from '@fastgpt/service/support/permission/auth/common';
+ import { sseErrRes, jsonRes } from '@fastgpt/service/common/response';
+ import { getLogger, LogCategories } from '@fastgpt/service/common/logger';
+ import { ChatRoleEnum, ChatSourceEnum } from '@fastgpt/global/core/chat/constants';
+@@ -44,7 +42,6 @@ import { ChatErrEnum } from '@fastgpt/global/common/error/code/chat';
+ import { type AIChatItemType, type UserChatItemType } from '@fastgpt/global/core/chat/type';
+ import { NextAPI } from '@/service/middleware/entry';
+ import { getAppLatestVersion } from '@fastgpt/service/core/app/version/controller';
+-import { ReadPermissionVal } from '@fastgpt/global/support/permission/constant';
+ import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
+ import {
+   serverGetWorkflowToolRunUserQuery,
+@@ -73,6 +70,7 @@ import {
+   createWorkflowStreamResponseContext,
+   type WorkflowStreamResponseContext
+ } from '@/service/core/workflow/streamResponseContext';
++import { authChatCompletionHeaderRequest } from '@/service/support/permission/auth/chatCompletion';
+ const logger = getLogger(LogCategories.MODULE.CHAT.ITEM);
+ 
+ async function handler(req: NextApiRequest, res: NextApiResponse) {
+@@ -92,7 +90,8 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+     showSkillReferences,
+     messages,
+     responseChatItemId,
+-    metadata
++    metadata,
++    authProxy
+   } = completionBody;
+   let { detail, retainDatasetCite, variables } = completionBody;
+ 
+@@ -150,6 +149,10 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+     } = await (async () => {
+       // share chat
+       if (shareId && outLinkUid) {
++        if (authProxy) {
++          return Promise.reject(ChatErrEnum.unAuthChat);
++        }
++
+         return authShareChat({
+           shareId,
+           outLinkUid,
+@@ -160,6 +163,10 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+       }
+       // team space chat
+       if (spaceTeamId && appId && teamToken) {
++        if (authProxy) {
++          return Promise.reject(ChatErrEnum.unAuthChat);
++        }
++
+         return authTeamSpaceChat({
+           teamId: spaceTeamId,
+           teamToken,
+@@ -169,10 +176,11 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
+       }
+ 
+       /* parse req: api or token */
+-      return authHeaderRequest({
++      return authChatCompletionHeaderRequest({
+         req,
+         appId,
+-        chatId
++        chatId,
++        authProxy
+       });
+     })();
+ 
+@@ -658,88 +666,6 @@ const authTeamSpaceChat = async ({
+     outLinkUserId: uid
+   };
+ };
+-const authHeaderRequest = async ({
+-  req,
+-  appId,
+-  chatId
+-}: {
+-  req: NextApiRequest;
+-  appId?: string;
+-  chatId?: string;
+-}): Promise<AuthResponseType> => {
+-  const {
+-    appId: apiKeyAppId,
+-    teamId,
+-    tmbId,
+-    authType,
+-    sourceName,
+-    apikey
+-  } = await authCert({
+-    req,
+-    authToken: true,
+-    authApiKey: true
+-  });
+-
+-  const { app } = await (async () => {
+-    if (authType === AuthUserTypeEnum.apikey) {
+-      const currentAppId = apiKeyAppId || appId;
+-      if (!currentAppId) {
+-        return Promise.reject(
+-          'Key is error. You need to use the app key rather than the account key.'
+-        );
+-      }
+-      const app = await MongoApp.findOne({ _id: currentAppId, teamId });
+-
+-      if (!app) {
+-        return Promise.reject('app is empty');
+-      }
+-
+-      appId = String(app._id);
+-
+-      return {
+-        app
+-      };
+-    } else {
+-      // token_auth
+-      if (!appId) {
+-        return Promise.reject('appId is empty');
+-      }
+-      const { app } = await authApp({
+-        req,
+-        authToken: true,
+-        appId,
+-        per: ReadPermissionVal
+-      });
+-
+-      return {
+-        app
+-      };
+-    }
+-  })();
+-
+-  const chat = await MongoChat.findOne({ appId, chatId }).lean();
+-
+-  if (
+-    chat &&
+-    (String(chat.teamId) !== teamId ||
+-      // There's no need to distinguish who created it if it's apiKey auth
+-      (authType === AuthUserTypeEnum.token && String(chat.tmbId) !== tmbId))
+-  ) {
+-    return Promise.reject(ChatErrEnum.unAuthChat);
+-  }
+-
+-  return {
+-    teamId,
+-    tmbId,
+-    app,
+-    apikey,
+-    authType,
+-    sourceName,
+-    responseAllData: true,
+-    showCite: true
+-  };
+-};
+-
+ export const config = {
+   api: {
+     bodyParser: {
+diff --git a/projects/app/src/service/support/permission/auth/chatCompletion.ts b/projects/app/src/service/support/permission/auth/chatCompletion.ts
+new file mode 100644
+index 000000000000..d02280b1ba1c
+--- /dev/null
++++ b/projects/app/src/service/support/permission/auth/chatCompletion.ts
+@@ -0,0 +1,205 @@
++import type { NextApiRequest } from 'next';
++import type {
++  AuthResponseType,
++  ChatCompletionAuthProxy
++} from '@fastgpt/global/openapi/core/chat/completion/api';
++import { ChatErrEnum } from '@fastgpt/global/common/error/code/chat';
++import { AuthUserTypeEnum, ReadPermissionVal } from '@fastgpt/global/support/permission/constant';
++import { notLeaveStatus } from '@fastgpt/global/support/user/team/constant';
++import { MongoApp } from '@fastgpt/service/core/app/schema';
++import { MongoChat } from '@fastgpt/service/core/chat/chatSchema';
++import { authApp } from '@fastgpt/service/support/permission/app/auth';
++import { authCert } from '@fastgpt/service/support/permission/auth/common';
++import { MongoUser } from '@fastgpt/service/support/user/schema';
++import { MongoTeamMember } from '@fastgpt/service/support/user/team/teamMemberSchema';
++
++/**
++ * 解析 Chat Completions 请求最终应归属的团队成员。
++ *
++ * 普通调用直接使用鉴权凭证中的 tmbId。只有开启 authProxy 的团队级 API Key 调用，
++ * 才允许通过 authProxy 指定“代表团队内某个成员执行”。代理成员必须仍在当前团队内；
++ * username 与 tmbId 同时传入时，两者必须解析到同一个团队成员。
++ */
++export const resolveChatCompletionEffectiveTmbId = async ({
++  authType,
++  authProxy,
++  teamId,
++  tmbId,
++  apiKeyAppId,
++  apiKeyAuthProxy
++}: {
++  authType: AuthUserTypeEnum;
++  authProxy?: ChatCompletionAuthProxy;
++  teamId: string;
++  tmbId: string;
++  apiKeyAppId?: string;
++  apiKeyAuthProxy?: boolean;
++}) => {
++  if (!authProxy) {
++    return {
++      tmbId,
++      isProxy: false
++    };
++  }
++
++  if (authType !== AuthUserTypeEnum.apikey || apiKeyAppId || !apiKeyAuthProxy) {
++    return Promise.reject(ChatErrEnum.unAuthChat);
++  }
++
++  const username = authProxy.username?.trim();
++  if (!username && !authProxy.tmbId) {
++    return Promise.reject(ChatErrEnum.unAuthChat);
++  }
++
++  const [memberByTmbId, memberByUsername] = await Promise.all([
++    authProxy.tmbId
++      ? MongoTeamMember.findOne({
++          _id: authProxy.tmbId,
++          teamId,
++          status: notLeaveStatus
++        })
++          .select('_id userId teamId')
++          .lean()
++      : null,
++    username
++      ? (async () => {
++          const user = await MongoUser.findOne({ username }).select('_id').lean();
++          if (!user) return null;
++
++          return MongoTeamMember.findOne({
++            teamId,
++            userId: user._id,
++            status: notLeaveStatus
++          })
++            .select('_id userId teamId')
++            .lean();
++        })()
++      : null
++  ]);
++
++  if ((authProxy.tmbId && !memberByTmbId) || (username && !memberByUsername)) {
++    return Promise.reject(ChatErrEnum.unAuthChat);
++  }
++
++  if (
++    memberByTmbId &&
++    memberByUsername &&
++    String(memberByTmbId._id) !== String(memberByUsername._id)
++  ) {
++    return Promise.reject(ChatErrEnum.unAuthChat);
++  }
++
++  const member = memberByTmbId || memberByUsername;
++  if (!member) {
++    return Promise.reject(ChatErrEnum.unAuthChat);
++  }
++
++  return {
++    tmbId: String(member._id),
++    isProxy: true
++  };
++};
++
++/**
++ * 鉴权 Chat Completions 头部请求，并返回后续对话运行需要的应用、团队和成员上下文。
++ *
++ * API Key 必须绑定 appId 或在请求体显式传 appId。全局 API Key 只有在 key 记录
++ * 开启 authProxy 时，才能把运行身份切换到团队内的指定成员。
++ */
++export const authChatCompletionHeaderRequest = async ({
++  req,
++  appId,
++  chatId,
++  authProxy,
++  showSkillReferences
++}: {
++  req: NextApiRequest;
++  appId?: string;
++  chatId?: string;
++  authProxy?: ChatCompletionAuthProxy;
++  showSkillReferences?: boolean;
++}): Promise<AuthResponseType> => {
++  const {
++    appId: authorizedAppId,
++    apiKeyAppId,
++    apiKeyAuthProxy,
++    teamId,
++    tmbId,
++    authType,
++    sourceName,
++    apikey
++  } = await authCert({
++    req,
++    authToken: true,
++    authApiKey: true
++  });
++
++  const { app } = await (async () => {
++    if (authType === AuthUserTypeEnum.apikey) {
++      const currentAppId = authorizedAppId || appId;
++      if (!currentAppId) {
++        return Promise.reject(
++          'Key is error. You need to use the app key rather than the account key.'
++        );
++      }
++      const app = await MongoApp.findOne({ _id: currentAppId, teamId });
++
++      if (!app) {
++        return Promise.reject('app is empty');
++      }
++
++      appId = String(app._id);
++
++      return {
++        app
++      };
++    }
++
++    if (!appId) {
++      return Promise.reject('appId is empty');
++    }
++    const { app } = await authApp({
++      req,
++      authToken: true,
++      appId,
++      per: ReadPermissionVal
++    });
++
++    return {
++      app
++    };
++  })();
++
++  const { tmbId: effectiveTmbId, isProxy } = await resolveChatCompletionEffectiveTmbId({
++    authType,
++    authProxy,
++    teamId,
++    tmbId,
++    apiKeyAppId,
++    apiKeyAuthProxy
++  });
++
++  const chat = await MongoChat.findOne({ appId, chatId }).lean();
++  const shouldCheckChatMember =
++    authType === AuthUserTypeEnum.token || (authType === AuthUserTypeEnum.apikey && isProxy);
++
++  if (
++    chat &&
++    (String(chat.teamId) !== teamId ||
++      (shouldCheckChatMember && String(chat.tmbId) !== effectiveTmbId))
++  ) {
++    return Promise.reject(ChatErrEnum.unAuthChat);
++  }
++
++  return {
++    teamId,
++    tmbId: effectiveTmbId,
++    app,
++    apikey,
++    authType,
++    sourceName,
++    responseAllData: true,
++    showCite: true,
++    showSkillReferences
++  };
++};
+diff --git a/projects/app/src/web/support/openapi/api.ts b/projects/app/src/web/support/openapi/api.ts
+index 3887d8381f01..59a0fb56e3ed 100644
+--- a/projects/app/src/web/support/openapi/api.ts
++++ b/projects/app/src/web/support/openapi/api.ts
+@@ -2,6 +2,8 @@ import { GET, POST, DELETE, PUT } from '@/web/common/api/request';
+ import type {
+   CreateApiKeyBodyType,
+   CreateApiKeyResponseType,
++  CopyApiKeyBodyType,
++  CopyApiKeyResponseType,
+   DeleteApiKeyQueryType,
+   DeleteApiKeyResponseType,
+   GetApiKeyListQueryType,
+@@ -28,6 +30,12 @@ export const putOpenApiKey = (data: UpdateApiKeyBodyType) =>
+ export const getOpenApiKeys = (params?: GetApiKeyListQueryType) =>
+   GET<GetApiKeyListResponseType>('/support/openapi/list', params);
+ 
++/**
++ * copy api key and record audit
++ */
++export const copyOpenApiKey = (data: CopyApiKeyBodyType) =>
++  POST<CopyApiKeyResponseType>('/support/openapi/copy', data);
++
+ /**
+  * delete api by id
+  */
+diff --git a/projects/app/test/api/support/openapi/copy.test.ts b/projects/app/test/api/support/openapi/copy.test.ts
+new file mode 100644
+index 000000000000..c9e82911dd02
+--- /dev/null
++++ b/projects/app/test/api/support/openapi/copy.test.ts
+@@ -0,0 +1,124 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest';
++import handler from '@/pages/api/support/openapi/copy';
++import { MongoApp } from '@fastgpt/service/core/app/schema';
++import { MongoOpenApi } from '@fastgpt/service/support/openapi/schema';
++import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
++import { AuditEventEnum } from '@fastgpt/global/support/user/audit/constants';
++import { addAuditLog } from '@fastgpt/service/support/user/audit/util';
++import { getRootUser } from '@test/datas/users';
++import { Call } from '@test/utils/request';
++
++describe('support/openapi/copy', () => {
++  beforeEach(() => {
++    vi.mocked(addAuditLog).mockClear();
++    vi.mocked(addAuditLog).mockResolvedValue(undefined);
++  });
++
++  it('记录团队级 APIKey 复制审计并返回明文密钥', async () => {
++    const user = await getRootUser();
++    const openapi = await MongoOpenApi.create({
++      teamId: user.teamId,
++      tmbId: user.tmbId,
++      apiKey: 'fastgpt-team-secret',
++      name: 'team key'
++    });
++
++    const auth = {
++      ...user,
++      userId: String(user.userId),
++      teamId: String(user.teamId),
++      tmbId: String(user.tmbId)
++    };
++
++    const result = await Call(handler, {
++      auth,
++      body: {
++        id: String(openapi._id)
++      }
++    });
++
++    expect(result.code).toBe(200);
++    expect(result.data).toBe('fastgpt-team-secret');
++    expect(addAuditLog).toHaveBeenCalledWith({
++      tmbId: auth.tmbId,
++      teamId: auth.teamId,
++      event: AuditEventEnum.COPY_API_KEY,
++      params: {
++        keyName: 'team key'
++      }
++    });
++    expect(JSON.stringify(vi.mocked(addAuditLog).mock.calls)).not.toContain('fastgpt-team-secret');
++  });
++
++  it('记录应用级 APIKey 复制审计并返回明文密钥', async () => {
++    const user = await getRootUser();
++    const app = await MongoApp.create({
++      teamId: user.teamId,
++      tmbId: user.tmbId,
++      name: 'test app',
++      type: AppTypeEnum.simple
++    });
++
++    const openapi = await MongoOpenApi.create({
++      teamId: user.teamId,
++      tmbId: user.tmbId,
++      appId: String(app._id),
++      apiKey: 'fastgpt-app-secret',
++      name: 'app key'
++    });
++
++    const auth = {
++      ...user,
++      userId: String(user.userId),
++      teamId: String(user.teamId),
++      tmbId: String(user.tmbId)
++    };
++
++    const result = await Call(handler, {
++      auth,
++      body: {
++        id: String(openapi._id)
++      }
++    });
++
++    expect(result.code).toBe(200);
++    expect(result.data).toBe('fastgpt-app-secret');
++    expect(addAuditLog).toHaveBeenCalledWith({
++      tmbId: auth.tmbId,
++      teamId: auth.teamId,
++      event: AuditEventEnum.COPY_API_KEY,
++      params: {
++        keyName: 'app key'
++      }
++    });
++    expect(JSON.stringify(vi.mocked(addAuditLog).mock.calls)).not.toContain('fastgpt-app-secret');
++  });
++
++  it('审计写入失败时不返回明文密钥', async () => {
++    const user = await getRootUser();
++    const openapi = await MongoOpenApi.create({
++      teamId: user.teamId,
++      tmbId: user.tmbId,
++      apiKey: 'fastgpt-audit-failed-secret',
++      name: 'audit failed key'
++    });
++
++    vi.mocked(addAuditLog).mockRejectedValueOnce(new Error('audit failed'));
++
++    const result = await Call(handler, {
++      auth: {
++        ...user,
++        userId: String(user.userId),
++        teamId: String(user.teamId),
++        tmbId: String(user.tmbId)
++      },
++      body: {
++        id: String(openapi._id)
++      }
++    });
++
++    expect(result.code).toBe(500);
++    expect(result.data).toBeUndefined();
++    expect(JSON.stringify(result)).not.toContain('fastgpt-audit-failed-secret');
++  });
++});
+diff --git a/projects/app/test/api/support/openapi/create.test.ts b/projects/app/test/api/support/openapi/create.test.ts
+index a3541a3bf1f4..a5f176175147 100644
+--- a/projects/app/test/api/support/openapi/create.test.ts
++++ b/projects/app/test/api/support/openapi/create.test.ts
+@@ -1,12 +1,9 @@
+ import type { EditApiKeyProps } from '@/global/support/openapi/api';
+ import * as createapi from '@/pages/api/support/openapi/create';
+-import { DatasetTypeEnum } from '@fastgpt/global/core/dataset/constants';
+ import { ManagePermissionVal } from '@fastgpt/global/support/permission/constant';
+-import {
+-  TeamApikeyCreatePermissionVal,
+-  TeamDatasetCreatePermissionVal
+-} from '@fastgpt/global/support/permission/user/constant';
++import { TeamApikeyCreatePermissionVal } from '@fastgpt/global/support/permission/user/constant';
+ import { MongoApp } from '@fastgpt/service/core/app/schema';
++import { MongoOpenApi } from '@fastgpt/service/support/openapi/schema';
+ import { MongoResourcePermission } from '@fastgpt/service/support/permission/schema';
+ import { getFakeUsers } from '@test/datas/users';
+ import { Call } from '@test/utils/request';
+@@ -61,4 +58,78 @@ describe('create dataset', () => {
+     expect(res2.error).toBeUndefined();
+     expect(res2.code).toBe(200);
+   });
++
++  it('team owner can create global APIKey with authProxy enabled', async () => {
++    const users = await getFakeUsers(1);
++
++    const res = await Call<EditApiKeyProps>(createapi.default, {
++      auth: users.owner,
++      body: {
++        name: 'owner auth proxy key',
++        authProxy: true,
++        limit: {
++          maxUsagePoints: 1000
++        }
++      }
++    });
++
++    expect(res.error).toBeUndefined();
++    expect(res.code).toBe(200);
++
++    const openapi = await MongoOpenApi.findOne({
++      teamId: users.owner.teamId,
++      name: 'owner auth proxy key'
++    }).lean();
++    expect(openapi?.authProxy).toBe(true);
++  });
++
++  it('non-owner cannot enable authProxy when creating global APIKey', async () => {
++    const users = await getFakeUsers(1);
++    await MongoResourcePermission.create({
++      resourceType: 'team',
++      teamId: users.members[0].teamId,
++      resourceId: null,
++      tmbId: users.members[0].tmbId,
++      permission: TeamApikeyCreatePermissionVal
++    });
++
++    const res = await Call<EditApiKeyProps>(createapi.default, {
++      auth: users.members[0],
++      body: {
++        name: 'member auth proxy key',
++        authProxy: true,
++        limit: {
++          maxUsagePoints: 1000
++        }
++      }
++    });
++
++    expect(res.code).toBe(500);
++    expect(await MongoOpenApi.findOne({ name: 'member auth proxy key' })).toBeNull();
++  });
++
++  it('app APIKey cannot enable authProxy', async () => {
++    const users = await getFakeUsers(1);
++    const app = await MongoApp.create({
++      name: 'auth proxy app',
++      type: 'simple',
++      tmbId: users.owner.tmbId,
++      teamId: users.owner.teamId
++    });
++
++    const res = await Call<EditApiKeyProps>(createapi.default, {
++      auth: users.owner,
++      body: {
++        appId: String(app._id),
++        name: 'app auth proxy key',
++        authProxy: true,
++        limit: {
++          maxUsagePoints: 1000
++        }
++      }
++    });
++
++    expect(res.code).toBe(500);
++    expect(await MongoOpenApi.findOne({ name: 'app auth proxy key' })).toBeNull();
++  });
+ });
+diff --git a/projects/app/test/api/support/openapi/list.test.ts b/projects/app/test/api/support/openapi/list.test.ts
+new file mode 100644
+index 000000000000..68fa00e4b124
+--- /dev/null
++++ b/projects/app/test/api/support/openapi/list.test.ts
+@@ -0,0 +1,117 @@
++import { describe, expect, it } from 'vitest';
++import handler from '@/pages/api/support/openapi/list';
++import { MongoApp } from '@fastgpt/service/core/app/schema';
++import { MongoOpenApi } from '@fastgpt/service/support/openapi/schema';
++import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
++import { getFakeUsers, getRootUser } from '@test/datas/users';
++import { Call } from '@test/utils/request';
++
++describe('support/openapi/list', () => {
++  it('团队级 APIKey 列表对有复制权限的记录返回脱敏值和复制权限', async () => {
++    const user = await getRootUser();
++    await MongoOpenApi.create({
++      teamId: user.teamId,
++      tmbId: user.tmbId,
++      apiKey: 'fastgpt-team-secret',
++      name: 'team key'
++    });
++
++    const result = await Call(handler, {
++      auth: user
++    });
++
++    expect(result.code).toBe(200);
++    expect(result.data).toHaveLength(1);
++    expect(result.data[0].apiKey).toBe('******cret');
++    expect(result.data[0].canCopy).toBe(true);
++    expect(result.data[0].authProxy).toBe(false);
++  });
++
++  it('团队级 APIKey 列表对无复制权限的记录保持脱敏', async () => {
++    const { manager, members } = await getFakeUsers(1);
++    const [member] = members;
++
++    await MongoOpenApi.create([
++      {
++        teamId: manager.teamId,
++        tmbId: manager.tmbId,
++        apiKey: 'fastgpt-manager-secret',
++        name: 'manager key'
++      },
++      {
++        teamId: member.teamId,
++        tmbId: member.tmbId,
++        apiKey: 'fastgpt-member-secret',
++        name: 'member key'
++      }
++    ]);
++
++    const result = await Call(handler, {
++      auth: manager
++    });
++
++    expect(result.code).toBe(200);
++    expect(result.data).toHaveLength(2);
++
++    const resultMap = Object.fromEntries(
++      result.data.map((item: { name: string; apiKey: string; canCopy: boolean }) => [
++        item.name,
++        item
++      ])
++    );
++    expect(resultMap['manager key'].apiKey).toBe('******cret');
++    expect(resultMap['manager key'].canCopy).toBe(true);
++    expect(resultMap['member key'].apiKey).toBe('******cret');
++    expect(resultMap['member key'].canCopy).toBe(false);
++  });
++
++  it('应用级 APIKey 列表返回脱敏值和复制权限', async () => {
++    const user = await getRootUser();
++    const app = await MongoApp.create({
++      teamId: user.teamId,
++      tmbId: user.tmbId,
++      name: 'test app',
++      type: AppTypeEnum.simple
++    });
++
++    await MongoOpenApi.create({
++      teamId: user.teamId,
++      tmbId: user.tmbId,
++      appId: String(app._id),
++      apiKey: 'fastgpt-app-secret',
++      name: 'app key'
++    });
++
++    const result = await Call(handler, {
++      auth: user,
++      query: {
++        appId: String(app._id)
++      }
++    });
++
++    expect(result.code).toBe(200);
++    expect(result.data).toHaveLength(1);
++    expect(result.data[0].apiKey).toBe('******cret');
++    expect(result.data[0].canCopy).toBe(true);
++    expect(result.data[0].authProxy).toBe(false);
++  });
++
++  it('团队级 APIKey 列表返回 authProxy 状态', async () => {
++    const user = await getRootUser();
++    await MongoOpenApi.create({
++      teamId: user.teamId,
++      tmbId: user.tmbId,
++      apiKey: 'fastgpt-auth-proxy-secret',
++      authProxy: true,
++      name: 'team auth proxy key'
++    });
++
++    const result = await Call(handler, {
++      auth: user
++    });
++
++    expect(result.code).toBe(200);
++    expect(result.data).toHaveLength(1);
++    expect(result.data[0].authProxy).toBe(true);
++  });
++});
+diff --git a/projects/app/test/api/support/openapi/update.test.ts b/projects/app/test/api/support/openapi/update.test.ts
+new file mode 100644
+index 000000000000..7daa1540c1c1
+--- /dev/null
++++ b/projects/app/test/api/support/openapi/update.test.ts
+@@ -0,0 +1,90 @@
++import type { UpdateApiKeyBodyType } from '@fastgpt/global/openapi/support/openapi/api';
++import handler from '@/pages/api/support/openapi/update';
++import { MongoApp } from '@fastgpt/service/core/app/schema';
++import { MongoOpenApi } from '@fastgpt/service/support/openapi/schema';
++import { getFakeUsers } from '@test/datas/users';
++import { Call } from '@test/utils/request';
++import { describe, expect, it } from 'vitest';
++
++describe('support/openapi/update', () => {
++  it('team owner can enable authProxy for global APIKey', async () => {
++    const { owner } = await getFakeUsers(1);
++    const openapi = await MongoOpenApi.create({
++      teamId: owner.teamId,
++      tmbId: owner.tmbId,
++      apiKey: 'fastgpt-owner-auth-proxy',
++      authProxy: false,
++      name: 'owner key'
++    });
++
++    const res = await Call<UpdateApiKeyBodyType>(handler, {
++      auth: owner,
++      body: {
++        _id: String(openapi._id),
++        authProxy: true
++      }
++    });
++
++    expect(res.error).toBeUndefined();
++    expect(res.code).toBe(200);
++
++    const updated = await MongoOpenApi.findById(openapi._id).lean();
++    expect(updated?.authProxy).toBe(true);
++  });
++
++  it('non-owner cannot enable authProxy for global APIKey', async () => {
++    const { members } = await getFakeUsers(1);
++    const [member] = members;
++    const openapi = await MongoOpenApi.create({
++      teamId: member.teamId,
++      tmbId: member.tmbId,
++      apiKey: 'fastgpt-member-auth-proxy',
++      authProxy: false,
++      name: 'member key'
++    });
++
++    const res = await Call<UpdateApiKeyBodyType>(handler, {
++      auth: member,
++      body: {
++        _id: String(openapi._id),
++        authProxy: true
++      }
++    });
++
++    expect(res.code).toBe(500);
++
++    const updated = await MongoOpenApi.findById(openapi._id).lean();
++    expect(updated?.authProxy).toBe(false);
++  });
++
++  it('app APIKey cannot enable authProxy', async () => {
++    const { owner } = await getFakeUsers(1);
++    const app = await MongoApp.create({
++      name: 'app auth proxy update',
++      type: 'simple',
++      tmbId: owner.tmbId,
++      teamId: owner.teamId
++    });
++    const openapi = await MongoOpenApi.create({
++      teamId: owner.teamId,
++      tmbId: owner.tmbId,
++      appId: String(app._id),
++      apiKey: 'fastgpt-app-auth-proxy',
++      authProxy: false,
++      name: 'app key'
++    });
++
++    const res = await Call<UpdateApiKeyBodyType>(handler, {
++      auth: owner,
++      body: {
++        _id: String(openapi._id),
++        authProxy: true
++      }
++    });
++
++    expect(res.code).toBe(500);
++
++    const updated = await MongoOpenApi.findById(openapi._id).lean();
++    expect(updated?.authProxy).toBe(false);
++  });
++});
+diff --git a/projects/app/test/service/support/permission/auth/chatCompletion.test.ts b/projects/app/test/service/support/permission/auth/chatCompletion.test.ts
+new file mode 100644
+index 000000000000..a4fe83479615
+--- /dev/null
++++ b/projects/app/test/service/support/permission/auth/chatCompletion.test.ts
+@@ -0,0 +1,355 @@
++import { describe, expect, it } from 'vitest';
++import { ChatSourceEnum } from '@fastgpt/global/core/chat/constants';
++import { ChatErrEnum } from '@fastgpt/global/common/error/code/chat';
++import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
++import { AuthUserTypeEnum } from '@fastgpt/global/support/permission/constant';
++import { TeamMemberStatusEnum } from '@fastgpt/global/support/user/team/constant';
++import { MongoApp } from '@fastgpt/service/core/app/schema';
++import { MongoChat } from '@fastgpt/service/core/chat/chatSchema';
++import { MongoTeamMember } from '@fastgpt/service/support/user/team/teamMemberSchema';
++import { getUser } from '@test/datas/users';
++import {
++  authChatCompletionHeaderRequest,
++  resolveChatCompletionEffectiveTmbId
++} from '@/service/support/permission/auth/chatCompletion';
++
++type TestUser = Awaited<ReturnType<typeof getUser>>;
++
++const createApiApp = (owner: TestUser) => {
++  return MongoApp.create({
++    name: `app-${owner.tmbId}`,
++    type: AppTypeEnum.simple,
++    teamId: owner.teamId,
++    tmbId: owner.tmbId
++  });
++};
++
++const createApiKeyAuth = ({
++  owner,
++  appId,
++  apiKeyAppId,
++  apiKeyAuthProxy = true
++}: {
++  owner: TestUser;
++  appId?: string;
++  apiKeyAppId?: string;
++  apiKeyAuthProxy?: boolean;
++}) => ({
++  ...owner,
++  appId: appId || '',
++  apiKeyAppId: apiKeyAppId || '',
++  authType: AuthUserTypeEnum.apikey,
++  apikey: 'test-api-key',
++  apiKeyAuthProxy
++});
++
++describe('resolveChatCompletionEffectiveTmbId', () => {
++  it('keeps API key owner as effective caller when authProxy is omitted', async () => {
++    const owner = await getUser('completion-proxy-owner-omitted');
++
++    await expect(
++      resolveChatCompletionEffectiveTmbId({
++        authType: AuthUserTypeEnum.apikey,
++        teamId: owner.teamId,
++        tmbId: owner.tmbId
++      })
++    ).resolves.toEqual({
++      tmbId: owner.tmbId,
++      isProxy: false
++    });
++  });
++
++  it('resolves username to an active team member in the API key team', async () => {
++    const owner = await getUser('completion-proxy-owner-username');
++    const member = await getUser('completion-proxy-member-username', owner.teamId);
++
++    await expect(
++      resolveChatCompletionEffectiveTmbId({
++        authType: AuthUserTypeEnum.apikey,
++        teamId: owner.teamId,
++        tmbId: owner.tmbId,
++        apiKeyAuthProxy: true,
++        authProxy: {
++          username: 'completion-proxy-member-username'
++        }
++      })
++    ).resolves.toEqual({
++      tmbId: member.tmbId,
++      isProxy: true
++    });
++  });
++
++  it('resolves tmbId to an active team member in the API key team', async () => {
++    const owner = await getUser('completion-proxy-owner-tmbid');
++    const member = await getUser('completion-proxy-member-tmbid', owner.teamId);
++
++    await expect(
++      resolveChatCompletionEffectiveTmbId({
++        authType: AuthUserTypeEnum.apikey,
++        teamId: owner.teamId,
++        tmbId: owner.tmbId,
++        apiKeyAuthProxy: true,
++        authProxy: {
++          tmbId: member.tmbId
++        }
++      })
++    ).resolves.toEqual({
++      tmbId: member.tmbId,
++      isProxy: true
++    });
++  });
++
++  it('accepts username and tmbId only when they point to the same member', async () => {
++    const owner = await getUser('completion-proxy-owner-both');
++    const member = await getUser('completion-proxy-member-both', owner.teamId);
++
++    await expect(
++      resolveChatCompletionEffectiveTmbId({
++        authType: AuthUserTypeEnum.apikey,
++        teamId: owner.teamId,
++        tmbId: owner.tmbId,
++        apiKeyAuthProxy: true,
++        authProxy: {
++          username: 'completion-proxy-member-both',
++          tmbId: member.tmbId
++        }
++      })
++    ).resolves.toEqual({
++      tmbId: member.tmbId,
++      isProxy: true
++    });
++  });
++
++  it('rejects username and tmbId that point to different members', async () => {
++    const owner = await getUser('completion-proxy-owner-mismatch');
++    const memberA = await getUser('completion-proxy-member-a-mismatch', owner.teamId);
++    const memberB = await getUser('completion-proxy-member-b-mismatch', owner.teamId);
++
++    await expect(
++      resolveChatCompletionEffectiveTmbId({
++        authType: AuthUserTypeEnum.apikey,
++        teamId: owner.teamId,
++        tmbId: owner.tmbId,
++        apiKeyAuthProxy: true,
++        authProxy: {
++          username: 'completion-proxy-member-a-mismatch',
++          tmbId: memberB.tmbId
++        }
++      })
++    ).rejects.toBe(ChatErrEnum.unAuthChat);
++
++    expect(memberA.tmbId).not.toBe(memberB.tmbId);
++  });
++
++  it('rejects members outside the API key team', async () => {
++    const owner = await getUser('completion-proxy-owner-cross-team');
++    const outsider = await getUser('completion-proxy-outsider-cross-team');
++
++    await expect(
++      resolveChatCompletionEffectiveTmbId({
++        authType: AuthUserTypeEnum.apikey,
++        teamId: owner.teamId,
++        tmbId: owner.tmbId,
++        apiKeyAuthProxy: true,
++        authProxy: {
++          tmbId: outsider.tmbId
++        }
++      })
++    ).rejects.toBe(ChatErrEnum.unAuthChat);
++  });
++
++  it('rejects leave or forbidden members', async () => {
++    const owner = await getUser('completion-proxy-owner-forbidden');
++    const forbidden = await getUser('completion-proxy-member-forbidden', owner.teamId);
++    await MongoTeamMember.updateOne(
++      { _id: forbidden.tmbId },
++      { status: TeamMemberStatusEnum.forbidden }
++    );
++
++    await expect(
++      resolveChatCompletionEffectiveTmbId({
++        authType: AuthUserTypeEnum.apikey,
++        teamId: owner.teamId,
++        tmbId: owner.tmbId,
++        apiKeyAuthProxy: true,
++        authProxy: {
++          tmbId: forbidden.tmbId
++        }
++      })
++    ).rejects.toBe(ChatErrEnum.unAuthChat);
++  });
++
++  it('rejects authProxy when APIKey capability is disabled', async () => {
++    const owner = await getUser('completion-proxy-owner-disabled');
++
++    await expect(
++      resolveChatCompletionEffectiveTmbId({
++        authType: AuthUserTypeEnum.apikey,
++        teamId: owner.teamId,
++        tmbId: owner.tmbId,
++        apiKeyAuthProxy: false,
++        authProxy: {
++          tmbId: owner.tmbId
++        }
++      })
++    ).rejects.toBe(ChatErrEnum.unAuthChat);
++  });
++
++  it('rejects authProxy for app-level APIKey', async () => {
++    const owner = await getUser('completion-proxy-owner-app-key');
++
++    await expect(
++      resolveChatCompletionEffectiveTmbId({
++        authType: AuthUserTypeEnum.apikey,
++        teamId: owner.teamId,
++        tmbId: owner.tmbId,
++        apiKeyAppId: 'app-key-bound-app',
++        apiKeyAuthProxy: true,
++        authProxy: {
++          tmbId: owner.tmbId
++        }
++      })
++    ).rejects.toBe(ChatErrEnum.unAuthChat);
++  });
++
++  it('rejects authProxy for non API key auth', async () => {
++    const owner = await getUser('completion-proxy-owner-token');
++
++    await expect(
++      resolveChatCompletionEffectiveTmbId({
++        authType: AuthUserTypeEnum.token,
++        teamId: owner.teamId,
++        tmbId: owner.tmbId,
++        authProxy: {
++          tmbId: owner.tmbId
++        }
++      })
++    ).rejects.toBe(ChatErrEnum.unAuthChat);
++  });
++});
++
++describe('authChatCompletionHeaderRequest', () => {
++  it('returns the proxied tmbId and keeps API key usage attribution data', async () => {
++    const owner = await getUser('completion-header-owner-proxy');
++    const member = await getUser('completion-header-member-proxy', owner.teamId);
++    const app = await createApiApp(owner);
++
++    const result = await authChatCompletionHeaderRequest({
++      req: {
++        auth: createApiKeyAuth({
++          owner
++        })
++      } as any,
++      appId: String(app._id),
++      authProxy: {
++        username: 'completion-header-member-proxy'
++      },
++      showSkillReferences: true
++    });
++
++    expect(result.tmbId).toBe(member.tmbId);
++    expect(result.teamId).toBe(owner.teamId);
++    expect(result.apikey).toBe('test-api-key');
++    expect(result.showSkillReferences).toBe(true);
++  });
++
++  it('allows a proxied caller to continue their own chat', async () => {
++    const owner = await getUser('completion-header-owner-own-chat');
++    const member = await getUser('completion-header-member-own-chat', owner.teamId);
++    const app = await createApiApp(owner);
++    const chatId = 'own-chat';
++    await MongoChat.create({
++      appId: app._id,
++      chatId,
++      teamId: owner.teamId,
++      tmbId: member.tmbId,
++      source: ChatSourceEnum.api
++    });
++
++    const result = await authChatCompletionHeaderRequest({
++      req: {
++        auth: createApiKeyAuth({
++          owner
++        })
++      } as any,
++      appId: String(app._id),
++      chatId,
++      authProxy: {
++        tmbId: member.tmbId
++      }
++    });
++
++    expect(result.tmbId).toBe(member.tmbId);
++  });
++
++  it('rejects a proxied caller continuing another member chat', async () => {
++    const owner = await getUser('completion-header-owner-other-chat');
++    const memberA = await getUser('completion-header-member-a-other-chat', owner.teamId);
++    const memberB = await getUser('completion-header-member-b-other-chat', owner.teamId);
++    const app = await createApiApp(owner);
++    const chatId = 'other-chat';
++    await MongoChat.create({
++      appId: app._id,
++      chatId,
++      teamId: owner.teamId,
++      tmbId: memberA.tmbId,
++      source: ChatSourceEnum.api
++    });
++
++    await expect(
++      authChatCompletionHeaderRequest({
++        req: {
++          auth: createApiKeyAuth({
++            owner
++          })
++        } as any,
++        appId: String(app._id),
++        chatId,
++        authProxy: {
++          tmbId: memberB.tmbId
++        }
++      })
++    ).rejects.toBe(ChatErrEnum.unAuthChat);
++  });
++
++  it('rejects authProxy when the APIKey is bound to an app', async () => {
++    const owner = await getUser('completion-header-owner-app-key');
++    const member = await getUser('completion-header-member-app-key', owner.teamId);
++    const app = await createApiApp(owner);
++
++    await expect(
++      authChatCompletionHeaderRequest({
++        req: {
++          auth: createApiKeyAuth({
++            owner,
++            appId: String(app._id),
++            apiKeyAppId: String(app._id)
++          })
++        } as any,
++        authProxy: {
++          tmbId: member.tmbId
++        }
++      })
++    ).rejects.toBe(ChatErrEnum.unAuthChat);
++  });
++
++  it('allows legacy Bearer key-appId when the global APIKey enables authProxy', async () => {
++    const owner = await getUser('completion-header-owner-legacy');
++    const member = await getUser('completion-header-member-legacy', owner.teamId);
++    const app = await createApiApp(owner);
++
++    const result = await authChatCompletionHeaderRequest({
++      req: {
++        auth: createApiKeyAuth({
++          owner,
++          appId: String(app._id)
++        })
++      } as any,
++      authProxy: {
++        tmbId: member.tmbId
++      }
++    });
++
++    expect(result.tmbId).toBe(member.tmbId);
++  });
++});
+diff --git a/test/mocks/request.ts b/test/mocks/request.ts
+index f98e325a3f1c..9eb1c1780345 100644
+--- a/test/mocks/request.ts
++++ b/test/mocks/request.ts
+@@ -45,9 +45,11 @@ export type parseHeaderCertRet = {
+   teamId: string;
+   tmbId: string;
+   appId: string;
++  apiKeyAppId?: string;
+   authType: AuthUserTypeEnum;
+   sourceName: string | undefined;
+   apikey: string;
++  apiKeyAuthProxy?: boolean;
+   isRoot: boolean;
+   sessionId: string;
+ };
