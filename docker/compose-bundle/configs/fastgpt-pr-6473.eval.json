@@ -1,0 +1,52 @@
+{
+  "case_id": "fastgpt-pr-6473",
+  "pr_number": 6473,
+  "title": "feat(docs): add analytics tracking script support",
+  "base_commit": "4b24472106cde7f2364bd0e6753ba0ec5918b89b",
+  "pnpm_version": "9.15.9",
+  "requires_bun": false,
+  "known_problem": "Docs-only change. The required gates are document build and document Dockerfile build.",
+  "changed_files": [
+    ".github/workflows/docs-deploy.yml",
+    "document/Dockerfile",
+    "document/app/[lang]/layout.tsx"
+  ],
+  "commands": [
+    {
+      "name": "toolchain",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "node --version && pnpm --version && docker --version && git --version",
+      "timeout_seconds": 120,
+      "required": true,
+      "reason": "Verify docs build and docker build tools."
+    },
+    {
+      "name": "git_diff_check",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "git diff --check",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Check patch whitespace and formatting."
+    },
+    {
+      "name": "build_document",
+      "phase": "build",
+      "cwd": "document",
+      "shell": "pnpm build",
+      "timeout_seconds": 1800,
+      "required": true,
+      "reason": "Docs layout change must pass document build."
+    },
+    {
+      "name": "build_document_docker",
+      "phase": "docker",
+      "cwd": ".",
+      "shell": "docker build -f document/Dockerfile -t repoaces/document-pr6473:local document",
+      "timeout_seconds": 2400,
+      "required": true,
+      "reason": "Changed document Dockerfile must build."
+    }
+  ]
+}

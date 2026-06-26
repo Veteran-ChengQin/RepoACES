@@ -1,0 +1,62 @@
+{
+  "case_id": "fastgpt-pr-6660",
+  "pr_number": 6660,
+  "title": "feat: add skill version update and switch",
+  "base_commit": "154107557f0002e6a7df94b6b04fd275d5fafb0d",
+  "pnpm_version": "9.15.9",
+  "requires_bun": false,
+  "known_problem": "projects/app build covers the changed API and OpenAPI type path; this PR passed in the earlier analysis.",
+  "changed_files": [
+    "packages/global/openapi/core/agentSkills/api.ts",
+    "packages/global/openapi/core/agentSkills/index.ts",
+    "projects/app/src/pages/api/core/agentSkills/version/switch.ts",
+    "projects/app/src/pages/api/core/agentSkills/version/update.ts"
+  ],
+  "commands": [
+    {
+      "name": "toolchain",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "node --version && npm --version && pnpm --version && git --version && rg --version | head -1",
+      "timeout_seconds": 120,
+      "required": true,
+      "reason": "Verify Node, pnpm, git, and ripgrep are available."
+    },
+    {
+      "name": "git_diff_check",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "git diff --check",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Check patch whitespace and formatting."
+    },
+    {
+      "name": "root_typecheck_best_effort",
+      "phase": "build",
+      "cwd": ".",
+      "shell": "pnpm exec tsc -p tsconfig.json --noEmit --pretty false",
+      "timeout_seconds": 1800,
+      "required": false,
+      "reason": "Best-effort root TypeScript diagnostic; older FastGPT commits may fail for repository-wide type complexity."
+    },
+    {
+      "name": "prepare_sdks",
+      "phase": "build",
+      "cwd": ".",
+      "shell": "pnpm run build:sdks",
+      "timeout_seconds": 900,
+      "required": false,
+      "reason": "Rebuild generated SDK dist files after git clean before app build."
+    },
+    {
+      "name": "build_projects_app",
+      "phase": "build",
+      "cwd": "projects/app",
+      "shell": "pnpm build",
+      "timeout_seconds": 2400,
+      "required": true,
+      "reason": "The PR changes app APIs and OpenAPI types, so projects/app build is the required compile gate."
+    }
+  ]
+}

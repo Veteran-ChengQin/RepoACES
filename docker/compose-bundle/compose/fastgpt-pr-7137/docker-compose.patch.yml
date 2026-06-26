@@ -1,0 +1,4 @@
+﻿services:
+  evaluator:
+    volumes:
+      - ./candidate.patch:/patches/candidate.patch:ro

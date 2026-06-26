@@ -1,0 +1,72 @@
+{
+  "case_id": "fastgpt-pr-7140",
+  "pr_number": 7140,
+  "title": "feat: add agent dataset auth entry",
+  "base_commit": "62ed465571fec59b5ebdc7b852c91368efd7f442",
+  "pnpm_version": "10.33.4",
+  "requires_bun": false,
+  "known_problem": "Agent dataset auth touches global app utils, service agent dispatch, and app editor UI. Run focused tests and app build.",
+  "changed_files": [
+    "packages/global/core/app/utils.ts",
+    "packages/global/test/core/app/utils.test.ts",
+    "packages/service/core/workflow/dispatch/ai/agent/utils.ts",
+    "packages/service/test/core/workflow/dispatch/ai/agent/utils.test.ts",
+    "projects/app/test/web/core/app/utils.test.ts"
+  ],
+  "commands": [
+    {
+      "name": "toolchain",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "node --version && pnpm --version && git --version && rg --version | head -1",
+      "timeout_seconds": 120,
+      "required": true,
+      "reason": "Verify base image toolchain."
+    },
+    {
+      "name": "git_diff_check",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "git diff --check",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Check patch whitespace and formatting."
+    },
+    {
+      "name": "global_app_utils_test",
+      "phase": "test",
+      "cwd": "packages/global",
+      "shell": "pnpm exec vitest run test/core/app/utils.test.ts -c vitest.config.ts",
+      "timeout_seconds": 900,
+      "required": true,
+      "reason": "Run focused global app utility tests."
+    },
+    {
+      "name": "service_agent_utils_tests",
+      "phase": "test",
+      "cwd": "packages/service",
+      "shell": "pnpm exec vitest run test/core/workflow/dispatch/ai/agent/utils.test.ts test/core/workflow/dispatch/ai/agent/sub/dataset.test.ts -c vitest.config.ts",
+      "timeout_seconds": 1200,
+      "required": true,
+      "reason": "Run focused agent dataset auth service tests."
+    },
+    {
+      "name": "prepare_sdks",
+      "phase": "build",
+      "cwd": ".",
+      "shell": "pnpm run build:sdks",
+      "timeout_seconds": 900,
+      "required": true,
+      "reason": "Rebuild generated SDK dist files after git clean before app build."
+    },
+    {
+      "name": "build_projects_app",
+      "phase": "build",
+      "cwd": "projects/app",
+      "shell": "pnpm build",
+      "timeout_seconds": 2400,
+      "required": true,
+      "reason": "App editor UI and agent auth changes must compile through app build."
+    }
+  ]
+}

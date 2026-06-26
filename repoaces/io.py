@@ -31,6 +31,11 @@ def write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def write_patch_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8", newline="\n")
+
+
 def path_to_jsonable(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)

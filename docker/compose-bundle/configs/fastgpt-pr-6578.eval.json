@@ -1,0 +1,72 @@
+{
+  "case_id": "fastgpt-pr-6578",
+  "pr_number": 6578,
+  "title": "feat(agent): add skill reference logging and display",
+  "base_commit": "af6861df98324a6e0f6d66b1c1501fb0c9b235e2",
+  "pnpm_version": "9.15.9",
+  "requires_bun": false,
+  "known_problem": "Agent logging touches service workflow dispatch and app chat UI. Scope tests to changed service/app tests and app build.",
+  "changed_files": [
+    "packages/service/core/workflow/dispatch/ai/agent/index.ts",
+    "packages/service/core/agentSkills/zipBuilder.ts",
+    "projects/app/src/pages/api/v1/chat/completions.ts",
+    "projects/app/test/pages/api/core/chat/record/getRecords_v2.test.ts",
+    "test/cases/service/core/workflow/dispatch/ai/agent/capability/sandboxSkills.test.ts"
+  ],
+  "commands": [
+    {
+      "name": "toolchain",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "node --version && pnpm --version && git --version && rg --version | head -1",
+      "timeout_seconds": 120,
+      "required": true,
+      "reason": "Verify base image toolchain."
+    },
+    {
+      "name": "git_diff_check",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "git diff --check",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Check patch whitespace and formatting."
+    },
+    {
+      "name": "service_agent_tests",
+      "phase": "test",
+      "cwd": ".",
+      "shell": "pnpm exec vitest run test/cases/service/core/workflow/dispatch/ai/agent/capability/sandboxSkills.test.ts test/cases/service/core/agentSkills/zipBuilder.test.ts",
+      "timeout_seconds": 1500,
+      "required": true,
+      "reason": "Run focused agent skill and sandbox skill tests."
+    },
+    {
+      "name": "app_chat_record_tests",
+      "phase": "test",
+      "cwd": "projects/app",
+      "shell": "pnpm test -- test/pages/api/core/chat/record/getRecords_v2.test.ts test/pages/api/support/outLink/playground/config.test.ts",
+      "timeout_seconds": 1500,
+      "required": true,
+      "reason": "Run focused app tests for changed chat/outLink behavior."
+    },
+    {
+      "name": "prepare_sdks",
+      "phase": "build",
+      "cwd": ".",
+      "shell": "pnpm run build:sdks",
+      "timeout_seconds": 900,
+      "required": true,
+      "reason": "Rebuild generated SDK dist files after git clean before app build."
+    },
+    {
+      "name": "build_projects_app",
+      "phase": "build",
+      "cwd": "projects/app",
+      "shell": "pnpm build",
+      "timeout_seconds": 2400,
+      "required": true,
+      "reason": "Chat UI and API changes must compile through app build."
+    }
+  ]
+}

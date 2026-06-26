@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-6942",
+    "pr_number":  "6942",
+    "title":  "feat: support image dataset search",
+    "base_commit":  "92e695887d9876b7707af9be9602a28d6304ac54",
+    "pnpm_version":  "9.15.9",
+    "requires_bun":  false
+}

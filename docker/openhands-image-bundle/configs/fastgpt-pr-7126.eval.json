@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-7126",
+    "pr_number":  "7126",
+    "title":  "feat(openapi): refine API key auth proxy and app isolation",
+    "base_commit":  "741ad4e2a35ec9edf6e640ac90505e929742533f",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

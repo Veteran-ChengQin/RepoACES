@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-6473",
+    "pr_number":  "6473",
+    "title":  "feat(docs): add analytics tracking script support",
+    "base_commit":  "4b24472106cde7f2364bd0e6753ba0ec5918b89b",
+    "pnpm_version":  "9.15.9",
+    "requires_bun":  false
+}

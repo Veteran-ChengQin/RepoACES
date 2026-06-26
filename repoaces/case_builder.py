@@ -142,6 +142,7 @@ Base commit: `{public_case.base_commit}`
 
 Do not browse the original pull request, golden patch, head commit, or online implementation.
 Quality and completeness are more important than speed.
+{self._render_runtime_guidance(public_case)}
 """
 
     def render_requirement_spec(self, public_case: PublicCase) -> str:
@@ -189,3 +190,30 @@ The coding agent must not receive the golden patch, head commit, changed-files l
     def _sentence(self, text: str) -> str:
         text = re.sub(r"\s+", " ", text).strip()
         return text.rstrip(".") + "."
+
+    def _render_runtime_guidance(self, public_case: PublicCase) -> str:
+        if "fastgpt" not in public_case.repo.lower():
+            return ""
+        return """
+
+## FastGPT Build/Test Runtime Guide
+
+Use this guide while validating changes in the FastGPT workspace.
+
+- Work from the repository root unless a command explicitly changes directory.
+- The workspace may already be prepared by a RepoACES OpenHands FastGPT image. If `/opt/repoaces-oh/openhands-common-commands.sh` exists, use it for quick root-level feedback:
+  - `/opt/repoaces-oh/openhands-common-commands.sh env`
+  - `/opt/repoaces-oh/openhands-common-commands.sh build`
+  - `/opt/repoaces-oh/openhands-common-commands.sh test`
+  - `/opt/repoaces-oh/openhands-common-commands.sh compose`
+- Prefer `pnpm` through the repository's configured Corepack or image-provided version.
+- If dependencies are missing, or a package cannot be found in the workspace, run `pnpm install --frozen-lockfile` from the repository root and record the result. Avoid deleting `node_modules` unless necessary.
+- If `build:sdks` exists, run `pnpm run build:sdks` before app builds that depend on generated SDK artifacts.
+- Targeted tests are useful while developing, but they do not replace package-level build/type checks.
+- If files under `projects/app/**`, `packages/global/**`, or app-facing service types are changed, run `cd projects/app && pnpm build` unless a clear environment blocker prevents it.
+- If files under `packages/service/**` are changed, run `cd packages/service && pnpm test` or a narrower Vitest command first, then report whether the package-level test suite was run.
+- If files under `projects/code-sandbox/**` are changed, run `cd projects/code-sandbox && pnpm build`; run targeted Vitest tests first if needed, but also run `pnpm test` when the change can affect worker lifecycle, resource limits, security, or API behavior.
+- If files under `document/**` are changed, run `cd document && pnpm build`.
+- If files under `deploy/dev/**` or Docker Compose files are changed, run `docker compose config` in the relevant compose directory. Use `docker compose up -d` only when runtime services are required for the feature check.
+- In the final response, list every validation command, whether it passed, and any exact blocker.
+"""

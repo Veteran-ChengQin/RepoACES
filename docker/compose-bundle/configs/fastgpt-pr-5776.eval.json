@@ -1,0 +1,88 @@
+{
+  "case_id": "fastgpt-pr-5776",
+  "pr_number": 5776,
+  "title": "feat: add health check to MongoDB service in Docker Compose templates",
+  "base_commit": "19846905ff007bcd0060299e1ca4fefaf59a23c2",
+  "pnpm_version": "9.15.9",
+  "requires_bun": false,
+  "known_problem": "This is a deploy/template PR and should not trigger root pnpm test. Real compose files are checked; template files with ${{...}} placeholders are not passed directly to docker compose config.",
+  "changed_files": [
+    "deploy/dev/docker-compose.cn.yml",
+    "deploy/dev/docker-compose.yml",
+    "deploy/docker/cn/docker-compose.milvus.yml",
+    "deploy/docker/cn/docker-compose.oceanbase.yml",
+    "deploy/docker/cn/docker-compose.pg.yml",
+    "deploy/docker/cn/docker-compose.zilliz.yml",
+    "deploy/docker/global/docker-compose.milvus.yml",
+    "deploy/docker/global/docker-compose.oceanbase.yml",
+    "deploy/docker/global/docker-compose.pg.yml",
+    "deploy/docker/global/docker-compose.ziliiz.yml",
+    "deploy/templates/docker-compose.dev.yml",
+    "deploy/templates/docker-compose.prod.yml"
+  ],
+  "commands": [
+    {
+      "name": "toolchain",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "docker --version && node --version && pnpm --version && git --version",
+      "timeout_seconds": 120,
+      "required": true,
+      "reason": "Verify tools required for docker compose config exist."
+    },
+    {
+      "name": "git_diff_check",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "git diff --check",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Check patch whitespace and formatting."
+    },
+    {
+      "name": "compose_dev",
+      "phase": "docker",
+      "cwd": ".",
+      "shell": "bash /opt/repoaces-pr/docker-compose-config.sh deploy/dev/docker-compose.yml",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "The real dev compose file must parse."
+    },
+    {
+      "name": "compose_dev_cn",
+      "phase": "docker",
+      "cwd": ".",
+      "shell": "bash /opt/repoaces-pr/docker-compose-config.sh deploy/dev/docker-compose.cn.yml",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "The real CN dev compose file must parse."
+    },
+    {
+      "name": "compose_cn_pg",
+      "phase": "docker",
+      "cwd": ".",
+      "shell": "bash /opt/repoaces-pr/docker-compose-config.sh deploy/docker/cn/docker-compose.pg.yml",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Cover standalone CN PG deployment compose."
+    },
+    {
+      "name": "compose_global_pg",
+      "phase": "docker",
+      "cwd": ".",
+      "shell": "bash /opt/repoaces-pr/docker-compose-config.sh deploy/docker/global/docker-compose.pg.yml",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Cover standalone global PG deployment compose."
+    },
+    {
+      "name": "template_placeholder_scan",
+      "phase": "docker",
+      "cwd": ".",
+      "shell": "grep -R \"healthcheck:\" deploy/templates deploy/docker document/public/deploy | head -80",
+      "timeout_seconds": 120,
+      "required": false,
+      "reason": "Template files are only scanned as text and are not passed directly to docker compose config."
+    }
+  ]
+}

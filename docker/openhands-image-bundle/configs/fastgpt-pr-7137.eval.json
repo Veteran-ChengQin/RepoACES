@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-7137",
+    "pr_number":  "7137",
+    "title":  "feat: route helper bot generation through pro",
+    "base_commit":  "9d5a8777da127283f9e2bfe1b16864b8c18c8e98",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

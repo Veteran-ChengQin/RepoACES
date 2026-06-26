@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.request import Request, urlopen
 
-from .io import write_json, write_text
+from .io import write_json, write_patch_text, write_text
 from .shell import require_ok, run_cmd
 
 
@@ -85,9 +85,7 @@ class OpenHandsRuntime:
 
         repo_mount = repo_mount_path or self._docker_mount_path(repo_dir)
         home_mount = self._docker_mount_path(openhands_home)
-        sandbox_volumes = [f"{repo_mount}:/workspace:rw"]
-        if sandbox_repo_path != "/workspace":
-            sandbox_volumes.append(f"{repo_mount}:{sandbox_repo_path}:rw")
+        sandbox_volumes = [f"{repo_mount}:{sandbox_repo_path}:rw"]
         sandbox_volumes_value = ",".join(sandbox_volumes)
 
         self._run_docker(["rm", "-f", container_name], timeout=60)
@@ -218,7 +216,7 @@ class OpenHandsRuntime:
                 timeout=300,
             )
         patch = proc.stdout if proc.returncode == 0 else ""
-        write_text(patch_path, patch)
+        write_patch_text(patch_path, patch)
         result: dict[str, Any] = {
             "patch_path": str(patch_path),
             "patch_diff_chars": len(patch),

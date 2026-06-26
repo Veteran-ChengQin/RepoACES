@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-7138",
+    "pr_number":  "7138",
+    "title":  "feat(app): filter unavailable tools in system tool selector",
+    "base_commit":  "ffa1037a3443e08d5434c0a5b66a11d868186074",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

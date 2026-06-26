@@ -96,6 +96,7 @@ class OpenHandsCodingAgent:
             auto_run=task.auto_run,
             wait_start_seconds=task.wait_start_seconds,
         )
+        initial_status = _status_from_start_task(conversation.get("start_task_status"))
         runtime_state = {
             "run_id": task.run_id,
             "mode": task.mode,
@@ -109,7 +110,7 @@ class OpenHandsCodingAgent:
             "conversation": conversation,
             "auto_run": task.auto_run,
             "model": task.model,
-            "status": "openhands_started",
+            "status": initial_status,
         }
 
         if conversation.get("conversation_id"):
@@ -190,6 +191,11 @@ class OpenHandsCodingAgent:
         conversation = runtime_state.get("conversation") or {}
         base_url = server.get("base_url")
         conversation_id = conversation.get("conversation_id")
+        if not conversation_id:
+            runtime_state["status"] = _status_from_start_task(
+                conversation.get("start_task_status"),
+                default=str(runtime_state.get("status", "openhands_unknown")),
+            )
         if base_url and conversation_id and not _cleanup_already_completed(runtime_state):
             try:
                 latest = self.runtime.get_conversation(base_url=str(base_url), conversation_id=str(conversation_id))
@@ -257,6 +263,17 @@ def _role_for_mode(mode: str) -> str:
 
 def _run_root(stage_dir: Path) -> Path:
     return stage_dir.parent.parent if stage_dir.parent.name == "tasks" else stage_dir.parent
+
+
+def _status_from_start_task(start_task_status: object, *, default: str = "openhands_started") -> str:
+    status = str(start_task_status or "").strip().upper()
+    if status == "ERROR":
+        return "openhands_error"
+    if status == "FAILED":
+        return "openhands_failed"
+    if status == "STOPPED":
+        return "openhands_stopped"
+    return default
 
 
 def _cleanup_already_completed(runtime_state: dict) -> bool:

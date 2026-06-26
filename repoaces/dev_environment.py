@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shlex
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,8 @@ class DevEnvironmentResult:
     docker_backend: str
     wsl_distro: str
     image: str
+    seed_workspace_from_image: bool
+    seed_source_path: str
     report_path: Path
     result_path: Path
     preflight_log_path: Path
@@ -50,6 +53,8 @@ class DevEnvironmentPreparer:
         wsl_distro: str = "Ubuntu-22.04",
         wsl_root: str | None = None,
         image: str = "repoaces/openhands-agent-fastgpt:node20-pnpm10",
+        seed_workspace_from_image: bool = False,
+        seed_source_path: str = "/workspace",
         container_uid: int = 10001,
         container_gid: int = 10001,
         force: bool = False,
@@ -82,6 +87,8 @@ class DevEnvironmentPreparer:
             base_commit=case.input.base_commit,
             pr_number=case.input.pr_number,
             image=image,
+            seed_workspace_from_image=seed_workspace_from_image,
+            seed_source_path=seed_source_path,
             force=force,
         )
         self._write_chown_script(
@@ -104,19 +111,34 @@ class DevEnvironmentPreparer:
             image=image,
         )
 
-        prepare_proc = self._run_wsl_script(wsl_distro, scripts["prepare_workspace"], timeout=timeout)
+        prepare_proc = self._run_wsl_script(
+            wsl_distro,
+            scripts["prepare_workspace"],
+            timeout=timeout,
+            script_wsl=f"{output_wsl}/{scripts['prepare_workspace'].name}",
+        )
         prepare_log = output_dir / "prepare_wsl_workspace.log"
         write_text(prepare_log, _render_process_log(scripts["prepare_workspace"], prepare_proc))
         if prepare_proc.returncode != 0:
             raise RuntimeError(f"WSL workspace preparation failed. See {prepare_log}")
 
-        chown_proc = self._run_wsl_script(wsl_distro, scripts["chown_workspace"], timeout=timeout)
+        chown_proc = self._run_wsl_script(
+            wsl_distro,
+            scripts["chown_workspace"],
+            timeout=timeout,
+            script_wsl=f"{output_wsl}/{scripts['chown_workspace'].name}",
+        )
         chown_log = output_dir / "chown_wsl_workspace_for_openhands.log"
         write_text(chown_log, _render_process_log(scripts["chown_workspace"], chown_proc))
         if chown_proc.returncode != 0:
             raise RuntimeError(f"WSL workspace ownership fix failed. See {chown_log}")
 
-        preflight_proc = self._run_wsl_script(wsl_distro, scripts["run_preflight"], timeout=timeout)
+        preflight_proc = self._run_wsl_script(
+            wsl_distro,
+            scripts["run_preflight"],
+            timeout=timeout,
+            script_wsl=f"{output_wsl}/{scripts['run_preflight'].name}",
+        )
         preflight_log = output_dir / "preflight.log"
         write_text(preflight_log, _render_process_log(scripts["run_preflight"], preflight_proc))
 
@@ -148,6 +170,8 @@ class DevEnvironmentPreparer:
             "wsl_distro": wsl_distro,
             "wsl_root": wsl_root,
             "image": image,
+            "seed_workspace_from_image": seed_workspace_from_image,
+            "seed_source_path": seed_source_path,
             "container_uid": container_uid,
             "container_gid": container_gid,
             "run_install": run_install,
@@ -181,6 +205,8 @@ class DevEnvironmentPreparer:
                 "docker_backend": "wsl",
                 "wsl_distro": wsl_distro,
                 "image": image,
+                "seed_workspace_from_image": seed_workspace_from_image,
+                "seed_source_path": seed_source_path,
                 "dev_environment_report": report_path,
                 "preflight_log": preflight_log,
                 "git_status_after_preflight": git_status_path,
@@ -194,6 +220,8 @@ class DevEnvironmentPreparer:
             docker_backend="wsl",
             wsl_distro=wsl_distro,
             image=image,
+            seed_workspace_from_image=seed_workspace_from_image,
+            seed_source_path=seed_source_path,
             report_path=report_path,
             result_path=result_path,
             preflight_log_path=preflight_log,
@@ -201,20 +229,41 @@ class DevEnvironmentPreparer:
         )
 
     def _default_wsl_root(self, distro: str) -> str:
-        proc = run_cmd(["wsl", "-d", distro, "--", "bash", "-lc", 'printf "%s" "$HOME"'], timeout=60)
+        proc = self._run_light_wsl_command(
+            distro,
+            ["bash", "-lc", 'printf "%s" "$HOME"'],
+            timeout=60,
+            action="determine WSL home",
+        )
         if proc.returncode != 0 or not proc.stdout.strip():
             raise RuntimeError(f"Unable to determine WSL home for distro {distro}: {proc.stderr}")
         return f"{proc.stdout.strip().rstrip('/')}/repoaces-workspaces"
 
     def _windows_path_to_wsl(self, path: Path, distro: str) -> str:
         resolved = str(path.resolve()).replace("\\", "/")
-        proc = run_cmd(["wsl", "-d", distro, "--", "wslpath", "-a", resolved], timeout=60)
+        proc = self._run_light_wsl_command(
+            distro,
+            ["wslpath", "-a", resolved],
+            timeout=60,
+            action=f"convert Windows path to WSL path: {path}",
+        )
         if proc.returncode != 0 or not proc.stdout.strip():
             raise RuntimeError(f"Unable to convert Windows path to WSL path: {path}\n{proc.stderr}")
         return proc.stdout.strip()
 
-    def _run_wsl_script(self, distro: str, script: Path, *, timeout: int) -> Any:
-        script_wsl = self._windows_path_to_wsl(script, distro)
+    def _run_light_wsl_command(self, distro: str, args: list[str], *, timeout: int, action: str) -> Any:
+        last_proc: Any = None
+        for attempt in range(1, 4):
+            proc = run_cmd(["wsl", "-d", distro, "--", *args], timeout=timeout)
+            last_proc = proc
+            if proc.returncode == 0 and proc.stdout.strip():
+                return proc
+            if attempt < 3:
+                time.sleep(3 * attempt)
+        return last_proc
+
+    def _run_wsl_script(self, distro: str, script: Path, *, timeout: int, script_wsl: str | None = None) -> Any:
+        script_wsl = script_wsl or self._windows_path_to_wsl(script, distro)
         return run_cmd(["wsl", "-d", distro, "--", "bash", script_wsl], timeout=timeout)
 
     def _write_prepare_workspace_script(
@@ -227,9 +276,12 @@ class DevEnvironmentPreparer:
         base_commit: str,
         pr_number: int,
         image: str,
+        seed_workspace_from_image: bool,
+        seed_source_path: str,
         force: bool,
     ) -> None:
         force_value = "1" if force else "0"
+        seed_value = "1" if seed_workspace_from_image else "0"
         script = f"""#!/usr/bin/env bash
 set -euo pipefail
 workspace={shlex.quote(workspace_wsl)}
@@ -239,6 +291,8 @@ repo_url={shlex.quote(repo_url)}
 base_commit={shlex.quote(base_commit)}
 pr_number={shlex.quote(str(pr_number))}
 image={shlex.quote(image)}
+seed_from_image={seed_value}
+seed_source_path={shlex.quote(seed_source_path)}
 force={force_value}
 
 case "$workspace" in
@@ -258,7 +312,16 @@ fi
 
 mkdir -p "$workspace_parent"
 if [ ! -d "$workspace/.git" ]; then
-  if ! git clone --no-hardlinks "$source_workspace" "$workspace"; then
+  if [ "$seed_from_image" = "1" ]; then
+    mkdir -p "$workspace"
+    docker run --rm --user "$(id -u):$(id -g)" \\
+      -e SEED_SOURCE="$seed_source_path" \\
+      -v "$workspace:/target:rw" \\
+      --entrypoint sh \\
+      "$image" \\
+      -lc 'set -e; test -d "$SEED_SOURCE/.git"; cd "$SEED_SOURCE"; tar cf - . | tar xf - -C /target'
+    test -d "$workspace/.git"
+  elif ! git clone --no-hardlinks "$source_workspace" "$workspace"; then
     rm -rf "$workspace"
     git clone --no-checkout "$repo_url" "$workspace"
   fi
@@ -280,7 +343,11 @@ if ! checkout_base; then
     exit 1
   fi
 fi
-git -C "$workspace" clean -fdx
+if [ "$seed_from_image" = "1" ]; then
+  git -C "$workspace" clean -fdx -e node_modules -e node_modules/ -e '**/node_modules' -e .pnpm-store -e .pnpm-store/
+else
+  git -C "$workspace" clean -fdx
+fi
 git -C "$workspace" rev-parse HEAD
 """
         _write_lf(path, script)
@@ -312,6 +379,8 @@ docker run --rm \\
   --entrypoint sh \\
   "$image" \\
   -lc "whoami && stat -c '%u:%g %A %n' /workspace"
+
+git config --global --add safe.directory "$workspace"
 """
         _write_lf(path, script)
 

@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-6574",
+    "pr_number":  "6574",
+    "title":  "feat: add skill permission management",
+    "base_commit":  "b431801b48d086e3aedc6a046fd00a81aa92339e",
+    "pnpm_version":  "9.15.9",
+    "requires_bun":  false
+}

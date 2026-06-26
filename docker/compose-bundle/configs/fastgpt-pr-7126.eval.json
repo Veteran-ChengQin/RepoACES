@@ -1,0 +1,82 @@
+{
+  "case_id": "fastgpt-pr-7126",
+  "pr_number": 7126,
+  "title": "feat(openapi): refine API key auth proxy and app isolation",
+  "base_commit": "741ad4e2a35ec9edf6e640ac90505e929742533f",
+  "pnpm_version": "10.33.4",
+  "requires_bun": false,
+  "requires_pro": true,
+  "known_problem": "OpenAPI auth change touches app, service, global, docs, and private pro. Guard pro and run focused OpenAPI tests.",
+  "changed_files": [
+    "packages/global/openapi/support/openapi/api.ts",
+    "packages/service/support/openapi/auth.ts",
+    "projects/app/src/pages/api/support/openapi/create.ts",
+    "projects/app/test/api/support/openapi/create.test.ts",
+    "pro"
+  ],
+  "commands": [
+    {
+      "name": "toolchain",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "node --version && pnpm --version && git --version && rg --version | head -1",
+      "timeout_seconds": 120,
+      "required": true,
+      "reason": "Verify base image toolchain."
+    },
+    {
+      "name": "git_diff_check",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "git diff --check",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Check patch whitespace and formatting."
+    },
+    {
+      "name": "pro_submodule_guard",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "test -e pro || (echo 'private pro submodule is required for this PR' >&2; exit 2)",
+      "timeout_seconds": 120,
+      "required": true,
+      "reason": "This PR changes private pro state; do not produce false positives without it."
+    },
+    {
+      "name": "service_openapi_auth_test",
+      "phase": "test",
+      "cwd": "packages/service",
+      "shell": "pnpm exec vitest run test/support/openapi/auth.test.ts -c vitest.config.ts",
+      "timeout_seconds": 1200,
+      "required": true,
+      "reason": "Run focused OpenAPI auth service test."
+    },
+    {
+      "name": "app_openapi_tests",
+      "phase": "test",
+      "cwd": "projects/app",
+      "shell": "pnpm test -- test/api/support/openapi/create.test.ts test/api/support/openapi/list.test.ts test/api/support/openapi/update.test.ts",
+      "timeout_seconds": 1500,
+      "required": true,
+      "reason": "Run focused app OpenAPI API tests."
+    },
+    {
+      "name": "prepare_sdks",
+      "phase": "build",
+      "cwd": ".",
+      "shell": "pnpm run build:sdks",
+      "timeout_seconds": 900,
+      "required": true,
+      "reason": "Rebuild generated SDK dist files after git clean before app build."
+    },
+    {
+      "name": "build_projects_app",
+      "phase": "build",
+      "cwd": "projects/app",
+      "shell": "pnpm build",
+      "timeout_seconds": 2400,
+      "required": true,
+      "reason": "OpenAPI app API/UI must compile through app build."
+    }
+  ]
+}

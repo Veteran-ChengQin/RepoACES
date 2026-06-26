@@ -1,0 +1,24 @@
+services:
+  openhands:
+    image: ${IMAGE_REF}
+    build:
+      context: ../..
+      dockerfile: dockerfiles/FastGPT.OpenHands.Dockerfile
+      args:
+        PR_ID: ${CASE_ID}
+        BASE_COMMIT: ${BASE_COMMIT}
+        FASTGPT_REPO: https://github.com/labring/FastGPT.git
+        PNPM_VERSION: ${PNPM_VERSION}
+        INSTALL_BUN: ${INSTALL_BUN}
+        OH_BASE_IMAGE: ${OH_BASE_IMAGE}
+        NPM_REGISTRY: ${NPM_REGISTRY}
+    environment:
+      CI: "true"
+      NODE_OPTIONS: "--max-old-space-size=8192"
+      GIT_TERMINAL_PROMPT: "0"
+      PRO_SUBMODULE_TOKEN: ${PRO_SUBMODULE_TOKEN:-}
+    working_dir: /workspace
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    tty: true
+    stdin_open: true

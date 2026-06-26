@@ -29,8 +29,11 @@ param(
   [int]$OpenHandsMaxSeconds = 3600,
   [int]$PollIntervalSeconds = 60,
   [int]$FinalEvalTimeoutSeconds = 1800,
+  [string]$DevImage = "",
+  [string]$SandboxRepoPath = "/workspace/project",
   [string[]]$Focus = @("agentSkills", "version", "openapi"),
   [switch]$Force,
+  [switch]$SeedWorkspaceFromImage,
   [switch]$SkipStaticIntel,
   [switch]$SkipDevInstall,
   [switch]$SkipDevSmoke,
@@ -130,6 +133,20 @@ function Get-WindowsSourceWorkspace {
   return [string]$workspace
 }
 
+function Get-DevImageFromBundle {
+  param([string]$CaseId)
+  $envPath = Join-Path "docker\openhands-image-bundle\oh-compose\$CaseId" ".env"
+  if (-not (Test-Path -LiteralPath $envPath)) {
+    return ""
+  }
+  foreach ($line in Get-Content -LiteralPath $envPath) {
+    if ($line -match '^IMAGE_REF=(.+)$') {
+      return $Matches[1].Trim()
+    }
+  }
+  return ""
+}
+
 function Is-OpenHandsTerminal {
   param([string]$Status)
   return @(
@@ -144,6 +161,12 @@ function Is-OpenHandsTerminal {
 $projectRoot = (Resolve-Path ".").Path
 $casePath = (Resolve-Path $Case).Path
 $caseId = Get-CaseId $casePath
+if (-not $DevImage -and $SeedWorkspaceFromImage) {
+  $DevImage = Get-DevImageFromBundle $caseId
+  if (-not $DevImage) {
+    throw "SeedWorkspaceFromImage was requested, but no DevImage was provided and no IMAGE_REF was found for $caseId."
+  }
+}
 
 if (-not $ArtifactRoot) {
   if (-not $RunName) {
@@ -172,9 +195,12 @@ Write-Host "Artifact root: $ArtifactRoot"
 Write-Host "Model:         $Model"
 Write-Host "WSL distro:    $WslDistro"
 Write-Host "OH port:       $(if ($OpenHandsPort -gt 0) { $OpenHandsPort } else { 'auto' })"
+Write-Host "Dev image:     $(if ($DevImage) { $DevImage } else { 'default' })"
+Write-Host "Seed image:    $([bool]$SeedWorkspaceFromImage)"
+Write-Host "Sandbox path:  $SandboxRepoPath"
 
 Write-Step "1/7 init-run"
-$initArgs = @("init-run", "--case", $caseArg, "--out", $ArtifactRoot)
+$initArgs = @("init-run", "--case", $caseArg, "--out", $ArtifactRoot, "--workspace-path", $SandboxRepoPath)
 Invoke-RepoACES @initArgs | Out-Null
 
 Write-Step "2/7 prepare-workspace"
@@ -208,6 +234,12 @@ $devEnvArgs = @(
   "--wsl-distro", $WslDistro,
   "--timeout", [string]$PrepareDevEnvTimeoutSeconds
 )
+if ($DevImage) {
+  $devEnvArgs += @("--image", $DevImage)
+}
+if ($SeedWorkspaceFromImage) {
+  $devEnvArgs += "--seed-workspace-from-image"
+}
 if ($Force) {
   $devEnvArgs += "--force"
 }
@@ -223,7 +255,7 @@ Write-Step "5/7 start-openhands"
 $startArgs = @(
   "start-openhands",
   "--artifact-root", $ArtifactRoot,
-  "--sandbox-repo-path", "/workspace",
+  "--sandbox-repo-path", $SandboxRepoPath,
   "--model", $Model,
   "--auto-run", "true",
   "--wait-start-seconds", [string]$OpenHandsStartTimeoutSeconds,

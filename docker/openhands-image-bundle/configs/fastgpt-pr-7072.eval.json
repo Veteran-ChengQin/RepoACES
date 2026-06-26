@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-7072",
+    "pr_number":  "7072",
+    "title":  "feat: upload parsed docx images from read file worker",
+    "base_commit":  "1d7b8768aecd53ae59372fd68b10af0e80722c79",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

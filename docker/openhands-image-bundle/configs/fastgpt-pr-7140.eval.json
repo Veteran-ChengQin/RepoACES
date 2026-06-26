@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-7140",
+    "pr_number":  "7140",
+    "title":  "feat: add agent dataset auth entry",
+    "base_commit":  "62ed465571fec59b5ebdc7b852c91368efd7f442",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

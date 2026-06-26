@@ -1,0 +1,20 @@
+{
+  "name": "repoaces-fastgpt-pr-dockers",
+  "version": "0.1.0",
+  "description": "Per-PR Docker evaluator suite for RepoACES FastGPT PR cases.",
+  "image_prefix": "repoaces/eval",
+  "dockerfile": "dockerfiles/FastGPT.Evaluator.Dockerfile",
+  "runtime": "runtime",
+  "config_count": 18,
+  "compose_root": "compose",
+  "scripts": {
+    "check": "scripts/Test-Configs.ps1",
+    "build_one": "scripts/Build-PrImage.ps1",
+    "build_all": "scripts/Build-All.ps1",
+    "run": "scripts/Run-PrEval.ps1",
+    "export": "scripts/Export-PrImage.ps1",
+    "import": "scripts/Import-PrImage.ps1",
+    "generate_compose": "scripts/Generate-ComposeFiles.ps1",
+    "export_compose_bundle": "scripts/Export-ComposeBundle.ps1"
+  }
+}

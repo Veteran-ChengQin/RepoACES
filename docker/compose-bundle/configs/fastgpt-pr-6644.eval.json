@@ -1,0 +1,85 @@
+{
+  "case_id": "fastgpt-pr-6644",
+  "pr_number": 6644,
+  "title": "feat(agentSkills): add skill version list API and fix OpenAPI spec",
+  "base_commit": "6a183afac680117a638180abb35f683525a05ae8",
+  "pnpm_version": "9.15.9",
+  "requires_bun": true,
+  "known_problem": "The old environment missed bun, so projects/volume-manager failed before validating the patch; this image installs bun explicitly.",
+  "changed_files": [
+    "deploy/args.json",
+    "deploy/dev/docker-compose.cn.yml",
+    "deploy/dev/docker-compose.yml",
+    "deploy/helm/opensandbox/values.yaml",
+    "packages/global/openapi/core/agentSkills/api.ts",
+    "packages/global/openapi/core/agentSkills/index.ts",
+    "projects/app/src/pages/api/core/agentSkills/version/list.ts",
+    "projects/volume-manager/src/drivers/DockerVolumeDriver.ts",
+    "projects/volume-manager/src/env.ts"
+  ],
+  "commands": [
+    {
+      "name": "toolchain_with_bun",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "node --version && npm --version && pnpm --version && bun --version && docker --version && git --version",
+      "timeout_seconds": 120,
+      "required": true,
+      "reason": "This PR requires bun; make bun availability an explicit environment gate."
+    },
+    {
+      "name": "git_diff_check",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "git diff --check",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Check patch whitespace and formatting."
+    },
+    {
+      "name": "compose_dev",
+      "phase": "docker",
+      "cwd": ".",
+      "shell": "bash /opt/repoaces-pr/docker-compose-config.sh deploy/dev/docker-compose.yml",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Validate the real dev compose file syntax."
+    },
+    {
+      "name": "compose_dev_cn",
+      "phase": "docker",
+      "cwd": ".",
+      "shell": "bash /opt/repoaces-pr/docker-compose-config.sh deploy/dev/docker-compose.cn.yml",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Validate the CN dev compose file syntax."
+    },
+    {
+      "name": "build_volume_manager",
+      "phase": "build",
+      "cwd": "projects/volume-manager",
+      "shell": "bun install --frozen-lockfile || true; bun run build",
+      "timeout_seconds": 1800,
+      "required": true,
+      "reason": "volume-manager uses Bun runtime APIs and must build inside a bun-enabled image."
+    },
+    {
+      "name": "prepare_sdks",
+      "phase": "build",
+      "cwd": ".",
+      "shell": "pnpm run build:sdks",
+      "timeout_seconds": 900,
+      "required": true,
+      "reason": "Rebuild generated SDK dist files after git clean before app build."
+    },
+    {
+      "name": "build_projects_app",
+      "phase": "build",
+      "cwd": "projects/app",
+      "shell": "pnpm build",
+      "timeout_seconds": 2400,
+      "required": true,
+      "reason": "The new agentSkills list API needs app build validation."
+    }
+  ]
+}

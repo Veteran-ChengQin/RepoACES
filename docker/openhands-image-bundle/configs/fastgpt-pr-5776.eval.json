@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-5776",
+    "pr_number":  "5776",
+    "title":  "feat: add health check to MongoDB service in Docker Compose templates",
+    "base_commit":  "19846905ff007bcd0060299e1ca4fefaf59a23c2",
+    "pnpm_version":  "9.15.9",
+    "requires_bun":  false
+}

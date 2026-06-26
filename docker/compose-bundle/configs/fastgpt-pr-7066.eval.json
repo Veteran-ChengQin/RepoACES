@@ -1,0 +1,52 @@
+{
+  "case_id": "fastgpt-pr-7066",
+  "pr_number": 7066,
+  "title": "feat: improve code block rendering",
+  "base_commit": "445a5dc45465aea0e1c5693a479a09aea0182805",
+  "pnpm_version": "10.33.4",
+  "requires_bun": false,
+  "known_problem": "Markdown rendering UI change. Scope to app build plus app tests if present.",
+  "changed_files": [
+    "projects/app/src/components/Markdown/index.tsx",
+    "projects/app/src/components/Markdown/utils.ts",
+    "projects/app/src/components/core/chat/components/AIResponseBox/RenderText.tsx"
+  ],
+  "commands": [
+    {
+      "name": "toolchain",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "node --version && pnpm --version && git --version && rg --version | head -1",
+      "timeout_seconds": 120,
+      "required": true,
+      "reason": "Verify base image toolchain."
+    },
+    {
+      "name": "git_diff_check",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "git diff --check",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Check patch whitespace and formatting."
+    },
+    {
+      "name": "prepare_sdks",
+      "phase": "build",
+      "cwd": ".",
+      "shell": "pnpm run build:sdks",
+      "timeout_seconds": 900,
+      "required": true,
+      "reason": "Rebuild generated SDK dist files after git clean before app build."
+    },
+    {
+      "name": "build_projects_app",
+      "phase": "build",
+      "cwd": "projects/app",
+      "shell": "pnpm build",
+      "timeout_seconds": 2400,
+      "required": true,
+      "reason": "Markdown rendering UI must compile through app build."
+    }
+  ]
+}

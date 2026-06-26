@@ -1,0 +1,63 @@
+{
+  "case_id": "fastgpt-pr-7015",
+  "pr_number": 7015,
+  "title": "feat: add context compression benchmark adapter",
+  "base_commit": "805e32d7238da2bc2f904fabff1e9d0bc419bbcf",
+  "pnpm_version": "10.33.4",
+  "requires_bun": false,
+  "requires_pro": true,
+  "known_problem": "Benchmark adapter depends on private pro workspace changes. Fail clearly if pro submodule is unavailable.",
+  "changed_files": [
+    "packages/service/core/ai/llm/promptCall/index.ts",
+    "packages/service/core/ai/model.ts",
+    "pnpm-workspace.yaml",
+    "pro"
+  ],
+  "commands": [
+    {
+      "name": "toolchain",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "node --version && pnpm --version && git --version && rg --version | head -1",
+      "timeout_seconds": 120,
+      "required": true,
+      "reason": "Verify base image toolchain."
+    },
+    {
+      "name": "git_diff_check",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "git diff --check",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Check patch whitespace and formatting."
+    },
+    {
+      "name": "pro_submodule_guard",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "test -e pro || (echo 'private pro submodule is required for this PR' >&2; exit 2)",
+      "timeout_seconds": 120,
+      "required": true,
+      "reason": "Benchmark adapter relies on private pro changes."
+    },
+    {
+      "name": "service_llm_typecheck",
+      "phase": "test",
+      "cwd": "packages/service",
+      "shell": "pnpm exec tsc --noEmit --pretty false",
+      "timeout_seconds": 1800,
+      "required": true,
+      "reason": "Check service LLM adapter type safety."
+    },
+    {
+      "name": "prepare_sdks",
+      "phase": "build",
+      "cwd": ".",
+      "shell": "pnpm run build:sdks",
+      "timeout_seconds": 900,
+      "required": true,
+      "reason": "Rebuild generated SDK dist files after git clean."
+    }
+  ]
+}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import write_stage_result
-from .io import write_json, write_text
+from .io import write_json, write_patch_text, write_text
 from .models import FeatureCase
 from .shell import run_cmd
 
@@ -58,6 +59,18 @@ class FinalEvaluator:
             shutil.copy2(baseline_source, baseline_patch_path)
         else:
             write_text(baseline_patch_path, "")
+
+        if self._should_use_compose_bundle(case):
+            bundle_root = self._find_compose_bundle_root(case.case_path)
+            if bundle_root:
+                return self._evaluate_with_compose_bundle(
+                    case=case,
+                    candidate_patch_path=candidate_patch_path,
+                    baseline_patch_path=baseline_patch_path,
+                    output_dir=output_dir,
+                    command_timeout=command_timeout,
+                    bundle_root=bundle_root,
+                )
 
         command_plan = self._build_command_plan(
             repo_dir=repo_dir,
@@ -132,6 +145,392 @@ class FinalEvaluator:
             "final_evaluation_report": report_path,
             "result": result_path,
         }
+
+    def _should_use_compose_bundle(self, case: FeatureCase) -> bool:
+        backend = os.getenv("REPOACES_FINAL_EVALUATOR_BACKEND", "auto").strip().lower()
+        if backend in {"dynamic", "legacy", "repo"}:
+            return False
+        if backend in {"compose", "compose-bundle", "docker", "per-instance", "auto"}:
+            bundle_root = self._find_compose_bundle_root(case.case_path)
+            return bool(bundle_root and (bundle_root / "configs" / f"{case.case_id}.eval.json").exists())
+        return False
+
+    def _find_compose_bundle_root(self, start: Path) -> Path | None:
+        for parent in [start.resolve(), *start.resolve().parents]:
+            candidate = parent / "docker" / "compose-bundle"
+            if (candidate / "configs").exists() and (candidate / "scripts" / "Run-PrEval.ps1").exists():
+                return candidate
+        cwd_candidate = Path.cwd() / "docker" / "compose-bundle"
+        if (cwd_candidate / "configs").exists() and (cwd_candidate / "scripts" / "Run-PrEval.ps1").exists():
+            return cwd_candidate
+        return None
+
+    def _evaluate_with_compose_bundle(
+        self,
+        *,
+        case: FeatureCase,
+        candidate_patch_path: Path,
+        baseline_patch_path: Path,
+        output_dir: Path,
+        command_timeout: int,
+        bundle_root: Path,
+    ) -> dict[str, Path]:
+        config_path = bundle_root / "configs" / f"{case.case_id}.eval.json"
+        config = json.loads(config_path.read_text(encoding="utf-8-sig", errors="replace"))
+        mode = os.getenv("REPOACES_COMPOSE_EVAL_MODE", "all").strip() or "all"
+        image_prefix = os.getenv("REPOACES_COMPOSE_EVAL_IMAGE_PREFIX", "repoaces/eval").strip() or "repoaces/eval"
+        image_ref = self._compose_bundle_image_ref(config, image_prefix=image_prefix)
+        result_root = output_dir / "docker-bundle-results"
+        result_root.mkdir(parents=True, exist_ok=True)
+
+        eval_script_path = output_dir / "eval.sh"
+        eval_plan_path = output_dir / "eval_plan.md"
+        commands_path = output_dir / "commands.json"
+        test_output_path = output_dir / "test_output.txt"
+        report_path = output_dir / "final_evaluation_report.json"
+        build_log_path = output_dir / "docker_image_build.log"
+
+        self._write_compose_bundle_eval_script(
+            eval_script_path,
+            bundle_root=bundle_root,
+            case_id=case.case_id,
+            mode=mode,
+            candidate_patch_path=candidate_patch_path,
+            result_root=result_root,
+            image_prefix=image_prefix,
+        )
+        self._write_compose_bundle_eval_plan(
+            eval_plan_path,
+            case=case,
+            config=config,
+            image_ref=image_ref,
+            mode=mode,
+            bundle_root=bundle_root,
+        )
+        write_json(
+            commands_path,
+            {
+                "backend": "compose_bundle",
+                "bundle_root": str(bundle_root),
+                "config": str(config_path),
+                "image": image_ref,
+                "mode": mode,
+                "commands": config.get("commands", []),
+            },
+        )
+
+        build_output = ""
+        image_status = self._ensure_compose_bundle_image(
+            bundle_root=bundle_root,
+            case_id=case.case_id,
+            image_ref=image_ref,
+            command_timeout=command_timeout,
+            image_prefix=image_prefix,
+        )
+        build_output = image_status.get("output", "")
+        write_text(build_log_path, build_output)
+
+        run_proc: Any | None = None
+        if image_status["available"]:
+            run_proc = self._run_compose_bundle_eval(
+                bundle_root=bundle_root,
+                case_id=case.case_id,
+                mode=mode,
+                candidate_patch_path=candidate_patch_path,
+                result_root=result_root,
+                command_timeout=command_timeout,
+                image_prefix=image_prefix,
+            )
+
+        container_report_path = result_root / "evaluation-report.json"
+        container_summary_path = result_root / "evaluation-summary.txt"
+        container_report: dict[str, Any] = {}
+        if container_report_path.exists():
+            try:
+                container_report = json.loads(container_report_path.read_text(encoding="utf-8", errors="replace"))
+            except json.JSONDecodeError as exc:
+                container_report = {"parse_error": str(exc)}
+
+        stdout = run_proc.stdout if run_proc is not None else ""
+        stderr = run_proc.stderr if run_proc is not None else image_status.get("error", "")
+        summary_text = container_summary_path.read_text(encoding="utf-8", errors="replace") if container_summary_path.exists() else ""
+        test_output = "\n".join(
+            [
+                "==> compose_bundle_image",
+                image_ref,
+                "",
+                "==> docker_image_build",
+                build_output,
+                "",
+                "==> compose_bundle_eval_stdout",
+                stdout,
+                "",
+                "==> compose_bundle_eval_stderr",
+                stderr,
+                "",
+                "==> evaluation-summary.txt",
+                summary_text,
+                "",
+            ]
+        )
+        write_text(test_output_path, test_output)
+
+        candidate_files = self._files_from_patch(candidate_patch_path)
+        baseline_files = self._files_from_patch(baseline_patch_path)
+        run_returncode = run_proc.returncode if run_proc is not None else 127
+        passed = bool(image_status["available"]) and run_returncode == 0 and bool(container_report.get("passed", False))
+        report = {
+            "case_id": case.case_id,
+            "repo": case.input.repo,
+            "base_commit": case.input.base_commit,
+            "candidate_patch": str(candidate_patch_path),
+            "baseline_patch": str(baseline_patch_path),
+            "candidate_patch_sha256": self._sha256(candidate_patch_path),
+            "baseline_patch_sha256": self._sha256(baseline_patch_path),
+            "candidate_changed_files": candidate_files,
+            "baseline_changed_files": baseline_files,
+            "changed_file_overlap": sorted(set(candidate_files) & set(baseline_files)),
+            "execution_backend": {
+                "type": "compose_bundle",
+                "bundle_root": str(bundle_root),
+                "config": str(config_path),
+                "image": image_ref,
+                "mode": mode,
+                "result_root": str(result_root),
+                "image_status": {k: v for k, v in image_status.items() if k != "output"},
+            },
+            "commands": container_report.get("commands", []),
+            "compose_bundle_report": container_report,
+            "docker_run_returncode": run_returncode,
+            "passed": passed,
+            "note": (
+                "Final evaluator used the per-PR Docker compose-bundle backend. "
+                "The candidate patch was applied inside the PR-specific evaluator image."
+            ),
+        }
+        write_json(report_path, report)
+
+        result_path = write_stage_result(
+            run_root=_run_root(output_dir),
+            stage_dir=output_dir,
+            stage="final-evaluator",
+            role="final_evaluator",
+            status="passed" if report["passed"] else "failed",
+            completed=True,
+            result={
+                "instruction": _run_root(output_dir) / "tasks" / "01-implementation" / "instruction.md",
+                "trajectory": _run_root(output_dir) / "tasks" / "01-implementation" / "trajectory.json",
+                "patch": _run_root(output_dir) / "tasks" / "01-implementation" / "patch.diff",
+                "candidate_patch": candidate_patch_path,
+                "baseline_patch": baseline_patch_path,
+                "eval_script": eval_script_path,
+                "eval_plan": eval_plan_path,
+                "commands": commands_path,
+                "test_output": test_output_path,
+                "final_evaluation_report": report_path,
+                "passed": report["passed"],
+            },
+        )
+
+        return {
+            "candidate_patch": candidate_patch_path,
+            "baseline_patch": baseline_patch_path,
+            "eval_script": eval_script_path,
+            "eval_plan": eval_plan_path,
+            "commands": commands_path,
+            "test_output": test_output_path,
+            "final_evaluation_report": report_path,
+            "result": result_path,
+        }
+
+    def _compose_bundle_image_ref(self, config: dict[str, Any], *, image_prefix: str) -> str:
+        pr_number = str(config["pr_number"])
+        base_commit = str(config["base_commit"])
+        return f"{image_prefix}-{pr_number}:{base_commit[:12]}"
+
+    def _ensure_compose_bundle_image(
+        self,
+        *,
+        bundle_root: Path,
+        case_id: str,
+        image_ref: str,
+        command_timeout: int,
+        image_prefix: str,
+    ) -> dict[str, Any]:
+        build_policy = os.getenv("REPOACES_COMPOSE_EVAL_BUILD", "auto").strip().lower()
+        force_build = build_policy in {"always", "force", "rebuild", "true", "1", "yes"}
+        inspect = run_cmd(["docker", "image", "inspect", image_ref], timeout=120)
+        if inspect.returncode == 0 and not force_build:
+            return {"available": True, "built": False, "returncode": 0, "output": inspect.stdout}
+
+        if build_policy in {"never", "false", "0", "no"}:
+            return {
+                "available": False,
+                "built": False,
+                "returncode": inspect.returncode,
+                "output": inspect.stdout + inspect.stderr,
+                "error": f"Evaluator image is missing and auto-build is disabled: {image_ref}",
+            }
+
+        pr = case_id.removeprefix("fastgpt-pr-")
+        script = bundle_root / "scripts" / "Build-PrImage.ps1"
+        build_args = [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+            "-Pr",
+            pr,
+            "-ImagePrefix",
+            image_prefix,
+            "-SkipVerify",
+        ]
+        npm_registry = os.getenv("REPOACES_COMPOSE_EVAL_NPM_REGISTRY", "").strip()
+        fastgpt_repo = os.getenv("REPOACES_COMPOSE_EVAL_FASTGPT_REPO", "").strip()
+        node_image = os.getenv("REPOACES_COMPOSE_EVAL_NODE_IMAGE", "").strip()
+        if npm_registry:
+            build_args.extend(["-NpmRegistry", npm_registry])
+        if fastgpt_repo:
+            build_args.extend(["-FastGptRepo", fastgpt_repo])
+        if node_image:
+            build_args.extend(["-NodeImage", node_image])
+
+        build = run_cmd(
+            build_args,
+            cwd=bundle_root,
+            timeout=max(command_timeout, 3600),
+        )
+        output = build.stdout + build.stderr
+        if build.returncode != 0:
+            return {
+                "available": False,
+                "built": True,
+                "returncode": build.returncode,
+                "output": output,
+                "error": f"Evaluator image build failed: {image_ref}",
+            }
+        inspect_after = run_cmd(["docker", "image", "inspect", image_ref], timeout=120)
+        return {
+            "available": inspect_after.returncode == 0,
+            "built": True,
+            "returncode": inspect_after.returncode,
+            "output": output + inspect_after.stdout + inspect_after.stderr,
+            "error": "" if inspect_after.returncode == 0 else f"Built image was not found after build: {image_ref}",
+        }
+
+    def _run_compose_bundle_eval(
+        self,
+        *,
+        bundle_root: Path,
+        case_id: str,
+        mode: str,
+        candidate_patch_path: Path,
+        result_root: Path,
+        command_timeout: int,
+        image_prefix: str,
+    ) -> Any:
+        pr = case_id.removeprefix("fastgpt-pr-")
+        script = bundle_root / "scripts" / "Run-PrEval.ps1"
+        return run_cmd(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(script),
+                "-Pr",
+                pr,
+                "-Mode",
+                mode,
+                "-Patch",
+                str(candidate_patch_path.resolve()),
+                "-ResultRoot",
+                str(result_root.resolve()),
+                "-ImagePrefix",
+                image_prefix,
+            ],
+            cwd=bundle_root,
+            timeout=max(command_timeout, 3600),
+        )
+
+    def _write_compose_bundle_eval_script(
+        self,
+        path: Path,
+        *,
+        bundle_root: Path,
+        case_id: str,
+        mode: str,
+        candidate_patch_path: Path,
+        result_root: Path,
+        image_prefix: str,
+    ) -> None:
+        pr = case_id.removeprefix("fastgpt-pr-")
+        content = "\n".join(
+            [
+                "# Reproduce RepoACES compose-bundle final evaluation from PowerShell:",
+                "powershell -NoProfile -ExecutionPolicy Bypass -File \\",
+                f"  {_ps_quote(str(bundle_root / 'scripts' / 'Run-PrEval.ps1'))} \\",
+                f"  -Pr {pr} \\",
+                f"  -Mode {mode} \\",
+                f"  -Patch {_ps_quote(str(candidate_patch_path.resolve()))} \\",
+                f"  -ResultRoot {_ps_quote(str(result_root.resolve()))} \\",
+                f"  -ImagePrefix {_ps_quote(image_prefix)}",
+                "",
+            ]
+        )
+        write_text(path, content)
+
+    def _write_compose_bundle_eval_plan(
+        self,
+        path: Path,
+        *,
+        case: FeatureCase,
+        config: dict[str, Any],
+        image_ref: str,
+        mode: str,
+        bundle_root: Path,
+    ) -> None:
+        command_lines = []
+        for command in config.get("commands", []):
+            command_lines.append(
+                "\n".join(
+                    [
+                        f"- `{command.get('phase')}:{command.get('name')}` in `{command.get('cwd')}`",
+                        f"  Command: `{command.get('shell')}`",
+                        f"  Required: `{command.get('required', True)}`",
+                        f"  Reason: {command.get('reason', '')}",
+                    ]
+                )
+            )
+        content = f"""# Final Evaluation Plan
+
+## Case
+
+- Case ID: `{case.case_id}`
+- Repository: `{case.input.repo}`
+- Base commit: `{case.input.base_commit}`
+- PR title: {case.input.pr_title_raw}
+
+## Backend
+
+- Type: `compose_bundle`
+- Bundle root: `{bundle_root}`
+- Image: `{image_ref}`
+- Mode: `{mode}`
+
+## Scope
+
+This final evaluator runs the PR-specific Docker evaluator image from `docker/compose-bundle`.
+The candidate patch is mounted into the container and applied to the clean base workspace inside the image.
+
+## Commands
+
+{chr(10).join(command_lines) if command_lines else "- No commands found in compose-bundle config."}
+"""
+        write_text(path, content)
 
     def _build_command_plan(
         self,
@@ -529,7 +928,7 @@ It does not start OpenHands and does not generate repair prompts.
 
     def _export_git_diff(self, repo_dir: Path, patch_path: Path) -> None:
         proc = run_cmd(["git", "diff", "--binary"], cwd=repo_dir, timeout=300)
-        write_text(patch_path, proc.stdout if proc.returncode == 0 else "")
+        write_patch_text(patch_path, proc.stdout if proc.returncode == 0 else "")
 
     def _sha256(self, path: Path) -> str | None:
         if not path.exists():
@@ -544,12 +943,16 @@ It does not start OpenHands and does not generate repair prompts.
 def git_diff(repo_dir: Path, output_patch: Path) -> Path:
     proc = run_cmd(["git", "diff", "--binary"], cwd=repo_dir, timeout=300)
     output_patch.parent.mkdir(parents=True, exist_ok=True)
-    output_patch.write_text(proc.stdout if proc.returncode == 0 else "", encoding="utf-8")
+    write_patch_text(output_patch, proc.stdout if proc.returncode == 0 else "")
     return output_patch
 
 
 def _shell_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+def _ps_quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
 def _pnpm_setup_shell(pnpm_spec: str) -> str:

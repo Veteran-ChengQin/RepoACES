@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-7046",
+    "pr_number":  "7046",
+    "title":  "feat: upgrade MiniMax default model to M3",
+    "base_commit":  "1759544e1e9028eebae0834ee9299929c88a0fe6",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

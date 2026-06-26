@@ -34,6 +34,12 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_dev_env.add_argument("--wsl-distro", default="Ubuntu-22.04")
     prepare_dev_env.add_argument("--wsl-root", help="WSL root directory for RepoACES workspaces; defaults to $HOME/repoaces-workspaces")
     prepare_dev_env.add_argument("--image", default="repoaces/openhands-agent-fastgpt:node20-pnpm10")
+    prepare_dev_env.add_argument(
+        "--seed-workspace-from-image",
+        action="store_true",
+        help="Seed the WSL workspace from the prepared /workspace inside the agent image",
+    )
+    prepare_dev_env.add_argument("--seed-source-path", default="/workspace")
     prepare_dev_env.add_argument("--container-uid", type=int, default=10001)
     prepare_dev_env.add_argument("--container-gid", type=int, default=10001)
     prepare_dev_env.add_argument("--force", action="store_true")
@@ -111,6 +117,8 @@ def main(argv: list[str] | None = None) -> int:
             wsl_distro=args.wsl_distro,
             wsl_root=args.wsl_root,
             image=args.image,
+            seed_workspace_from_image=args.seed_workspace_from_image,
+            seed_source_path=args.seed_source_path,
             container_uid=args.container_uid,
             container_gid=args.container_gid,
             force=args.force,
@@ -127,6 +135,8 @@ def main(argv: list[str] | None = None) -> int:
                     "status": state.status,
                     "workspace": str(state.workspace),
                     "workspace_wsl_path": dev_env.get("workspace_wsl_path"),
+                    "seed_workspace_from_image": dev_env.get("seed_workspace_from_image"),
+                    "seed_source_path": dev_env.get("seed_source_path"),
                     "preflight_log": dev_env.get("preflight_log"),
                 },
                 ensure_ascii=False,

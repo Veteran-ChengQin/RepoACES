@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-7066",
+    "pr_number":  "7066",
+    "title":  "feat: improve code block rendering",
+    "base_commit":  "445a5dc45465aea0e1c5693a479a09aea0182805",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

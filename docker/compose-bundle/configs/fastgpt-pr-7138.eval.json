@@ -1,0 +1,81 @@
+{
+  "case_id": "fastgpt-pr-7138",
+  "pr_number": 7138,
+  "title": "feat(app): filter unavailable tools in system tool selector",
+  "base_commit": "ffa1037a3443e08d5434c0a5b66a11d868186074",
+  "pnpm_version": "10.33.4",
+  "requires_bun": false,
+  "known_problem": "Targeted tests can pass while projects/app build catches missing shared/global type updates; app build is required.",
+  "changed_files": [
+    "packages/global/core/app/tool/systemTool/type/base.ts",
+    "packages/global/core/workflow/type/node.ts",
+    "packages/service/core/app/tool/systemTool/systemTool.repo.ts",
+    "projects/app/src/pages/api/core/app/tool/getSystemToolTemplates.ts",
+    "projects/app/test/api/core/app/tool/getSystemToolTemplates.test.ts"
+  ],
+  "commands": [
+    {
+      "name": "toolchain",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "node --version && npm --version && pnpm --version && git --version && rg --version | head -1",
+      "timeout_seconds": 120,
+      "required": true,
+      "reason": "Verify base image toolchain."
+    },
+    {
+      "name": "git_diff_check",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "git diff --check",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Check patch whitespace and formatting."
+    },
+    {
+      "name": "prepare_sdks",
+      "phase": "build",
+      "cwd": ".",
+      "shell": "pnpm run build:sdks",
+      "timeout_seconds": 900,
+      "required": true,
+      "reason": "Rebuild generated SDK dist files before package tests and app build."
+    },
+    {
+      "name": "test_packages_global",
+      "phase": "test",
+      "cwd": "packages/global",
+      "shell": "pnpm test",
+      "timeout_seconds": 1800,
+      "required": true,
+      "reason": "Cover changed global tool types and enums."
+    },
+    {
+      "name": "test_packages_service",
+      "phase": "test",
+      "cwd": "packages/service",
+      "shell": "pnpm test",
+      "timeout_seconds": 1800,
+      "required": true,
+      "reason": "Cover systemTool repository logic."
+    },
+    {
+      "name": "test_projects_app",
+      "phase": "test",
+      "cwd": "projects/app",
+      "shell": "pnpm test -- test/api/core/app/tool/getSystemToolTemplates.test.ts",
+      "timeout_seconds": 1200,
+      "required": true,
+      "reason": "Run only the PR-related API test, not the full app test suite."
+    },
+    {
+      "name": "build_projects_app",
+      "phase": "build",
+      "cwd": "projects/app",
+      "shell": "pnpm build",
+      "timeout_seconds": 2400,
+      "required": true,
+      "reason": "Real failure gate from the captured run; missing shared/global type updates must fail here."
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+﻿services:
+  evaluator:
+    image: ${IMAGE_REF}
+    build:
+      context: ../..
+      dockerfile: dockerfiles/FastGPT.Evaluator.Dockerfile
+      args:
+        PR_ID: ${CASE_ID}
+        BASE_COMMIT: ${BASE_COMMIT}
+        FASTGPT_REPO: https://github.com/labring/FastGPT.git
+        PNPM_VERSION: ${PNPM_VERSION}
+        INSTALL_BUN: ${INSTALL_BUN}
+        NODE_IMAGE: ${NODE_IMAGE}
+        NPM_REGISTRY: ${NPM_REGISTRY}
+    command: ${MODE:-env}
+    environment:
+      CI: "true"
+      NODE_OPTIONS: "--max-old-space-size=8192"
+    volumes:
+      - ../../dist/compose-results/${CASE_ID}:/results

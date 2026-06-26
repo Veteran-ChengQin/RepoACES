@@ -1,0 +1,89 @@
+{
+  "case_id": "fastgpt-pr-7017",
+  "pr_number": 7017,
+  "title": "feat: add browser sandbox image packaging",
+  "base_commit": "0415311979e729e25ff62c20ac2c6462e566d968",
+  "pnpm_version": "10.33.4",
+  "requires_bun": false,
+  "known_problem": "The old evaluator could produce false results when the patch was empty. This PR depends on the private pro submodule and must not be replaced by root tests.",
+  "changed_files": [
+    ".github/workflows/build-browser-sandbox.yml",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "pro"
+  ],
+  "commands": [
+    {
+      "name": "toolchain",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "node --version && pnpm --version && docker --version && git --version",
+      "timeout_seconds": 120,
+      "required": true,
+      "reason": "Verify tools needed for browser sandbox packaging."
+    },
+    {
+      "name": "git_diff_check",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "git diff --check",
+      "timeout_seconds": 300,
+      "required": true,
+      "reason": "Check patch whitespace and formatting."
+    },
+    {
+      "name": "pro_submodule_available",
+      "phase": "env",
+      "cwd": ".",
+      "shell": "test -f pro/browser-sandbox/package.json || (echo 'pro/browser-sandbox missing. Set PRO_SUBMODULE_TOKEN and initialize private pro submodule before evaluating this PR.' >&2; exit 2)",
+      "timeout_seconds": 120,
+      "required": true,
+      "reason": "The real target is private pro/browser-sandbox; fail clearly if the submodule is unavailable."
+    },
+    {
+      "name": "install_browser_sandbox_deps",
+      "phase": "test",
+      "cwd": ".",
+      "shell": "pnpm install --frozen-lockfile --ignore-scripts --filter @fastgpt/browser-sandbox...",
+      "timeout_seconds": 2400,
+      "required": true,
+      "reason": "Mirror the workflow dependency installation scope."
+    },
+    {
+      "name": "browser_sandbox_typecheck",
+      "phase": "test",
+      "cwd": ".",
+      "shell": "pnpm --filter @fastgpt/browser-sandbox typecheck && pnpm --filter @fastgpt/browser-sandbox typecheck:test",
+      "timeout_seconds": 1800,
+      "required": true,
+      "reason": "Mirror the workflow TypeScript validation."
+    },
+    {
+      "name": "browser_sandbox_test",
+      "phase": "test",
+      "cwd": ".",
+      "shell": "pnpm --filter @fastgpt/browser-sandbox test",
+      "timeout_seconds": 1800,
+      "required": true,
+      "reason": "Mirror the workflow browser-sandbox tests."
+    },
+    {
+      "name": "browser_sandbox_build",
+      "phase": "build",
+      "cwd": ".",
+      "shell": "pnpm --filter @fastgpt/browser-sandbox build",
+      "timeout_seconds": 1800,
+      "required": true,
+      "reason": "Mirror the workflow browser-sandbox build."
+    },
+    {
+      "name": "browser_sandbox_docker_build",
+      "phase": "docker",
+      "cwd": ".",
+      "shell": "docker build -f pro/browser-sandbox/Dockerfile -t repoaces/browser-sandbox-pr7017:local pro/browser-sandbox",
+      "timeout_seconds": 2400,
+      "required": true,
+      "reason": "Verify the browser sandbox Docker image added by the PR builds locally."
+    }
+  ]
+}

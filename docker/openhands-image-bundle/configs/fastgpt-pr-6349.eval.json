@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-6349",
+    "pr_number":  "6349",
+    "title":  "feat: add vector database migration solution between different vector DBs",
+    "base_commit":  "6213f0001d66fabe45dddf18eb7f6fe58423425a",
+    "pnpm_version":  "9.15.9",
+    "requires_bun":  false
+}

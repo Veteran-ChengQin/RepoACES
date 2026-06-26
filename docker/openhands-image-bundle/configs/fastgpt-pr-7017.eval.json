@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-7017",
+    "pr_number":  "7017",
+    "title":  "feat: add browser sandbox image packaging",
+    "base_commit":  "0415311979e729e25ff62c20ac2c6462e566d968",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

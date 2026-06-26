@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-6660",
+    "pr_number":  "6660",
+    "title":  "feat: add skill version update and switch",
+    "base_commit":  "154107557f0002e6a7df94b6b04fd275d5fafb0d",
+    "pnpm_version":  "9.15.9",
+    "requires_bun":  false
+}

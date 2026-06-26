@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-6644",
+    "pr_number":  "6644",
+    "title":  "feat(agentSkills): add skill version list API and fix OpenAPI spec",
+    "base_commit":  "6a183afac680117a638180abb35f683525a05ae8",
+    "pnpm_version":  "9.15.9",
+    "requires_bun":  true
+}
