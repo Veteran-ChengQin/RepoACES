@@ -78,6 +78,7 @@ class OpenHandsRuntime:
         repo_dir: Path,
         sandbox_repo_path: str,
         repo_mount_path: str | None = None,
+        extra_sandbox_volumes: list[tuple[Path, str, str]] | None = None,
     ) -> dict[str, Any]:
         port = self.config.host_port or find_free_port()
         container_name = f"repoaces-oh-{run_id}"[:120]
@@ -86,6 +87,9 @@ class OpenHandsRuntime:
         repo_mount = repo_mount_path or self._docker_mount_path(repo_dir)
         home_mount = self._docker_mount_path(openhands_home)
         sandbox_volumes = [f"{repo_mount}:{sandbox_repo_path}:rw"]
+        for host_path, container_path, mode in extra_sandbox_volumes or []:
+            mount = self._docker_mount_path(host_path)
+            sandbox_volumes.append(f"{mount}:{container_path}:{mode}")
         sandbox_volumes_value = ",".join(sandbox_volumes)
 
         self._run_docker(["rm", "-f", container_name], timeout=60)
@@ -363,6 +367,23 @@ class OpenHandsRuntime:
             "attempted": bool(results),
             "results": results,
             "all_removed": all(item["removed"] for item in results) if results else True,
+        }
+
+    def copy_from_container(self, *, container: str, source_path: str, destination: Path) -> dict[str, Any]:
+        destination.mkdir(parents=True, exist_ok=True)
+        if self.config.docker_backend == "wsl":
+            dest = self._windows_path_to_wsl(destination)
+        else:
+            dest = str(destination.resolve())
+        proc = self._run_docker(["cp", f"{container}:{source_path.rstrip('/')}/.", dest], timeout=120)
+        return {
+            "container": container,
+            "source_path": source_path,
+            "destination": str(destination),
+            "returncode": proc.returncode,
+            "stdout": proc.stdout[-4000:],
+            "stderr": proc.stderr[-4000:],
+            "copied": proc.returncode == 0,
         }
 
     def export_conversation_artifacts(
