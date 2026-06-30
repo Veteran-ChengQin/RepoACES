@@ -1,0 +1,4 @@
+M	packages/global/openapi/core/agentSkills/api.ts
+M	packages/global/openapi/core/agentSkills/index.ts
+M	projects/app/src/pages/api/core/agentSkills/version/switch.ts
+M	projects/app/src/pages/api/core/agentSkills/version/update.ts

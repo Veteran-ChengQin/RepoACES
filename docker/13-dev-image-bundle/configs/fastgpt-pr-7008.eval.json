@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-7008",
+    "pr_number":  "7008",
+    "title":  "feat(code-sandbox): add queueId concurrency limit",
+    "base_commit":  "4af1ef77674851e30478bef5a9e5cb6ded6db660",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

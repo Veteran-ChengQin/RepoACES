@@ -1,0 +1,14 @@
+M	packages/global/common/file/icon.ts
+M	packages/global/core/app/constants.ts
+M	packages/global/core/app/type.d.ts
+M	packages/web/components/common/Icon/constants.ts
+M	packages/web/components/common/Icon/icons/file/fill/audio.svg
+M	packages/web/components/common/Icon/icons/file/fill/video.svg
+M	packages/web/i18n/en/app.json
+M	packages/web/i18n/zh-CN/app.json
+M	packages/web/i18n/zh-Hant/app.json
+M	projects/app/src/components/Select/FileSelector.tsx
+M	projects/app/src/components/core/app/FileSelect.tsx
+M	projects/app/src/components/core/chat/ChatContainer/ChatBox/Input/ChatInput.tsx
+M	projects/app/src/components/core/chat/ChatContainer/ChatBox/hooks/useFileUpload.tsx
+M	projects/app/src/pageComponents/chat/ChatWindow/HomeChatWindow.tsx

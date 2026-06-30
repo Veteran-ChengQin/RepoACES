@@ -1,0 +1,132 @@
+diff --git a/packages/service/core/agentSkills/sandboxController.ts b/packages/service/core/agentSkills/sandboxController.ts
+index b35578a7db20..a46800b5b846 100644
+--- a/packages/service/core/agentSkills/sandboxController.ts
++++ b/packages/service/core/agentSkills/sandboxController.ts
+@@ -33,6 +33,7 @@ import type {
+ import { SandboxTypeEnum, SandboxStatusEnum } from '@fastgpt/global/core/agentSkills/constants';
+ import { mongoSessionRun } from '../../common/mongo/sessionRun';
+ import { getLogger, LogCategories } from '../../common/logger';
++import { env } from '../../env';
+ import type { SandboxStatusItemType } from '@fastgpt/global/core/chat/type';
+ 
+ const addLog = getLogger(LogCategories.MODULE.AI.AGENT);
+@@ -228,6 +229,20 @@ export async function createEditDebugSandbox(
+   // Package is already in ZIP format from import time.
+   const standardizedBuffer = packageBuffer;
+ 
++  // Check active edit-debug sandbox count limit
++  const maxEditDebug = env.AGENT_SANDBOX_MAX_EDIT_DEBUG;
++  if (maxEditDebug !== undefined) {
++    const activeCount = await MongoSandboxInstance.countDocuments({
++      status: SandboxStatusEnum.running,
++      'detail.sandboxType': SandboxTypeEnum.editDebug
++    });
++    if (activeCount >= maxEditDebug) {
++      const message = `Active edit-debug sandbox limit reached (${activeCount}/${maxEditDebug}). Please try again later.`;
++      onProgress?.({ sandboxId: skillId, phase: 'failed', message });
++      throw new Error(message);
++    }
++  }
++
+   // === Phase 3: Sandbox operations ===
+   let sandbox: ISandbox | null = null;
+ 
+@@ -242,7 +257,7 @@ export async function createEditDebugSandbox(
+     const createEntrypoint = defaults.entrypoint;
+ 
+     let volumes: Volume[] | undefined;
+-    if (providerConfig.provider === 'opensandbox') {
++    if (providerConfig.provider === 'opensandbox' && env.AGENT_SANDBOX_ENABLE_VOLUME) {
+       const vmConfig = getVolumeManagerConfig();
+       const claimName = await ensureSessionVolume(sessionId, vmConfig);
+       volumes = [
+diff --git a/packages/service/core/ai/sandbox/controller.ts b/packages/service/core/ai/sandbox/controller.ts
+index f91b694299e4..2ed7eeb7d7e3 100644
+--- a/packages/service/core/ai/sandbox/controller.ts
++++ b/packages/service/core/ai/sandbox/controller.ts
+@@ -70,8 +70,8 @@ export class SandboxClient {
+         return {
+           provider: 'opensandbox' as const,
+           config: {
+-            baseUrl: env.AGENT_SANDBOX_OPENSANDBOX_BASEURL,
+-            token: env.AGENT_SANDBOX_OPENSANDBOX_TOKEN,
++            baseUrl: env.AGENT_SANDBOX_BASE_URL,
++            token: env.AGENT_SANDBOX_API_KEY,
+             sandboxId: this.sandboxId
+           }
+         };
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/sub/sandbox/lifecycle.ts b/packages/service/core/workflow/dispatch/ai/agent/sub/sandbox/lifecycle.ts
+index 70ac5a2049ae..d7c95c9f1131 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/sub/sandbox/lifecycle.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/sub/sandbox/lifecycle.ts
+@@ -28,6 +28,7 @@ import {
+   buildBaseContainerEnv
+ } from '../../../../../../agentSkills/sandboxConfig';
+ import { SandboxTypeEnum, SandboxStatusEnum } from '@fastgpt/global/core/agentSkills/constants';
++import { env } from '../../../../../../../env';
+ import type {
+   AgentSkillSchemaType,
+   AgentSkillsVersionSchemaType,
+@@ -267,6 +268,20 @@ export async function createAgentSandbox(
+     }
+   }
+ 
++  // Check active session-runtime sandbox count limit
++  const maxSessionRuntime = env.AGENT_SANDBOX_MAX_SESSION_RUNTIME;
++  if (maxSessionRuntime !== undefined) {
++    const activeCount = await MongoSandboxInstance.countDocuments({
++      status: SandboxStatusEnum.running,
++      'detail.sandboxType': SandboxTypeEnum.sessionRuntime
++    });
++    if (activeCount >= maxSessionRuntime) {
++      const message = `Active session-runtime sandbox limit reached (${activeCount}/${maxSessionRuntime}). Please try again later.`;
++      onProgress?.({ sandboxId: sessionId, phase: 'failed', message });
++      throw new Error(message);
++    }
++  }
++
+   // Step 3: Create sandbox container, inject SESSION_ID
+   let sandbox: ISandbox | null = null;
+ 
+@@ -274,7 +289,7 @@ export async function createAgentSandbox(
+     const createEntrypoint = defaults.entrypoint;
+ 
+     let volumes: Volume[] | undefined;
+-    if (providerConfig.provider === 'opensandbox') {
++    if (providerConfig.provider === 'opensandbox' && env.AGENT_SANDBOX_ENABLE_VOLUME) {
+       const vmConfig = getVolumeManagerConfig();
+       const claimName = await ensureSessionVolume(sessionId, vmConfig);
+       volumes = [
+diff --git a/packages/service/env.ts b/packages/service/env.ts
+index 41001b6ff3a7..f20d9e16ac52 100644
+--- a/packages/service/env.ts
++++ b/packages/service/env.ts
+@@ -26,10 +26,13 @@ export const env = createEnv({
+     AGENT_SKILL_MAX_UNCOMPRESSED_SIZE: z.coerce.number().optional(),
+     AGENT_SKILL_MAX_DOWNLOAD_SIZE: z.coerce.number().optional(),
+     AGENT_SKILL_MAX_SANDBOX_SIZE: z.coerce.number().optional(),
++    AGENT_SANDBOX_MAX_EDIT_DEBUG: z.coerce.number().optional(),
++    AGENT_SANDBOX_MAX_SESSION_RUNTIME: z.coerce.number().optional(),
+ 
+     VOLUME_MANAGER_URL: z.string().url().optional(),
+     VOLUME_MANAGER_TOKEN: z.string().optional(),
+     VOLUME_MANAGER_MOUNT_PATH: z.string().optional(),
++    AGENT_SANDBOX_ENABLE_VOLUME: BoolSchema.default(true),
+ 
+     LOG_ENABLE_CONSOLE: BoolSchema.default(true),
+     LOG_CONSOLE_LEVEL: LogLevelSchema.default('debug'),
+diff --git a/projects/app/.env.template b/projects/app/.env.template
+index 567e2e44b3f7..1ed90c9162ec 100644
+--- a/projects/app/.env.template
++++ b/projects/app/.env.template
+@@ -49,6 +49,10 @@ AGENT_SANDBOX_USE_SERVER_PROXY=false
+ AGENT_SANDBOX_SEALOS_BASEURL=
+ AGENT_SANDBOX_SEALOS_TOKEN=
+ 
++# 活跃沙箱数量上限（不设置则不限制）
++AGENT_SANDBOX_MAX_EDIT_DEBUG=
++AGENT_SANDBOX_MAX_SESSION_RUNTIME=
++
+ # Volume manager
+ VOLUME_MANAGER_URL=
+ VOLUME_MANAGER_TOKEN=

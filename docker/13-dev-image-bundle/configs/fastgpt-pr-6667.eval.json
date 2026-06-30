@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-6667",
+    "pr_number":  "6667",
+    "title":  "feat(skill): add custom delete chat item for skill debug",
+    "base_commit":  "1920d283c74c2fee2ddb103c4e4f5ecf593bec9e",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

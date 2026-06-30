@@ -1,0 +1,14 @@
+M	packages/global/core/chat/adapt.ts
+M	packages/global/core/chat/type.ts
+M	packages/global/core/chat/utils.ts
+M	packages/global/core/workflow/template/system/interactive/type.ts
+M	packages/service/core/chat/saveChat.ts
+M	packages/service/core/workflow/dispatch/ai/agent/index.ts
+M	packages/service/core/workflow/dispatch/ai/agent/master/call.ts
+M	packages/service/core/workflow/dispatch/ai/agent/master/prompt.ts
+M	packages/service/core/workflow/dispatch/ai/agent/sub/plan/constants.ts
+M	packages/service/core/workflow/dispatch/ai/agent/sub/plan/index.ts
+M	packages/service/core/workflow/dispatch/ai/agent/sub/plan/prompt.ts
+M	packages/service/core/workflow/dispatch/index.ts
+M	test/cases/global/core/chat/adapt.test.ts
+M	test/cases/service/core/chat/saveChat.test.ts

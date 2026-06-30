@@ -1,0 +1,25 @@
+id: fastgpt-pr-5911
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "eeea4d7ec0c93cc13a69eed7d6fb46b0cb770dcf"
+  pr_number: 5911
+  pr_url: https://github.com/labring/FastGPT/pull/5911
+  pr_title_raw: "feat: add app option to agent editor"
+  summary_source: generated_from_pr_patch
+  summary_raw_markdown: |
+    - Add team app and workflow tool options to the Agent editor skill picker.
+    - Support folder loading and keyboard/mouse navigation for nested app/tool choices in the picker.
+    - Map selected team apps and tools into Agent editor tool selections with the correct template metadata and localized labels.
+
+validation:
+  head_commit: "decdfafc8adf13fed4976c839a569b88a0bb8c9d"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-5911.patch"
+  patch_sha256: "4405627dd0b6cef1f6df7dae2d76f69abc3909e6a385bbb9032688e75f043b24"
+  changed_files_file: "patches/fastgpt-pr-5911.changed_files.txt"
+  manual_functionality_description: |
+    Pending manual functionality description for this TypeScript-size candidate batch.

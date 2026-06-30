@@ -1,0 +1,4 @@
+M	packages/service/core/app/tool/controller.ts
+M	projects/app/src/pageComponents/config/tool/SystemToolConfigModal.tsx
+M	projects/app/src/pages/api/core/plugin/admin/tool/detail.ts
+M	projects/app/src/pages/api/core/plugin/admin/tool/update.ts

@@ -1,0 +1,197 @@
+diff --git a/packages/global/openapi/core/agentSkills/api.ts b/packages/global/openapi/core/agentSkills/api.ts
+index 45dcf4345bbc..f1b55c54e7bf 100644
+--- a/packages/global/openapi/core/agentSkills/api.ts
++++ b/packages/global/openapi/core/agentSkills/api.ts
+@@ -300,6 +300,13 @@ export const ExportSkillQuerySchema = z.object({
+ });
+ export type ExportSkillQuery = z.infer<typeof ExportSkillQuerySchema>;
+ 
++export const SkillDebugDeleteChatItemBodySchema = z.object({
++  skillId: IdSchema,
++  chatId: z.string(),
++  contentId: z.string()
++});
++export type SkillDebugDeleteChatItemBody = z.infer<typeof SkillDebugDeleteChatItemBodySchema>;
++
+ export const SkillDebugRecordsBodySchema = z.object({
+   skillId: IdSchema,
+   chatId: z.string(),
+diff --git a/projects/app/src/components/core/chat/ChatContainer/ChatBox/index.tsx b/projects/app/src/components/core/chat/ChatContainer/ChatBox/index.tsx
+index a6392e8c948e..7d297921c7a9 100644
+--- a/projects/app/src/components/core/chat/ChatContainer/ChatBox/index.tsx
++++ b/projects/app/src/components/core/chat/ChatContainer/ChatBox/index.tsx
+@@ -97,6 +97,8 @@ type Props = OutLinkChatAuthProps &
+       }
+     >;
+     onTriggerRefresh?: () => void;
++    // 自定义删除消息的实现，不传则使用默认的 delChatRecordById
++    onDeleteChatItem?: (contentId: string, delFile?: boolean) => Promise<void>;
+   };
+ 
+ const ChatBox = ({
+@@ -108,7 +110,8 @@ const ChatBox = ({
+   showWorkorder,
+   onStartChat,
+   chatType,
+-  onTriggerRefresh
++  onTriggerRefresh,
++  onDeleteChatItem
+ }: Props) => {
+   const ScrollContainerRef = useRef<HTMLDivElement>(null);
+   const { t } = useTranslation();
+@@ -806,6 +809,9 @@ const ChatBox = ({
+   // retry input
+   const onDelMessage = useCallback(
+     (contentId: string, delFile = true) => {
++      if (onDeleteChatItem) {
++        return onDeleteChatItem(contentId, delFile);
++      }
+       return delChatRecordById({
+         appId,
+         chatId,
+@@ -814,7 +820,7 @@ const ChatBox = ({
+         ...outLinkAuthData
+       });
+     },
+-    [appId, chatId, outLinkAuthData]
++    [appId, chatId, outLinkAuthData, onDeleteChatItem]
+   );
+   const retryInput = useMemoizedFn((dataId?: string) => {
+     if (!dataId || !onDelMessage) return;
+diff --git a/projects/app/src/pageComponents/dashboard/skill/detail/preview/SkillPreview.tsx b/projects/app/src/pageComponents/dashboard/skill/detail/preview/SkillPreview.tsx
+index b96f5842c849..a47321d7c385 100644
+--- a/projects/app/src/pageComponents/dashboard/skill/detail/preview/SkillPreview.tsx
++++ b/projects/app/src/pageComponents/dashboard/skill/detail/preview/SkillPreview.tsx
+@@ -119,8 +119,8 @@ const Render = () => {
+       canDownloadSource={false}
+       isShowCite={false}
+       isShowFullText={false}
+-      showRunningStatus={false}
+-      showSkillReferences={false}
++      showRunningStatus={true}
++      showSkillReferences={true}
+       showWholeResponse={false}
+       showAvatar={false}
+     >
+diff --git a/projects/app/src/pageComponents/dashboard/skill/detail/preview/useSkillChatTest.tsx b/projects/app/src/pageComponents/dashboard/skill/detail/preview/useSkillChatTest.tsx
+index d7c3ab2bc4a6..07a84bae5317 100644
+--- a/projects/app/src/pageComponents/dashboard/skill/detail/preview/useSkillChatTest.tsx
++++ b/projects/app/src/pageComponents/dashboard/skill/detail/preview/useSkillChatTest.tsx
+@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react';
+ import { useMemoizedFn } from 'ahooks';
+ import { useContextSelector } from 'use-context-selector';
+ import { streamFetch } from '@/web/common/api/fetch';
+-import { SKILL_DEBUG_CHAT_URL } from '@/web/core/skill/api';
++import { SKILL_DEBUG_CHAT_URL, delSkillDebugChatItem } from '@/web/core/skill/api';
+ import { ChatItemContext } from '@/web/core/chat/context/chatItemContext';
+ import { AppTypeEnum } from '@fastgpt/global/core/app/constants';
+ import type { StartChatFnProps } from '@/components/core/chat/ChatContainer/type';
+@@ -24,10 +24,11 @@ export const useSkillChatTest = ({
+ }) => {
+   const setChatBoxData = useContextSelector(ChatItemContext, (v) => v.setChatBoxData);
+ 
++  // TODO: 暂时隐藏文件上传按钮，后续需要放开 canSelectFile 和 canSelectImg
+   const fileSelectConfig: AppFileSelectConfigType = {
+     maxFiles: 10,
+-    canSelectFile: true,
+-    canSelectImg: true,
++    canSelectFile: false,
++    canSelectImg: false,
+     customPdfParse: false,
+     canSelectVideo: false,
+     canSelectAudio: false,
+@@ -71,6 +72,11 @@ export const useSkillChatTest = ({
+     }
+   );
+ 
++  // 使用 skill 专属的删除接口，避免走 /api/core/chat/item/delete 时用 skillId 查 App 报错
++  const handleDeleteChatItem = useMemoizedFn((contentId: string) =>
++    delSkillDebugChatItem({ skillId, chatId, contentId })
++  );
++
+   const ChatContainer = useCallback(
+     () => (
+       <ChatBox
+@@ -79,9 +85,10 @@ export const useSkillChatTest = ({
+         chatId={chatId}
+         chatType={ChatTypeEnum.test}
+         onStartChat={startChat}
++        onDeleteChatItem={handleDeleteChatItem}
+       />
+     ),
+-    [skillId, chatId, isReady, startChat]
++    [skillId, chatId, isReady, startChat, handleDeleteChatItem]
+   );
+ 
+   return {
+diff --git a/projects/app/src/pages/api/core/agentSkills/debugSession/chatItem/delete.ts b/projects/app/src/pages/api/core/agentSkills/debugSession/chatItem/delete.ts
+new file mode 100644
+index 000000000000..8a94234f427f
+--- /dev/null
++++ b/projects/app/src/pages/api/core/agentSkills/debugSession/chatItem/delete.ts
+@@ -0,0 +1,42 @@
++import type { NextApiResponse } from 'next';
++import { MongoChatItem } from '@fastgpt/service/core/chat/chatItemSchema';
++import { authSkill } from '@fastgpt/service/support/permission/agentSkill/auth';
++import { NextAPI } from '@/service/middleware/entry';
++import { ReadPermissionVal } from '@fastgpt/global/support/permission/constant';
++import { UserError } from '@fastgpt/global/common/error/utils';
++import { type ApiRequestProps } from '@fastgpt/service/type/next';
++import type { SkillDebugDeleteChatItemBody } from '@fastgpt/global/core/agentSkills/api';
++
++async function handler(
++  req: ApiRequestProps<SkillDebugDeleteChatItemBody>,
++  _res: NextApiResponse
++) {
++  const { skillId, chatId, contentId } = req.body;
++
++  if (!skillId) throw new UserError('skillId is required');
++  if (!chatId) throw new UserError('chatId is required');
++  if (!contentId) throw new UserError('contentId is required');
++
++  await authSkill({
++    req,
++    authToken: true,
++    authApiKey: true,
++    skillId,
++    per: ReadPermissionVal
++  });
++
++  await MongoChatItem.updateOne(
++    {
++      appId: skillId,
++      chatId,
++      dataId: contentId
++    },
++    {
++      $set: { deleteTime: new Date() }
++    }
++  );
++
++  return;
++}
++
++export default NextAPI(handler);
+diff --git a/projects/app/src/web/core/skill/api.ts b/projects/app/src/web/core/skill/api.ts
+index 6f024f0323ab..d76702933b83 100644
+--- a/projects/app/src/web/core/skill/api.ts
++++ b/projects/app/src/web/core/skill/api.ts
+@@ -28,6 +28,7 @@ import type {
+   UpdateSkillVersionBody
+ } from '@fastgpt/global/core/agentSkills/api';
+ import type { getChatRecordsResponse } from '@/pages/api/core/chat/record/getRecords_v2';
++import type { SkillDebugDeleteChatItemBody } from '@fastgpt/global/core/agentSkills/api';
+ import type { GetResourceFolderListProps } from '@fastgpt/global/common/parentFolder/type';
+ import { AgentSkillTypeEnum } from '@fastgpt/global/core/agentSkills/constants';
+ 
+@@ -155,6 +156,10 @@ export const exportSkill = (skillId: string, skillName: string) =>
+ export const getAppsBySkillId = (skillId: string) =>
+   GET<ListAppsBySkillIdResponse>('/core/agentSkills/apps', { skillId });
+ 
++/** 删除 Skill 调试会话中的单条对话消息（用于"重新生成"时清除旧记录） */
++export const delSkillDebugChatItem = (data: SkillDebugDeleteChatItemBody) =>
++  POST('/core/agentSkills/debugSession/chatItem/delete', data);
++
+ /** 获取 Skill 调试会话的对话记录（用于预览界面加载历史记录） */
+ export const getSkillDebugRecords = (data: SkillDebugRecordsBody) =>
+   POST<getChatRecordsResponse>('/core/agentSkills/debugSession/records', data);

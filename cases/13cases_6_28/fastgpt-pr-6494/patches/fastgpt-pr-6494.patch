@@ -1,0 +1,909 @@
+diff --git a/packages/global/core/chat/adapt.ts b/packages/global/core/chat/adapt.ts
+index 218bae7e94d2..a5818bca8afc 100644
+--- a/packages/global/core/chat/adapt.ts
++++ b/packages/global/core/chat/adapt.ts
+@@ -19,7 +19,7 @@ import type {
+   ChatCompletionToolMessageParam
+ } from '../../core/ai/type';
+ import { ChatCompletionRequestMessageRoleEnum } from '../../core/ai/constants';
+-import { getNanoid } from '../../common/string/tools';
++import { getPlanCallResponseText } from './utils';
+ 
+ export const GPT2Chat = {
+   [ChatCompletionRequestMessageRoleEnum.System]: ChatRoleEnum.System,
+@@ -52,7 +52,7 @@ export const chats2GPTMessages = ({
+ }): ChatCompletionMessageParam[] => {
+   let results: ChatCompletionMessageParam[] = [];
+ 
+-  messages.forEach((item) => {
++  messages.forEach((item, index) => {
+     const dataId = reserveId ? item.dataId : undefined;
+     if (item.obj === ChatRoleEnum.System) {
+       const content = item.value?.[0]?.text?.content;
+@@ -65,6 +65,8 @@ export const chats2GPTMessages = ({
+       }
+     } else if (item.obj === ChatRoleEnum.Human) {
+       const value = item.value
++        // 有 planId 的过滤掉，会被 planTool 一起处理
++        .filter((item) => !item.planId)
+         .map((item) => {
+           if (item.text) {
+             return {
+@@ -93,22 +95,28 @@ export const chats2GPTMessages = ({
+         })
+         .filter(Boolean) as ChatCompletionContentPart[];
+ 
+-      results.push({
+-        dataId,
+-        hideInUI: item.hideInUI,
+-        role: ChatCompletionRequestMessageRoleEnum.User,
+-        content: simpleUserContentPart(value)
+-      });
++      if (value.length) {
++        results.push({
++          dataId,
++          hideInUI: item.hideInUI,
++          role: ChatCompletionRequestMessageRoleEnum.User,
++          content: simpleUserContentPart(value)
++        });
++      }
+     } else {
+       const aiResults: ChatCompletionMessageParam[] = [];
+-      const existsPlanId = new Set<string>();
+ 
+       item.value.forEach((value, i) => {
+-        // 只需要把根节点转化即可
+-        if (value.stepId) return;
++        /* Plan agent 产生的上下文都需要合并到一个 toolCall 里。
++          Plan agent 产生的上下文都会携带 planId
++          value.plan 代表的是 plan 的具体内容，根据这个值去转化成 toolcall
++        */
++        if (value.planId && !value.plan) return;
+ 
+-        if ((value.tools || value.tool) && reserveTool) {
+-          const tools = value.tools || [value.tool!];
++        const hasTools = Array.isArray(value.tools) && value.tools.length > 0;
++
++        if (reserveTool && (hasTools || value.tool)) {
++          const tools = hasTools ? value.tools! : [value.tool!];
+           const tool_calls: ChatCompletionMessageToolCall[] = [];
+           const toolResponse: ChatCompletionToolMessageParam[] = [];
+           tools.forEach((tool) => {
+@@ -150,33 +158,19 @@ export const chats2GPTMessages = ({
+               content: value.text.content
+             });
+           }
+-        } else if (value.plan && reserveTool) {
++        } else if (value.plan) {
++          // 查找该 Plan 产生的上下文，组成一个 toolcall
+           const planId = value.plan.planId;
+-          if (existsPlanId.has(planId)) {
+-            return;
+-          }
+-          existsPlanId.add(planId);
+-          const steps = item.value
+-            .filter((item) => item.plan?.planId === planId)
+-            .flatMap((item) => item.plan?.steps || [])
+-            .map((step) => {
+-              const stepResponse = item.value
+-                .filter((item) => item.stepId === step.id)
+-                ?.map((item) => item.text?.content)
+-                .join('\n');
+-
+-              return {
+-                title: step.title,
+-                response: stepResponse
+-              };
+-            });
+-          const toolId = getNanoid(6);
++          const planResponseText = getPlanCallResponseText({
++            plan: value.plan,
++            assistantResponses: item.value.filter((item) => item.planId === planId)
++          });
+           aiResults.push({
+             dataId,
+             role: ChatCompletionRequestMessageRoleEnum.Assistant,
+             tool_calls: [
+               {
+-                id: toolId,
++                id: planId,
+                 type: 'function',
+                 function: {
+                   name: 'plan_agent',
+@@ -192,25 +186,11 @@ export const chats2GPTMessages = ({
+           aiResults.push({
+             dataId,
+             role: ChatCompletionRequestMessageRoleEnum.Tool,
+-            tool_call_id: toolId,
+-            content: JSON.stringify(steps)
++            tool_call_id: planId,
++            content: planResponseText
+           });
+         } else if (value.interactive) {
+-          if (value.interactive.type === 'agentPlanAskQuery') {
+-            aiResults.push({
+-              dataId,
+-              role: ChatCompletionRequestMessageRoleEnum.Assistant,
+-              content: value.interactive.params.content
+-            });
+-          } else if (value.interactive.type === 'agentPlanAskUserForm') {
+-            aiResults.push({
+-              dataId,
+-              role: ChatCompletionRequestMessageRoleEnum.Assistant,
+-              content: `${value.interactive.params.description}
+-
+-Answer: ${value.interactive.params.inputForm.map((item) => `- ${item.label}: ${item.value}`).join('\n')}`
+-            });
+-          }
++          // 目前只有 plan 里会有交互，所以这里暂时不需要处理
+         }
+       });
+ 
+diff --git a/packages/global/core/chat/type.ts b/packages/global/core/chat/type.ts
+index 45fab405a695..64dec5cf8238 100644
+--- a/packages/global/core/chat/type.ts
++++ b/packages/global/core/chat/type.ts
+@@ -85,6 +85,7 @@ export const UserChatItemFileItemSchema = z.object({
+ export type UserChatItemFileItemType = z.infer<typeof UserChatItemFileItemSchema>;
+ 
+ export const UserChatItemValueItemSchema = z.object({
++  planId: z.string().nullish(),
+   text: z
+     .object({
+       content: z.string()
+@@ -130,6 +131,7 @@ export type AdminFbkType = z.infer<typeof AdminFbkSchema>;
+ export const AIChatItemValueSchema = z.object({
+   id: z.string().nullish(),
+   stepId: z.string().nullish(),
++  planId: z.string().nullish(),
+   text: z
+     .object({
+       content: z.string()
+diff --git a/packages/global/core/chat/utils.ts b/packages/global/core/chat/utils.ts
+index 3dba77724110..077947a9ca9d 100644
+--- a/packages/global/core/chat/utils.ts
++++ b/packages/global/core/chat/utils.ts
+@@ -12,6 +12,87 @@ import { PublishChannelEnum } from '../../support/outLink/constant';
+ import { removeDatasetCiteText } from '../ai/llm/utils';
+ import type { WorkflowInteractiveResponseType } from '../workflow/template/system/interactive/type';
+ import { ConfirmPlanAgentText } from '../workflow/runtime/constants';
++import type { AgentPlanType } from '../ai/agent/type';
++
++export type PlanAskInfo = {
++  question: string;
++  answer: string;
++};
++
++export const getPlanCallResponseText = ({
++  plan,
++  assistantResponses
++}: {
++  plan: AgentPlanType;
++  assistantResponses: AIChatItemValueItemType[];
++}): string => {
++  // 1. 获取 ask 信息
++  const askText = (() => {
++    const asks = assistantResponses
++      .map((item) => {
++        const interactive = item.interactive;
++        if (!interactive) return;
++        if (interactive.type === 'agentPlanAskQuery') {
++          const question = interactive.params?.content?.trim();
++          if (!question) return;
++          const answer = interactive.params?.answer?.trim() || undefined;
++          return JSON.stringify({ question, answer });
++        }
++
++        if (interactive.type === 'agentPlanAskUserForm') {
++          const question = interactive.params?.description?.trim();
++          const answer =
++            interactive.params?.inputForm
++              ?.map((item) => {
++                if (!item?.label) return '';
++                const val =
++                  typeof item.value === 'object' ? JSON.stringify(item.value) : String(item.value);
++                return `${item.label}: ${val}`;
++              })
++              .filter(Boolean)
++              .join('; ') || undefined;
++
++          if (!question && !answer) return;
++          return JSON.stringify({ question, answer });
++        }
++        return undefined;
++      })
++      .filter(Boolean) as string[];
++
++    return asks.join('\n');
++  })();
++
++  // 2. 获取 step 信息; 如果是中途暂停，则需要提示用户暂停
++  const { stepText, isPause } = (() => {
++    const stepValues = assistantResponses.filter((item) => item.stepId);
++    let isPause = false;
++    const stepResults = plan.steps.map((step, index) => {
++      const result = stepValues
++        .map((item) => item.text?.content?.trim() || '')
++        .filter(Boolean)
++        .join('\n');
++
++      const executed = !!result;
++
++      if (!executed) {
++        isPause = true;
++      }
++
++      return `(${index + 1}) [${executed ? `executed` : `pending`}] id=${step.id}; title=${step.title || ''}; description=${step.description || ''}${result ? `; result: ${result}` : ''}`;
++    });
++
++    return {
++      stepText: stepResults.join('\n'),
++      isPause
++    };
++  })();
++
++  return `${isPause ? 'PLAN_PAUSE_HANDOFF' : ''}
++COLLECTED INFO:
++${askText}
++STEPS: 
++${stepText}`;
++};
+ 
+ // Concat 2 -> 1, and sort by role
+ export const concatHistories = (histories1: ChatItemType[], histories2: ChatItemType[]) => {
+diff --git a/packages/global/core/workflow/template/system/interactive/type.ts b/packages/global/core/workflow/template/system/interactive/type.ts
+index b61c7cfbf704..ae7b8e8e6c02 100644
+--- a/packages/global/core/workflow/template/system/interactive/type.ts
++++ b/packages/global/core/workflow/template/system/interactive/type.ts
+@@ -88,7 +88,8 @@ export type AgentPlanCheckInteractive = z.infer<typeof AgentPlanCheckInteractive
+ export const AgentPlanAskQueryInteractiveSchema = z.object({
+   type: z.literal('agentPlanAskQuery'),
+   params: z.object({
+-    content: z.string()
++    content: z.string(),
++    answer: z.string().optional()
+   })
+ });
+ export type AgentPlanAskQueryInteractive = z.infer<typeof AgentPlanAskQueryInteractiveSchema>;
+@@ -147,16 +148,21 @@ export const PaymentPauseInteractiveSchema = z.object({
+ });
+ export type PaymentPauseInteractive = z.infer<typeof PaymentPauseInteractiveSchema>;
+ 
+-export const InteractiveNodeResponseTypeSchema = z.discriminatedUnion('type', [
+-  UserSelectInteractiveSchema,
+-  UserInputInteractiveSchema,
+-  ChildrenInteractiveSchema,
+-  ToolCallChildrenInteractiveSchema,
+-  LoopInteractiveSchema,
+-  PaymentPauseInteractiveSchema,
+-  AgentPlanCheckInteractiveSchema,
+-  AgentPlanAskQueryInteractiveSchema
+-]);
++export const InteractiveNodeResponseTypeSchema = z.intersection(
++  z.discriminatedUnion('type', [
++    UserSelectInteractiveSchema,
++    UserInputInteractiveSchema,
++    ChildrenInteractiveSchema,
++    ToolCallChildrenInteractiveSchema,
++    LoopInteractiveSchema,
++    PaymentPauseInteractiveSchema,
++    AgentPlanCheckInteractiveSchema,
++    AgentPlanAskQueryInteractiveSchema
++  ]),
++  z.object({
++    planId: z.string().optional()
++  })
++);
+ export type InteractiveNodeResponseType = z.infer<typeof InteractiveNodeResponseTypeSchema>;
+ 
+ export const WorkflowInteractiveResponseTypeSchema = z.intersection(
+diff --git a/packages/service/core/chat/saveChat.ts b/packages/service/core/chat/saveChat.ts
+index 106796a9bb27..d43eb18a43b1 100644
+--- a/packages/service/core/chat/saveChat.ts
++++ b/packages/service/core/chat/saveChat.ts
+@@ -458,7 +458,25 @@ export const updateInteractiveChat = async ({
+     interactive,
+     input: userInteractiveVal
+   });
++  // 提取嵌套在子流程里的交互节点
++  const finalInteractive = extractDeepestInteractive(interactive);
+   if (status === 'query') {
++    // 特殊处理：
++    {
++      // 1. AskQuery 需要把用户答案回填到上一条 interactive，避免后续多轮恢复时丢失 answer。
++      if (finalInteractive.type === 'agentPlanAskQuery') {
++        finalInteractive.params.answer = userInteractiveVal;
++        chatItem.value[chatItem.value.length - 1].interactive = interactive;
++        chatItem.markModified('value');
++        await chatItem.save();
++
++        // 追加 PlanId 给 userItem(便于适配器会跳过转化该条消息)
++        props.userContent.value.forEach((item) => {
++          item.planId = finalInteractive.planId;
++        });
++      }
++    }
++
+     return await pushChatRecords(props);
+   }
+ 
+@@ -483,9 +501,6 @@ export const updateInteractiveChat = async ({
+   */
+   // Update interactive value
+   {
+-    // 提取嵌套在子流程里的交互节点
+-    const finalInteractive = extractDeepestInteractive(interactive);
+-
+     if (
+       finalInteractive.type === 'userSelect' ||
+       finalInteractive.type === 'agentPlanAskUserSelect'
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/index.ts b/packages/service/core/workflow/dispatch/ai/agent/index.ts
+index ab25a3b76f26..b93bbeae1a8d 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/index.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/index.ts
+@@ -20,6 +20,7 @@ import {
+   chatValue2RuntimePrompt,
+   GPTMessages2Chats
+ } from '@fastgpt/global/core/chat/adapt';
++import { getPlanCallResponseText } from '@fastgpt/global/core/chat/utils';
+ import { filterMemoryMessages } from '../utils';
+ import { parseI18nString } from '@fastgpt/global/common/i18n/utils';
+ import { systemSubInfo } from '@fastgpt/global/core/workflow/node/agent/constants';
+@@ -94,6 +95,9 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+     }
+   } = props;
+   const chatHistories = getHistories(history, histories);
++  const aiHistoryValues = chatHistories
++    .filter((item) => item.obj === ChatRoleEnum.AI)
++    .flatMap((item) => item.value);
+   const historiesMessages = chats2GPTMessages({
+     messages: chatHistories,
+     reserveId: false,
+@@ -234,11 +238,15 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+         });
+       }
+ 
++      if (askInteractive) {
++        // 这里存储一份冗余的 planId，便于告诉 AI value 也存储一份 planId
++        askInteractive.planId = planBuffer?.planId;
++      }
++
+       return {
+         completeMessages,
+         askInteractive,
+-        plan,
+-        planBuffer
++        plan
+       };
+     };
+     const planCallFn = async () => {
+@@ -286,15 +294,9 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+       getLogger(LogCategories.MODULE.AI.AGENT).debug(
+         `All steps completed, check if need continue planning`
+       );
+-      const stepsResponse = agentPlan.steps.map((step) => {
+-        const stepResponse = assistantResponses
+-          .filter((item) => item.stepId === step.id)
+-          ?.map((item) => item.text?.content)
+-          .join('\n');
+-        return {
+-          title: step.title,
+-          response: stepResponse
+-        };
++      const planResponseText = getPlanCallResponseText({
++        plan: agentPlan,
++        assistantResponses: [...aiHistoryValues, ...assistantResponses]
+       });
+ 
+       try {
+@@ -310,11 +312,9 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+             task: agentPlan.task,
+             description: agentPlan.description,
+             background: agentPlan.background,
+-            response: JSON.stringify(stepsResponse)
++            response: planResponseText
+           }),
+-          task: agentPlan.task,
+-          description: agentPlan.description,
+-          background: agentPlan.background
++          ...agentPlan
+         });
+ 
+         const { plan: continuePlan } = parsePlanCallResult(result);
+@@ -350,6 +350,7 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+         break;
+       }
+ 
++      // Step calls
+       if (agentPlan) {
+         while (!checkIsStopping() && agentPlan.steps.filter((item) => !item.response).length) {
+           for await (const step of agentPlan.steps) {
+@@ -357,8 +358,10 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+               break;
+             }
+             if (step.response) continue;
++
+             getLogger(LogCategories.MODULE.AI.AGENT).debug(`Step call: ${step.id}`, step);
+             assistantResponses.push({
++              planId: agentPlan.planId,
+               stepTitle: {
+                 stepId: step.id,
+                 title: step.title
+@@ -399,6 +402,7 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+               .flat()
+               .map((item) => ({
+                 ...item,
++                planId: agentPlan!.planId,
+                 stepId: step.id
+               }));
+             assistantResponses.push(...assistantResponse);
+@@ -408,25 +412,20 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+           }
+         }
+ 
++        // 用户主动暂停（相当于强制结束本轮 task，会清空所有状态）
+         if (checkIsStopping()) {
+           break;
+         }
+ 
+         // 所有步骤执行完后，固定调用 Plan Agent（继续规划模式）
+-        const stepsResponse = agentPlan.steps.map((step) => {
+-          const stepResponse = assistantResponses
+-            .filter((item) => item.stepId === step.id)
+-            ?.map((item) => item.text?.content)
+-            .join('\n');
+-          return {
+-            title: step.title,
+-            response: stepResponse
+-          };
++        const planResponseText = getPlanCallResponseText({
++          plan: agentPlan,
++          assistantResponses: [...aiHistoryValues, ...assistantResponses]
+         });
+         // 拼接 plan response 到 masterMessages 的 plan tool call 里（肯定在最后一个）
+         const lastToolIndex = masterMessages.findLastIndex((item) => item.role === 'tool');
+         if (lastToolIndex !== -1) {
+-          masterMessages[lastToolIndex].content = JSON.stringify(stepsResponse);
++          masterMessages[lastToolIndex].content = planResponseText;
+         }
+         planIterationCount++;
+ 
+@@ -452,7 +451,6 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+         }
+       } else {
+         getLogger(LogCategories.MODULE.AI.AGENT).debug(`Start master agent`);
+-
+         const result = await masterCall({
+           ...props,
+           masterMessages,
+@@ -478,7 +476,7 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+ 
+         // 触发了 plan
+         if (result.planResponse) {
+-          const { completeMessages, askInteractive, plan, planBuffer } = parsePlanCallResult(
++          const { completeMessages, askInteractive, plan } = parsePlanCallResult(
+             result.planResponse
+           );
+ 
+@@ -490,7 +488,7 @@ export const dispatchRunAgent = async (props: DispatchAgentModuleProps): Promise
+                 [masterMessagesKey]: masterMessages,
+                 [planMessagesKey]: filterMemoryMessages(completeMessages),
+                 [agentPlanKey]: plan,
+-                [planBufferKey]: planBuffer
++                [planBufferKey]: result.planResponse.planBuffer
+               },
+               [DispatchNodeResponseKeyEnum.interactive]: askInteractive,
+               [DispatchNodeResponseKeyEnum.nodeResponses]: nodeResponses
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/master/call.ts b/packages/service/core/workflow/dispatch/ai/agent/master/call.ts
+index 6e32d989ed7a..e849692384c3 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/master/call.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/master/call.ts
+@@ -425,9 +425,8 @@ export const masterCall = async ({
+                 model,
+                 stream,
+                 mode: 'initial',
+-                task: toolArgs.data.task,
+-                description: toolArgs.data.description,
+-                background: toolArgs.data.background
++                ...toolArgs.data,
++                planId: call.id
+               });
+ 
+               return {
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/master/prompt.ts b/packages/service/core/workflow/dispatch/ai/agent/master/prompt.ts
+index 43ddd742252d..723d2f074446 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/master/prompt.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/master/prompt.ts
+@@ -122,6 +122,50 @@ ${
+ | 明显需要工具的任务 | **提示模式**（引导用户选择工具或进入辅助生成） |
+ </decision_matrix>
+ 
++<goal_alignment_policy>
++## 第五步：总结模式目标对齐策略
++
++进入总结模式前，先锁定当前任务目标：
++
++1. 当前输入优先
++- 优先使用本轮最新用户输入来确定当前任务目标
++
++2. 短指令回退规则
++- 若用户仅输入“总结一下”“汇总下进度”等短指令，且未给出新任务目标
++- 默认总结最近任务目标
++
++3. 最近任务目标定义
++- 优先提取当前上下文处在最后面的任务目标
++
++4. 目标冲突处理
++- 若当前输入与旧目标冲突，旧目标仅可作为背景证据
++- 总结结论必须围绕当前任务目标组织
++</goal_alignment_policy>
++
++<pause_resume_policy>
++## 第六步：Pause 后软续跑策略
++
++仅当满足下面条件时，才启用 pause 续跑策略：
++- 最近一条工具消息内容以 "PLAN_PAUSE_HANDOFF" 开头
++- 该工具消息位于当前用户输入之前的最近上下文位置
++- 若只是更早历史里的 handoff 记录，不视为本轮 pause 恢复信号
++
++1. 仅当用户输入明显表达“继续”意图时，优先延续旧 plan
++- 继续意图示例：继续、接着、按上次、继续执行、往下做、resume、continue
++- 命中后优先调用 ${SubAppIds.plan}
++
++2. 命中继续意图时，调用 ${SubAppIds.plan}
++- 复用 handoff 里的 信息
++- 明确继承 ask 的 question 和 answer（若存在）
++- 优先推进 pending steps，避免重复 executed steps
++
++3. 若用户新输入与旧 plan 目标明显冲突
++- 直接按新输入重规划任务，不强行续旧 plan
++
++4. 若没有继续意图
++- 按 <decision_matrix> 正常决策，不自动续跑旧 plan
++</pause_resume_policy>
++
+ <examples>
+ <example name="无工具 + 通用对话 → 聊天助手">
+ 用户："什么是人工智能？"
+@@ -167,6 +211,34 @@ ${
+ 判断：信息不够完整
+ 决策：调用 ${SubAppIds.plan} 补充规划
+ </example>
++
++<example name="Pause 上下文 + 继续意图 → 优先续旧计划">
++用户："继续执行上次的计划"
++上下文：包含 PLAN_PAUSE_HANDOFF，且存在 pending steps
++判断：用户明确要继续，且旧计划可延续
++决策：优先调用 ${SubAppIds.plan}，把 handoff 的任务和步骤进度整理进 background，优先执行 pending steps
++</example>
++
++<example name="Pause 上下文 + 新任务冲突 → 直接重规划">
++用户："不要继续上次了，改成帮我做竞品调研"
++上下文：包含 PLAN_PAUSE_HANDOFF，但用户目标已明显变化
++判断：新输入与旧计划冲突
++决策：按新输入直接重规划，不强行沿用旧 pending steps
++</example>
++
++<example name="Pause 上下文 + 短指令总结 → 对齐最近任务目标">
++用户："总结一下"
++上下文：最近存在 PLAN_PAUSE_HANDOFF，同时更早历史里还有其他任务记录
++判断：用户未给新目标，属于短指令总结
++决策：按最近任务目标总结，不扩散到更早历史任务
++</example>
++
++<example name="Pause 上下文 + 新目标冲突 + 总结 → 当前输入优先">
++用户："别按上次方向了，直接总结这次关于成本优化的结论"
++上下文：存在旧任务 handoff，但与本轮目标冲突
++判断：当前输入给出了明确新目标
++决策：按当前输入目标总结，旧目标只作为背景证据
++</example>
+ </examples>
+ 
+ <security>
+@@ -205,8 +277,10 @@ ${
+ - 需要工具的任务 → 明确告知用户缺少工具，引导选择工具或进入辅助生成模式，例如："当前没有可用的工具来完成此任务，请先选择相关工具或进入辅助生成模式自动化生成任务规划"
+ 
+ **有工具时的执行**：
+-- 总结模式：整合已有信息，生成结构化输出，需要基于之前的上下文所有信息来输出一个完整且详细的总结，
+-    不是简单回答，需要直接把详细的总结信息给输出出来，把上下执行的信息都整合进去，这一步越详细越好
++- 总结模式：先在内部确认当前任务目标（优先本轮用户输入；短指令则回退最近任务目标），
++    再结合当前历史记录中与目标相关的全部信息输出详细总结，不要只给简短结论，把上下执行的信息都整合进去，这一步越详细越好，如果不详细很可能会重做
++    这是不可允许的，一旦进入总结模式就需要根据上下文并结合目标来完成报告。
++    若当前目标信息不足，不要硬总结，转工具模式或规划模式补充信息
+ - 工具模式：调用最合适的工具
+ - 规划模式：调用 ${SubAppIds.plan}，让规划系统接管，同时需要对当前的上下文信息进行总结，尤其是之前向用户询问的一些问题和用户的回答（避免重复的询问同一个问题），
+     以及已经执行的步骤和结果，未执行的步骤信息，帮助规划系统更好地理解当前状态，最后将上诉的信息放到 background 的参数里
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/sub/plan/constants.ts b/packages/service/core/workflow/dispatch/ai/agent/sub/plan/constants.ts
+index 26ab0a822789..5b3ffbfd881d 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/sub/plan/constants.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/sub/plan/constants.ts
+@@ -1,6 +1,7 @@
+ import type { ChatCompletionTool } from '@fastgpt/global/core/ai/type';
+ import { SubAppIds, systemSubInfo } from '@fastgpt/global/core/workflow/node/agent/constants';
+ import type { InteractiveNodeResponseType } from '@fastgpt/global/core/workflow/template/system/interactive/type';
++import { getNanoid } from '@fastgpt/global/common/string/tools';
+ import z from 'zod';
+ 
+ export const PlanCheckInteractive: InteractiveNodeResponseType = {
+@@ -13,7 +14,8 @@ export const PlanCheckInteractive: InteractiveNodeResponseType = {
+ export const PlanAgentParamsSchema = z.object({
+   task: z.string(),
+   description: z.string(),
+-  background: z.string().nullish()
++  background: z.string().nullish(),
++  planId: z.string().default(() => getNanoid(6))
+ });
+ export type PlanAgentParamsType = z.infer<typeof PlanAgentParamsSchema>;
+ export const PlanAgentTool: ChatCompletionTool = {
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/sub/plan/index.ts b/packages/service/core/workflow/dispatch/ai/agent/sub/plan/index.ts
+index 393409605b4d..d2bc51d7f3cb 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/sub/plan/index.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/sub/plan/index.ts
+@@ -9,8 +9,7 @@ import { getLLMModel } from '../../../../../../ai/model';
+ import { formatModelChars2Points } from '../../../../../../../support/wallet/usage/utils';
+ import type { ChatNodeUsageType } from '@fastgpt/global/support/wallet/bill/type';
+ import type {
+-  AgentPlanAskQueryInteractive,
+-  UserInputInteractive,
++  InteractiveNodeResponseType,
+   WorkflowInteractiveResponseType
+ } from '@fastgpt/global/core/workflow/template/system/interactive/type';
+ import { parseJsonArgs } from '../../../../../../ai/utils';
+@@ -61,7 +60,7 @@ type DispatchPlanAgentProps = PlanAgentConfig &
+   } & (InitialParams | ContinueParams | InteractiveParams);
+ 
+ export type DispatchPlanAgentResponse = {
+-  askInteractive?: UserInputInteractive | AgentPlanAskQueryInteractive;
++  askInteractive?: InteractiveNodeResponseType;
+   plan?: AgentPlanType;
+   planBuffer: PlanAgentParamsType;
+   completeMessages: ChatCompletionMessageParam[];
+@@ -71,6 +70,7 @@ export type DispatchPlanAgentResponse = {
+ 
+ const parsePlan = async ({
+   text,
++  planId,
+   task,
+   description,
+   background
+@@ -90,7 +90,8 @@ const parsePlan = async ({
+     ...result,
+     task,
+     description,
+-    background
++    background,
++    planId
+   });
+   if (!params.success) {
+     getLogger(LogCategories.MODULE.AI.AGENT).warn(`[Plan Agent] Not plan`, { text });
+@@ -101,7 +102,7 @@ const parsePlan = async ({
+ };
+ const parseAskInteractive = async (
+   toolCalls: ChatCompletionMessageToolCall[]
+-): Promise<UserInputInteractive | AgentPlanAskQueryInteractive | undefined> => {
++): Promise<InteractiveNodeResponseType | undefined> => {
+   const tooCall = toolCalls[0];
+   if (!tooCall) return;
+   const params = await AIAskAnswerSchema.safeParseAsync(parseJsonArgs(tooCall.function.arguments));
+@@ -161,6 +162,7 @@ export const dispatchPlanAgent = async ({
+   getSubAppInfo,
+   systemPrompt,
+   model,
++  planId,
+   task,
+   description,
+   background,
+@@ -259,6 +261,7 @@ export const dispatchPlanAgent = async ({
+   // 获取生成的 plan
+   const plan = await parsePlan({
+     text: answerText,
++    planId,
+     task,
+     description,
+     background
+@@ -292,6 +295,7 @@ export const dispatchPlanAgent = async ({
+     askInteractive,
+     plan,
+     planBuffer: {
++      planId,
+       task,
+       description,
+       background
+diff --git a/packages/service/core/workflow/dispatch/ai/agent/sub/plan/prompt.ts b/packages/service/core/workflow/dispatch/ai/agent/sub/plan/prompt.ts
+index e3f65de277f8..3e53ac983ff4 100644
+--- a/packages/service/core/workflow/dispatch/ai/agent/sub/plan/prompt.ts
++++ b/packages/service/core/workflow/dispatch/ai/agent/sub/plan/prompt.ts
+@@ -1092,7 +1092,11 @@ ${bestPractices}
+ `;
+ };
+ 
+-export const getInitialPlanQuery = ({ task, description, background }: PlanAgentParamsType) => {
++export const getInitialPlanQuery = ({
++  task,
++  description,
++  background
++}: Omit<PlanAgentParamsType, 'planId'>) => {
+   return `## 任务目标
+ ${task}
+ 
+@@ -1108,7 +1112,7 @@ export const getContinuePlanQuery = ({
+   description,
+   background,
+   response
+-}: PlanAgentParamsType & {
++}: Omit<PlanAgentParamsType, 'planId'> & {
+   response: string;
+ }) => {
+   return `${getInitialPlanQuery({ task, description, background })}
+diff --git a/packages/service/core/workflow/dispatch/index.ts b/packages/service/core/workflow/dispatch/index.ts
+index 810466455f9c..f2cde88dfa25 100644
+--- a/packages/service/core/workflow/dispatch/index.ts
++++ b/packages/service/core/workflow/dispatch/index.ts
+@@ -1209,11 +1209,11 @@ export class WorkflowQueue {
+     }
+ 
+     /*
+-            特殊情况：
+-            通过 skipEdges 可以判断是运行了分支节点。
+-            由于分支节点，可能会实现递归调用（skip 连线往前递归）
+-            需要把分支节点也加入到已跳过的记录里，可以保证递归 skip 运行时，至多只会传递到当前分支节点，不会影响分支后的内容。
+-          */
++      特殊情况：
++      通过 skipEdges 可以判断是运行了分支节点。
++      由于分支节点，可能会实现递归调用（skip 连线往前递归）
++      需要把分支节点也加入到已跳过的记录里，可以保证递归 skip 运行时，至多只会传递到当前分支节点，不会影响分支后的内容。
++    */
+     const skipEdges = (nodeRunResult.result[DispatchNodeResponseKeyEnum.skipHandleId] ||
+       []) as string[];
+     if (skipEdges && skipEdges?.length > 0) {
+@@ -1310,6 +1310,7 @@ export class WorkflowQueue {
+     }
+ 
+     return {
++      planId: interactiveResult.planId,
+       interactive: interactiveResult
+     };
+   }
+diff --git a/test/cases/global/core/chat/adapt.test.ts b/test/cases/global/core/chat/adapt.test.ts
+index 701df823f492..f90dfd8102a0 100644
+--- a/test/cases/global/core/chat/adapt.test.ts
++++ b/test/cases/global/core/chat/adapt.test.ts
+@@ -319,8 +319,7 @@ describe('chats2GPTMessages', () => {
+ 
+     const result = chats2GPTMessages({ messages, reserveId: false });
+ 
+-    expect(result).toHaveLength(1);
+-    expect(result[0].content).toBe('What would you like to know?');
++    expect(result).toHaveLength(0);
+   });
+ 
+   it('should handle interactive agentPlanAskUserForm', () => {
+@@ -346,10 +345,7 @@ describe('chats2GPTMessages', () => {
+ 
+     const result = chats2GPTMessages({ messages, reserveId: false });
+ 
+-    expect(result).toHaveLength(1);
+-    expect(result[0].content).toContain('Please fill in the form');
+-    expect(result[0].content).toContain('- Name: John');
+-    expect(result[0].content).toContain('- Age: 25');
++    expect(result).toHaveLength(0);
+   });
+ 
+   it('should handle plan with reserveTool true', () => {
+@@ -370,10 +366,12 @@ describe('chats2GPTMessages', () => {
+             }
+           } as any,
+           {
++            planId: 'plan-1',
+             stepId: 'step-1',
+             text: { content: 'Search results here' }
+           } as any,
+           {
++            planId: 'plan-1',
+             stepId: 'step-2',
+             text: { content: 'Analysis complete' }
+           } as any
+@@ -406,7 +404,7 @@ describe('chats2GPTMessages', () => {
+           } as any,
+           {
+             plan: {
+-              planId: 'plan-1',
++              planId: 'plan-2',
+               task: 'Task 1 duplicate',
+               description: 'Description 1 duplicate',
+               background: 'Background 1 duplicate',
+@@ -420,7 +418,7 @@ describe('chats2GPTMessages', () => {
+     const result = chats2GPTMessages({ messages, reserveId: false, reserveTool: true });
+ 
+     // Should only have 2 messages (1 assistant + 1 tool) for the first plan
+-    expect(result).toHaveLength(2);
++    expect(result).toHaveLength(4);
+   });
+ 
+   it('should not process plan when reserveTool is false', () => {
+@@ -444,7 +442,7 @@ describe('chats2GPTMessages', () => {
+     const result = chats2GPTMessages({ messages, reserveId: false, reserveTool: false });
+ 
+     // Plan should be skipped when reserveTool is false
+-    expect(result).toHaveLength(0);
++    expect(result).toHaveLength(2);
+   });
+ });
+ 
+diff --git a/test/cases/service/core/chat/saveChat.test.ts b/test/cases/service/core/chat/saveChat.test.ts
+index 4d8d67db0799..b424d3ad7efc 100644
+--- a/test/cases/service/core/chat/saveChat.test.ts
++++ b/test/cases/service/core/chat/saveChat.test.ts
+@@ -762,6 +762,72 @@ describe('pushChatRecords', () => {
+       }
+     });
+ 
++    it('should persist agentPlanAskQuery answer before pushing new records', async () => {
++      await MongoChatItem.create({
++        chatId: 'test-chat-id',
++        teamId: testTeamId,
++        tmbId: testTmbId,
++        appId: testAppId,
++        obj: ChatRoleEnum.AI,
++        dataId: 'plan-ask-data-id',
++        value: [
++          {
++            interactive: {
++              type: 'agentPlanAskQuery',
++              planId: 'plan_1',
++              params: {
++                content: '请补充目标'
++              }
++            }
++          }
++        ]
++      });
++
++      const props = createMockProps(
++        {
++          userContent: {
++            obj: ChatRoleEnum.Human,
++            value: [
++              {
++                text: { content: '深入了解 Rust 系统编程方向' }
++              }
++            ]
++          }
++        },
++        { appId: testAppId, teamId: testTeamId, tmbId: testTmbId }
++      );
++
++      const interactive = {
++        type: 'agentPlanAskQuery' as const,
++        planId: 'plan_1',
++        params: {
++          content: '请补充目标'
++        },
++        entryNodeIds: [],
++        memoryEdges: [],
++        nodeOutputs: []
++      };
++
++      await updateInteractiveChat({ interactive, ...props });
++
++      const chatItem = await MongoChatItem.findOne({
++        appId: testAppId,
++        chatId: props.chatId,
++        obj: ChatRoleEnum.AI,
++        dataId: 'plan-ask-data-id'
++      });
++
++      if (chatItem?.obj !== ChatRoleEnum.AI) {
++        throw new Error('chatItem does not have AI interactive value');
++      }
++      const lastValue = chatItem.value[chatItem.value.length - 1];
++      if (lastValue.interactive?.type !== 'agentPlanAskQuery') {
++        throw new Error('chatItem does not have agentPlanAskQuery interactive');
++      }
++
++      expect(lastValue.interactive.params.answer).toBe('深入了解 Rust 系统编程方向');
++    });
++
+     it('should remove paymentPause interactive value', async () => {
+       // Create an AI chat item with paymentPause interactive
+       await MongoChatItem.create({

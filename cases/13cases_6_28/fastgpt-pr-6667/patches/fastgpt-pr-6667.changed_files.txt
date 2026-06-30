@@ -1,0 +1,6 @@
+M	packages/global/openapi/core/agentSkills/api.ts
+M	projects/app/src/components/core/chat/ChatContainer/ChatBox/index.tsx
+M	projects/app/src/pageComponents/dashboard/skill/detail/preview/SkillPreview.tsx
+M	projects/app/src/pageComponents/dashboard/skill/detail/preview/useSkillChatTest.tsx
+M	projects/app/src/pages/api/core/agentSkills/debugSession/chatItem/delete.ts
+M	projects/app/src/web/core/skill/api.ts

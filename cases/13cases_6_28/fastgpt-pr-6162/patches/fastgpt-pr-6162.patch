@@ -1,0 +1,296 @@
+diff --git a/packages/global/openapi/core/app/log/api.ts b/packages/global/openapi/core/app/log/api.ts
+index 2e9a338a8dc3..32dbf9d708ef 100644
+--- a/packages/global/openapi/core/app/log/api.ts
++++ b/packages/global/openapi/core/app/log/api.ts
+@@ -55,6 +55,7 @@ export const ChatLogItemSchema = z.object({
+   tmbId: z.string().nullish().meta({ example: 'tmb123', description: '团队成员 ID' }),
+   sourceMember: SourceMemberSchema.nullish().meta({ description: '来源成员信息' }),
+   versionName: z.string().nullish().meta({ example: 'v1.0.0', description: '版本名称' }),
++  originIp: z.string().nullish().meta({ example: '192.168.1.1', description: '原始 IP 地址' }),
+   region: z.string().nullish().meta({ example: '中国', description: '区域' })
+ });
+ export type AppLogsListItemType = z.infer<typeof ChatLogItemSchema>;
+diff --git a/packages/web/i18n/en/app.json b/packages/web/i18n/en/app.json
+index 56203f83f0e2..4e58f813c53c 100644
+--- a/packages/web/i18n/en/app.json
++++ b/packages/web/i18n/en/app.json
+@@ -221,7 +221,9 @@
+   "logs_keys_lastConversationTime": "last conversation time",
+   "logs_keys_messageCount": "Message Count",
+   "logs_keys_points": "Points Consumed",
+-  "logs_keys_region": "User IP",
++  "logs_keys_region": "IP & Region",
++  "logs_keys_only_ip": "Only IP",
++  "logs_keys_only_region": "Only Region",
+   "logs_keys_responseTime": "Average Response Time",
+   "logs_keys_sessionId": "Session ID",
+   "logs_keys_source": "Source",
+diff --git a/packages/web/i18n/zh-CN/app.json b/packages/web/i18n/zh-CN/app.json
+index fb584adbe88f..cfaabbee4349 100644
+--- a/packages/web/i18n/zh-CN/app.json
++++ b/packages/web/i18n/zh-CN/app.json
+@@ -225,7 +225,9 @@
+   "logs_keys_lastConversationTime": "最后对话时间",
+   "logs_keys_messageCount": "消息总数",
+   "logs_keys_points": "积分消耗",
+-  "logs_keys_region": "使用者IP",
++  "logs_keys_region": "IP及属地",
++  "logs_keys_only_ip": "仅IP",
++  "logs_keys_only_region": "仅属地",
+   "logs_keys_responseTime": "平均响应时长",
+   "logs_keys_sessionId": "会话 ID",
+   "logs_keys_source": "来源",
+diff --git a/packages/web/i18n/zh-Hant/app.json b/packages/web/i18n/zh-Hant/app.json
+index 05c0e51b00bf..d64d89d77fb5 100644
+--- a/packages/web/i18n/zh-Hant/app.json
++++ b/packages/web/i18n/zh-Hant/app.json
+@@ -219,7 +219,10 @@
+   "logs_keys_feedback": "使用者回饋",
+   "logs_keys_lastConversationTime": "最後對話時間",
+   "logs_keys_messageCount": "訊息總數",
++  "logs_keys_only_ip": "僅IP",
++  "logs_keys_only_region": "僅屬地",
+   "logs_keys_points": "積分消耗",
++  "logs_keys_region": "IP及屬地",
+   "logs_keys_responseTime": "平均回應時長",
+   "logs_keys_sessionId": "會話 ID",
+   "logs_keys_source": "來源",
+diff --git a/projects/app/src/pageComponents/app/detail/Logs/LogTable.tsx b/projects/app/src/pageComponents/app/detail/Logs/LogTable.tsx
+index 0398f2595ce0..94beb6735a60 100644
+--- a/projects/app/src/pageComponents/app/detail/Logs/LogTable.tsx
++++ b/projects/app/src/pageComponents/app/detail/Logs/LogTable.tsx
+@@ -49,6 +49,7 @@ import EmptyTip from '@fastgpt/web/components/common/EmptyTip';
+ import dynamic from 'next/dynamic';
+ import type { HeaderControlProps } from './LogChart';
+ import FeedbackTypeFilter from './FeedbackTypeFilter';
++import UserIpTypeFilter, { type UserIpTypeValue } from './UserIpTypeFilter';
+ import { useSystemStore } from '@/web/common/system/useSystemStore';
+ import MyBox from '@fastgpt/web/components/common/MyBox';
+ import { useContextSelector } from 'use-context-selector';
+@@ -79,6 +80,7 @@ const LogTable = ({
+   const appName = useContextSelector(AppContext, (v) => v.appDetail.name);
+   const [feedbackType, setFeedbackType] = useState<'all' | 'has_feedback' | 'good' | 'bad'>('all');
+   const [unreadOnly, setUnreadOnly] = useState<boolean>(false);
++  const [userIpType, setUserIpType] = useState<UserIpTypeValue>('all');
+ 
+   // source
+   const sourceList = useMemo(
+@@ -257,7 +259,22 @@ const LogTable = ({
+         </Th>
+       ),
+       [AppLogKeysEnum.USER]: <Th key={AppLogKeysEnum.USER}>{t('app:logs_chat_user')}</Th>,
+-      [AppLogKeysEnum.REGION]: <Th key={AppLogKeysEnum.REGION}>{t('app:logs_keys_region')}</Th>,
++      [AppLogKeysEnum.REGION]: (
++        <Th key={AppLogKeysEnum.REGION}>
++          <UserIpTypeFilter
++            userIpType={userIpType}
++            setUserIpType={setUserIpType}
++            menuButtonProps={{
++              fontSize: '12.8px',
++              fontWeight: 'medium',
++              color: 'myGray.600',
++              px: 0,
++              _hover: {},
++              _active: {}
++            }}
++          />
++        </Th>
++      ),
+       [AppLogKeysEnum.TITLE]: <Th key={AppLogKeysEnum.TITLE}>{t('app:logs_title')}</Th>,
+       [AppLogKeysEnum.SESSION_ID]: (
+         <Th key={AppLogKeysEnum.SESSION_ID}>{t('app:logs_keys_sessionId')}</Th>
+@@ -308,7 +325,7 @@ const LogTable = ({
+         <Th key={AppLogKeysEnum.VERSION_NAME}>{t('app:logs_keys_versionName')}</Th>
+       )
+     }),
+-    [t, feedbackType, setFeedbackType, unreadOnly, setUnreadOnly]
++    [t, feedbackType, setFeedbackType, unreadOnly, setUnreadOnly, userIpType, setUserIpType]
+   );
+ 
+   const getCellRenderMap = useCallback(
+@@ -342,7 +359,19 @@ const LogTable = ({
+           </Box>
+         </Td>
+       ),
+-      [AppLogKeysEnum.REGION]: <Td key={AppLogKeysEnum.REGION}>{item.region || '-'}</Td>,
++      [AppLogKeysEnum.REGION]: (
++        <Td key={AppLogKeysEnum.REGION}>
++          {userIpType === 'only_ip'
++            ? item.originIp || '-'
++            : userIpType === 'only_region'
++              ? item.originIp !== item.region
++                ? item.region || '-'
++                : '-'
++              : item.originIp
++                ? `${item.region || '-'}: ${item.originIp}`
++                : '-'}
++        </Td>
++      ),
+       [AppLogKeysEnum.TITLE]: (
+         <Td key={AppLogKeysEnum.TITLE} className="textEllipsis" maxW={'250px'}>
+           {item.customTitle || item.title}
+@@ -398,7 +427,7 @@ const LogTable = ({
+         <Td key={AppLogKeysEnum.VERSION_NAME}>{item.versionName || '-'}</Td>
+       )
+     }),
+-    [t]
++    [t, userIpType]
+   );
+ 
+   return (
+diff --git a/projects/app/src/pageComponents/app/detail/Logs/UserIpTypeFilter.tsx b/projects/app/src/pageComponents/app/detail/Logs/UserIpTypeFilter.tsx
+new file mode 100644
+index 000000000000..09e9f66128d8
+--- /dev/null
++++ b/projects/app/src/pageComponents/app/detail/Logs/UserIpTypeFilter.tsx
+@@ -0,0 +1,129 @@
++import React from 'react';
++import type { ButtonProps, PlacementWithLogical } from '@chakra-ui/react';
++import {
++  Menu,
++  MenuButton,
++  MenuList,
++  MenuItem,
++  Flex,
++  Box,
++  Button,
++  useDisclosure
++} from '@chakra-ui/react';
++import { useTranslation } from 'next-i18next';
++import MyIcon from '@fastgpt/web/components/common/Icon';
++
++export type UserIpTypeValue = 'all' | 'only_ip' | 'only_region';
++
++type FilterProps = {
++  userIpType: UserIpTypeValue;
++  setUserIpType: (userIpType: UserIpTypeValue) => void;
++  menuButtonProps?: ButtonProps;
++};
++
++const UserIpTypeFilter = ({ userIpType, setUserIpType, menuButtonProps }: FilterProps) => {
++  const { t } = useTranslation();
++  const { isOpen, onOpen, onClose } = useDisclosure();
++
++  const userIpOptions = [
++    {
++      value: 'all' as const,
++      label: t('app:logs_keys_region')
++    },
++    {
++      value: 'only_ip' as const,
++      label: t('app:logs_keys_only_ip')
++    },
++    {
++      value: 'only_region' as const,
++      label: t('app:logs_keys_only_region')
++    }
++  ];
++
++  return (
++    <Menu
++      isOpen={isOpen}
++      onOpen={onOpen}
++      onClose={onClose}
++      closeOnSelect={true}
++      strategy={'fixed'}
++      autoSelect={false}
++      placement="bottom"
++    >
++      <MenuButton
++        as={Button}
++        variant={'grayGhost'}
++        size="sm"
++        rightIcon={<MyIcon name={'core/chat/chevronDown'} w={4} />}
++        fontWeight={'normal'}
++        {...menuButtonProps}
++      >
++        {userIpOptions.find((option) => option.value === userIpType)?.label}
++      </MenuButton>
++
++      <MenuList
++        minW={'120px'}
++        w={'180px'}
++        px={'6px'}
++        py={'6px'}
++        border={'1px solid #fff'}
++        boxShadow={
++          '0px 4px 10px 0px rgba(19, 51, 107, 0.10), 0px 0px 1px 0px rgba(19, 51, 107, 0.10)'
++        }
++        zIndex={99}
++      >
++        {/* Radio options */}
++        {userIpOptions.map((option) => (
++          <MenuItem
++            key={option.value}
++            borderRadius="sm"
++            py={2}
++            px={3}
++            fontSize={'sm'}
++            fontWeight={'normal'}
++            color={userIpType === option.value ? 'primary.600' : 'myGray.900'}
++            bg={userIpType === option.value ? 'primary.50' : 'transparent'}
++            _hover={{ bg: 'myGray.100' }}
++            onClick={(e) => {
++              e.stopPropagation();
++              e.preventDefault();
++              setUserIpType(option.value);
++              onClose();
++            }}
++          >
++            <Flex alignItems={'center'} gap={2}>
++              <Box
++                w={'18px'}
++                h={'18px'}
++                borderWidth={'2.4px'}
++                borderColor={userIpType === option.value ? 'primary.015' : 'transparent'}
++                borderRadius={'50%'}
++              >
++                <Flex
++                  w={'100%'}
++                  h={'100%'}
++                  borderWidth={'1px'}
++                  borderColor={userIpType === option.value ? 'primary.600' : 'borderColor.high'}
++                  bg={userIpType === option.value ? 'primary.1' : 'transparent'}
++                  borderRadius={'50%'}
++                  alignItems={'center'}
++                  justifyContent={'center'}
++                >
++                  <Box
++                    w={'5px'}
++                    h={'5px'}
++                    borderRadius={'50%'}
++                    bg={userIpType === option.value ? 'primary.600' : 'transparent'}
++                  />
++                </Flex>
++              </Box>
++              {option.label}
++            </Flex>
++          </MenuItem>
++        ))}
++      </MenuList>
++    </Menu>
++  );
++};
++
++export default UserIpTypeFilter;
+diff --git a/projects/app/src/pages/api/core/app/logs/list.ts b/projects/app/src/pages/api/core/app/logs/list.ts
+index d0f24a527a31..05ae80f9cbf7 100644
+--- a/projects/app/src/pages/api/core/app/logs/list.ts
++++ b/projects/app/src/pages/api/core/app/logs/list.ts
+@@ -330,14 +330,13 @@ async function handler(
+ 
+     return {
+       ...item,
++      originIp: ip,
+       region: region || ip
+     };
+   });
+ 
+   // 获取有 tmbId 的人员
+-  const listWithSourceMember = await addSourceMember({
+-    list: listWithRegion
+-  });
++  const listWithSourceMember = await addSourceMember({ list: listWithRegion });
+   // 获取没有 tmbId 的人员
+   const listWithoutTmbId = listWithRegion.filter((item) => !item.tmbId);
+   return GetAppChatLogsResponseSchema.parse({

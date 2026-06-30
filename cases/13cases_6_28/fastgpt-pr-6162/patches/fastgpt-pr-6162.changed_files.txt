@@ -1,0 +1,7 @@
+M	packages/global/openapi/core/app/log/api.ts
+M	packages/web/i18n/en/app.json
+M	packages/web/i18n/zh-CN/app.json
+M	packages/web/i18n/zh-Hant/app.json
+M	projects/app/src/pageComponents/app/detail/Logs/LogTable.tsx
+M	projects/app/src/pageComponents/app/detail/Logs/UserIpTypeFilter.tsx
+M	projects/app/src/pages/api/core/app/logs/list.ts

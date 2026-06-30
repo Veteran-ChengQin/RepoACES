@@ -1,0 +1,13 @@
+M	document/content/docs/upgrading/4-12/4125.mdx
+M	document/data/doc-last-modified.json
+M	packages/global/common/system/types/index.d.ts
+M	projects/app/data/config.json
+M	projects/app/src/pageComponents/dataset/detail/CollectionCard/TrainingStates.tsx
+M	projects/app/src/pageComponents/dataset/detail/CollectionCard/index.tsx
+M	projects/app/src/pageComponents/dataset/detail/NavBar.tsx
+M	projects/app/src/pages/api/core/dataset/collection/trainingDetail.ts
+M	projects/app/src/pages/api/core/dataset/training/getQueueLen.ts
+M	projects/app/src/service/common/system/index.ts
+M	projects/app/src/service/core/dataset/queues/datasetParse.ts
+M	projects/app/src/types/index.d.ts
+M	projects/app/src/web/core/dataset/api.ts

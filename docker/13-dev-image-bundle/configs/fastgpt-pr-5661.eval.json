@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-5661",
+    "pr_number":  "5661",
+    "title":  "feat: dataset parse queue",
+    "base_commit":  "b6224a2f2aed8fb48921336f821665d503a4b82e",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

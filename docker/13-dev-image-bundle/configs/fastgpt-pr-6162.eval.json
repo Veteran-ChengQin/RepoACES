@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-6162",
+    "pr_number":  "6162",
+    "title":  "feat: add user ip filter for chat log table",
+    "base_commit":  "29f61abcd3435c5622d42c85a1a3da2dce6c9c9b",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

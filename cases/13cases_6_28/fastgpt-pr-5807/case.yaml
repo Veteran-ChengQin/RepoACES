@@ -1,0 +1,25 @@
+id: fastgpt-pr-5807
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "e84ec1c48c5308ad9df629d5468141c0502ea4c0"
+  pr_number: 5807
+  pr_url: https://github.com/labring/FastGPT/pull/5807
+  pr_title_raw: "feat: add more file type for uploading"
+  summary_source: generated_from_pr_patch
+  summary_raw_markdown: |
+    - Expand uploadable file type configuration to include document, image, audio, video, and custom extension categories.
+    - Add file icons and localized UI labels for audio/video/custom extension upload types.
+    - Update app file selection and chat upload UI so builders can configure maximum file count, allowed file categories, and custom file extensions.
+
+validation:
+  head_commit: "bedf1df7181acdf7f7a8484ce2337069f58a55a7"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-5807.patch"
+  patch_sha256: "8988318f6ba72a269139a968c19fd61a2486d5ac18d04174754fc993d614ceb7"
+  changed_files_file: "patches/fastgpt-pr-5807.changed_files.txt"
+  manual_functionality_description: |
+    Pending manual functionality description for this TypeScript-size candidate batch.

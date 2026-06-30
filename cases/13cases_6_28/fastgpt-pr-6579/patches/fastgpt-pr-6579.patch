@@ -1,0 +1,296 @@
+diff --git a/packages/global/core/chat/helperBot/topAgent/type.ts b/packages/global/core/chat/helperBot/topAgent/type.ts
+index 47d4063e8702..e2b92780e358 100644
+--- a/packages/global/core/chat/helperBot/topAgent/type.ts
++++ b/packages/global/core/chat/helperBot/topAgent/type.ts
+@@ -7,6 +7,7 @@ export const topAgentParamsSchema = z.object({
+   systemPrompt: z.string().nullish(),
+   selectedTools: z.array(z.string()).nullish(),
+   selectedDatasets: z.array(z.string()).nullish(),
+-  fileUpload: z.boolean().nullish()
++  fileUpload: z.boolean().nullish(),
++  enableSandbox: z.boolean().nullish()
+ });
+ export type TopAgentParamsType = z.infer<typeof topAgentParamsSchema>;
+diff --git a/packages/service/core/chat/HelperBot/dispatch/topAgent/index.ts b/packages/service/core/chat/HelperBot/dispatch/topAgent/index.ts
+index b382042f75d6..9130f3a0dd57 100644
+--- a/packages/service/core/chat/HelperBot/dispatch/topAgent/index.ts
++++ b/packages/service/core/chat/HelperBot/dispatch/topAgent/index.ts
+@@ -160,6 +160,7 @@ export const dispatchTopAgent = async (
+         tools, // 从 execution_plan 提取
+         datasets: filterDatasets,
+         fileUploadEnabled: responseJson.resources?.system_features?.file_upload?.enabled || false,
++        enableSandboxEnabled: responseJson.resources?.system_features?.sandbox?.enabled || false,
+         executionPlan: responseJson.execution_plan // 保存原始 execution_plan
+       });
+ 
+diff --git a/packages/service/core/chat/HelperBot/dispatch/topAgent/prompt.ts b/packages/service/core/chat/HelperBot/dispatch/topAgent/prompt.ts
+index 9ce6bb3f3bd6..8052f0ab0b3b 100644
+--- a/packages/service/core/chat/HelperBot/dispatch/topAgent/prompt.ts
++++ b/packages/service/core/chat/HelperBot/dispatch/topAgent/prompt.ts
+@@ -34,6 +34,12 @@ export const getPrompt = ({
+       );
+     }
+ 
++    if (metadata.enableSandbox !== undefined && metadata.enableSandbox !== null) {
++      sections.push(
++        `**虚拟机**: ${metadata.enableSandbox ? '搭建者已启用虚拟机功能' : '搭建者已禁用虚拟机功能'}`
++      );
++    }
++
+     if (sections.length === 0) return '';
+ 
+     return `
+@@ -337,6 +343,8 @@ ${resourceList}
+ - 系统功能判断：
+   * 是否需要用户的私有文件？→ 启用 file_upload
+   * 数据能否通过工具获取？→ 不需要 file_upload
++  * 是否需要执行代码或数据处理（如运行 Python 脚本、复杂计算、数据转换）？→ 启用 sandbox
++  * 任务仅需 LLM 推理和工具调用，无需执行任意代码？→ 不需要 sandbox
+ 
+ 🔧 第四层：资源整合
+ - 收集所有需要的工具、知识库和系统功能
+@@ -377,6 +385,10 @@ ${resourceList}
+       "file_upload": {
+         "enabled": true/false,
+         "purpose": "说明原因（enabled=true时必填）"
++      },
++      "sandbox": {
++        "enabled": true/false,
++        "purpose": "说明为何需要虚拟机执行能力（enabled=true时必填，适用于代码执行、数据处理等场景）"
+       }
+     }
+   }
+@@ -395,6 +407,8 @@ ${resourceList}
+ - resources: 资源配置对象，仅包含系统功能配置
+   * system_features.file_upload.enabled: 是否需要文件上传（必填）
+   * system_features.file_upload.purpose: 为什么需要（enabled=true时必填）
++  * system_features.sandbox.enabled: 是否需要虚拟机执行能力（可选，适用于代码执行、数据处理场景）
++  * system_features.sandbox.purpose: 为什么需要虚拟机（enabled=true时必填）
+ 
+ <execution_plan_design>
+ **执行计划设计**：
+diff --git a/packages/service/core/chat/HelperBot/dispatch/topAgent/type.ts b/packages/service/core/chat/HelperBot/dispatch/topAgent/type.ts
+index 1144fb8b549c..a27cd043855a 100644
+--- a/packages/service/core/chat/HelperBot/dispatch/topAgent/type.ts
++++ b/packages/service/core/chat/HelperBot/dispatch/topAgent/type.ts
+@@ -27,6 +27,7 @@ export const TopAgentFormDataSchema = z.object({
+   tools: z.array(z.string()).optional().default([]),
+   datasets: z.array(SelectedDatasetSchema).optional().default([]),
+   fileUploadEnabled: z.boolean().optional().default(false),
++  enableSandboxEnabled: z.boolean().optional().default(false),
+   executionPlan: z.any().optional()
+ });
+ export type TopAgentFormDataType = z.infer<typeof TopAgentFormDataSchema>;
+@@ -50,6 +51,10 @@ export const TopAgentGenerationAnswerSchema = z.object({
+       file_upload: z.object({
+         enabled: z.boolean(),
+         purpose: z.string().optional()
++      }),
++      sandbox: z.object({
++        enabled: z.boolean(),
++        purpose: z.string().optional()
+       })
+     })
+   })
+diff --git a/packages/service/core/chat/HelperBot/dispatch/topAgent/utils.ts b/packages/service/core/chat/HelperBot/dispatch/topAgent/utils.ts
+index d32194a7c0bb..0c00efda8cb7 100644
+--- a/packages/service/core/chat/HelperBot/dispatch/topAgent/utils.ts
++++ b/packages/service/core/chat/HelperBot/dispatch/topAgent/utils.ts
+@@ -65,7 +65,8 @@ ${tool}
+ ${dataset}
+ 
+ ### 系统功能
+-- **file_upload**: 文件上传功能 (enabled, purpose, file_types)
++- **file_upload**: 文件上传功能，允许用户在对话中上传文件，让 Agent 读取私有文件内容
++- **sandbox**: 虚拟机执行环境，为 Agent 提供代码运行能力（Python、Shell 等），适用于数据处理、科学计算、代码执行等场景
+ `;
+   };
+ 
+@@ -109,10 +110,12 @@ ${dataset}
+     })
+   ]);
+ 
+-  const allTools = [...systemTools, ...myTools];
+-  const fileReadInfo = systemSubInfo[SubAppIds.fileRead];
+-  const fileReadTool = `- **${SubAppIds.fileRead}** [工具]: ${parseI18nString(fileReadInfo.name, lang)} - ${fileReadInfo.toolDescription}`;
+-  allTools.push(fileReadTool);
++  const builtinTools = [SubAppIds.fileRead, SubAppIds.sandboxTool].map((id) => {
++    const info = systemSubInfo[id];
++    return `- **${id}** [工具]: ${parseI18nString(info.name, lang)} - ${info.toolDescription}`;
++  });
++
++  const allTools = [...systemTools, ...myTools, ...builtinTools];
+ 
+   return {
+     resourceList: getPrompt({
+diff --git a/packages/web/components/common/Textarea/PromptEditor/Editor.tsx b/packages/web/components/common/Textarea/PromptEditor/Editor.tsx
+index 10c2fe553aae..f0409c19abcb 100644
+--- a/packages/web/components/common/Textarea/PromptEditor/Editor.tsx
++++ b/packages/web/components/common/Textarea/PromptEditor/Editor.tsx
+@@ -7,7 +7,7 @@
+  */
+ 
+ import type { CSSProperties } from 'react';
+-import { useEffect, useMemo, useState, useTransition } from 'react';
++import { useEffect, useMemo, useState, useTransition, useRef } from 'react';
+ import { LexicalComposer } from '@lexical/react/LexicalComposer';
+ import { PlainTextPlugin } from '@lexical/react/LexicalPlainTextPlugin';
+ import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
+@@ -33,7 +33,7 @@ import type { FormPropsType } from './type';
+ import { type EditorVariableLabelPickerType, type EditorVariablePickerType } from './type';
+ import { getNanoid } from '@fastgpt/global/common/string/tools';
+ import FocusPlugin from './plugins/FocusPlugin';
+-import { textToEditorState } from './utils';
++import { textToEditorState, editorStateToText } from './utils';
+ import { MaxLengthPlugin } from './plugins/MaxLengthPlugin';
+ import { VariableLabelNode } from './plugins/VariableLabelPlugin/node';
+ import VariableLabelPlugin from './plugins/VariableLabelPlugin';
+@@ -145,6 +145,7 @@ export default function Editor({
+   const [_, startSts] = useTransition();
+   const [focus, setFocus] = useState(false);
+   const [scrollHeight, setScrollHeight] = useState(0);
++  const editorOutputRef = useRef(value);
+ 
+   const initialConfig = {
+     namespace: isRichText ? 'richPromptEditor' : 'promptEditor',
+@@ -164,7 +165,7 @@ export default function Editor({
+   };
+ 
+   useDeepCompareEffect(() => {
+-    if (focus) return;
++    if (focus && value === editorOutputRef.current) return;
+     setKey(getNanoid(6));
+   }, [value, variables, variableLabels, skillOption, selectedSkills]);
+ 
+@@ -256,6 +257,7 @@ export default function Editor({
+             <OnBlurPlugin onBlur={onBlur} />
+             <OnChangePlugin
+               onChange={(editorState, editor) => {
++                editorOutputRef.current = editorStateToText(editor);
+                 const rootElement = editor.getRootElement();
+                 setScrollHeight(rootElement?.scrollHeight || 0);
+                 startSts(() => {
+diff --git a/projects/app/src/components/core/chat/HelperBot/context.tsx b/projects/app/src/components/core/chat/HelperBot/context.tsx
+index f1839071daac..29e4497ddd75 100644
+--- a/projects/app/src/components/core/chat/HelperBot/context.tsx
++++ b/projects/app/src/components/core/chat/HelperBot/context.tsx
+@@ -28,7 +28,8 @@ export const HelperBotContext = createContext<HelperBotContextType>({
+     taskObject: '',
+     selectedTools: [],
+     selectedDatasets: [],
+-    fileUpload: false
++    fileUpload: false,
++    enableSandbox: false
+   },
+   onApply: function (e): void {
+     throw new Error('Function not implemented.');
+diff --git a/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/ChatTest.tsx b/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/ChatTest.tsx
+index d5d79a335b32..88abb461fe43 100644
+--- a/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/ChatTest.tsx
++++ b/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/ChatTest.tsx
+@@ -78,6 +78,7 @@ const ChatTest = ({ appForm, setAppForm, setRenderEdit, form2WorkflowFn }: Props
+       selectedTools: appForm.selectedTools.map((tool) => tool.id),
+       selectedDatasets: appForm.dataset.datasets.map((dataset) => dataset.datasetId),
+       fileUpload: appForm.chatConfig.fileSelectConfig?.canSelectFile || false,
++      enableSandbox: appForm.aiSettings.useAgentSandbox || false,
+       modelConfig: {
+         model: appForm.aiSettings.model,
+         temperature: appForm.aiSettings.temperature,
+@@ -153,6 +154,7 @@ const ChatTest = ({ appForm, setAppForm, setRenderEdit, form2WorkflowFn }: Props
+               metadata={topAgentMetadata}
+               onApply={async (formData) => {
+                 const fileUploadEnabled = !!formData.fileUploadEnabled;
++                const enableSandboxEnabled = !!formData.enableSandboxEnabled;
+ 
+                 // Filter internal tools
+                 const filteredToolIds = (formData.tools || []).filter(
+@@ -178,7 +180,8 @@ const ChatTest = ({ appForm, setAppForm, setRenderEdit, form2WorkflowFn }: Props
+                         : prev.dataset,
+                     aiSettings: {
+                       ...prev.aiSettings,
+-                      systemPrompt: formData.systemPrompt || prev.aiSettings.systemPrompt
++                      systemPrompt: formData.systemPrompt || prev.aiSettings.systemPrompt,
++                      useAgentSandbox: enableSandboxEnabled
+                     },
+                     chatConfig: {
+                       ...prev.chatConfig,
+diff --git a/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/EditForm.tsx b/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/EditForm.tsx
+index ffdcec9d3eac..7811bb7988dd 100644
+--- a/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/EditForm.tsx
++++ b/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/EditForm.tsx
+@@ -99,7 +99,8 @@ const EditForm = ({
+       appForm.chatConfig.fileSelectConfig?.canSelectAudio ||
+       appForm.chatConfig.fileSelectConfig?.canSelectCustomFileExtension
+     ),
+-    hasSelectedDataset: (appForm.dataset.datasets?.length || 0) > 0
++    hasSelectedDataset: (appForm.dataset.datasets?.length || 0) > 0,
++    useAgentSandbox: !!appForm.aiSettings.useAgentSandbox
+   });
+ 
+   const {
+diff --git a/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/hooks/useSkillManager.tsx b/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/hooks/useSkillManager.tsx
+index 7a1ceee3f725..f1244e93803f 100644
+--- a/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/hooks/useSkillManager.tsx
++++ b/projects/app/src/pageComponents/app/detail/Edit/ChatAgent/hooks/useSkillManager.tsx
+@@ -49,13 +49,15 @@ export const useSkillManager = ({
+   onUpdateOrAddTool,
+   onDeleteTool,
+   canUploadFile,
+-  hasSelectedDataset
++  hasSelectedDataset,
++  useAgentSandbox
+ }: {
+   selectedTools: SelectedToolItemType[];
+   onDeleteTool: (id: string) => void;
+   onUpdateOrAddTool: (tool: SelectedToolItemType) => void;
+   canUploadFile: boolean;
+   hasSelectedDataset: boolean;
++  useAgentSandbox: boolean;
+ }) => {
+   const { t, i18n } = useTranslation();
+   const { toast } = useToast();
+@@ -109,6 +111,17 @@ export const useSkillManager = ({
+         });
+       }
+ 
++      const sandboxToolInfo = systemSubInfo[SubAppIds.sandboxTool];
++      if (sandboxToolInfo) {
++        apiTools.unshift({
++          id: SubAppIds.sandboxTool,
++          label: parseI18nString(sandboxToolInfo.name, i18n.language),
++          icon: sandboxToolInfo.avatar,
++          description: sandboxToolInfo.toolDescription,
++          canClick: true
++        });
++      }
++
+       return apiTools;
+     },
+     {
+@@ -324,8 +337,25 @@ export const useSkillManager = ({
+       });
+     }
+ 
++    // Merge sandbox tool
++    const sandboxToolInfo = systemSubInfo[SubAppIds.sandboxTool];
++    if (sandboxToolInfo) {
++      tools.push({
++        id: SubAppIds.sandboxTool,
++        pluginId: SubAppIds.sandboxTool,
++        name: parseI18nString(sandboxToolInfo.name, i18n.language),
++        avatar: sandboxToolInfo.avatar,
++        intro: sandboxToolInfo.toolDescription,
++        flowNodeType: FlowNodeTypeEnum.tool,
++        templateType: FlowNodeTemplateTypeEnum.tools,
++        inputs: [],
++        outputs: [],
++        configStatus: useAgentSandbox ? 'noConfig' : 'invalid'
++      });
++    }
++
+     return tools;
+-  }, [selectedTools, canUploadFile, hasSelectedDataset, i18n.language]);
++  }, [selectedTools, canUploadFile, hasSelectedDataset, useAgentSandbox, i18n.language]);
+ 
+   const [configTool, setConfigTool] = useState<SelectedToolItemType>();
+   const onClickSkill = useCallback(

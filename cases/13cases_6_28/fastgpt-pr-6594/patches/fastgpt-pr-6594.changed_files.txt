@@ -1,0 +1,5 @@
+M	packages/service/core/agentSkills/sandboxController.ts
+M	packages/service/core/ai/sandbox/controller.ts
+M	packages/service/core/workflow/dispatch/ai/agent/sub/sandbox/lifecycle.ts
+M	packages/service/env.ts
+M	projects/app/.env.template

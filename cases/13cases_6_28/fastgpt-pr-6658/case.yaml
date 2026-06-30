@@ -1,0 +1,25 @@
+id: fastgpt-pr-6658
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "f3e62c298f519112ee1db2f3d00c033716ae0cff"
+  pr_number: 6658
+  pr_url: https://github.com/labring/FastGPT/pull/6658
+  pr_title_raw: "feat(sandbox): add path-based proxy server for sandbox iframe access"
+  summary_source: generated_from_pr_patch
+  summary_raw_markdown: |
+    - Add a path-based sandbox proxy server for /proxy, /absproxy, and WebSocket tunnel access to sandbox iframe services.
+    - Add proxy authentication and relay-token handling so sandbox subdomain/path proxy requests can be authorized through the main app.
+    - Add HTML path rewriting for absolute proxy mode and tests for sandbox proxy utility behavior.
+
+validation:
+  head_commit: "520b2355cd1e514e7aeb1a58d3163f187579e496"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-6658.patch"
+  patch_sha256: "8d459c95e04d774eaa45b956233aeaa4712629f4d30db335df06893dc3f767c2"
+  changed_files_file: "patches/fastgpt-pr-6658.changed_files.txt"
+  manual_functionality_description: |
+    Pending manual functionality description for this TypeScript-size candidate batch.

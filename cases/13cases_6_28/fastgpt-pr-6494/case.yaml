@@ -1,0 +1,25 @@
+id: fastgpt-pr-6494
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "0fc2bce28c8ca5e14eeeb730c9c08fae2b4c2ca3"
+  pr_number: 6494
+  pr_url: https://github.com/labring/FastGPT/pull/6494
+  pr_title_raw: "feat: Pause Recovery"
+  summary_source: generated_from_pr_patch
+  summary_raw_markdown: |
+    - Preserve agent plan pause context in chat history so paused plans can be handed off and resumed.
+    - Convert plan-step interactive responses into tool-call response text that includes questions, answers, executed steps, pending steps, and pause handoff markers.
+    - Update agent planning prompts and chat saving/adaptation logic so continue-style user inputs can resume recent paused plans while conflicting new goals trigger replanning.
+
+validation:
+  head_commit: "8bc37a387c3357dad0849deebfab0f05a10fc676"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-6494.patch"
+  patch_sha256: "5dfe3e774412fc75960a061877b63da3e1b180e89b1d2668447f811e6bbeb99e"
+  changed_files_file: "patches/fastgpt-pr-6494.changed_files.txt"
+  manual_functionality_description: |
+    Pending manual functionality description for this TypeScript-size candidate batch.

@@ -1,0 +1,1070 @@
+diff --git a/document/content/docs/upgrading/4-12/4125.mdx b/document/content/docs/upgrading/4-12/4125.mdx
+index ceb32a76fb72..f79538ca87d0 100644
+--- a/document/content/docs/upgrading/4-12/4125.mdx
++++ b/document/content/docs/upgrading/4-12/4125.mdx
+@@ -6,6 +6,7 @@ description: 'FastGPT V4.12.5 更新说明'
+ 
+ ## 🚀 新增内容
+ 
++1. 知识库文件解析支持配置最大并发数。
+ 
+ ## ⚙️ 优化
+ 
+@@ -13,6 +14,7 @@ description: 'FastGPT V4.12.5 更新说明'
+ 
+ ## 🐛 修复
+ 
++1. 知识库集合页面，有训练数据时候无法自动刷新页面。
+ 
+ ## 🔨 插件更新
+ 
+diff --git a/document/data/doc-last-modified.json b/document/data/doc-last-modified.json
+index c9580985844e..38365a521c41 100644
+--- a/document/data/doc-last-modified.json
++++ b/document/data/doc-last-modified.json
+@@ -97,7 +97,7 @@
+   "document/content/docs/protocol/terms.en.mdx": "2025-08-03T22:37:45+08:00",
+   "document/content/docs/protocol/terms.mdx": "2025-08-03T22:37:45+08:00",
+   "document/content/docs/toc.en.mdx": "2025-08-04T13:42:36+08:00",
+-  "document/content/docs/toc.mdx": "2025-09-15T20:02:54+08:00",
++  "document/content/docs/toc.mdx": "2025-09-16T15:30:21+08:00",
+   "document/content/docs/upgrading/4-10/4100.mdx": "2025-08-02T19:38:37+08:00",
+   "document/content/docs/upgrading/4-10/4101.mdx": "2025-09-08T20:07:20+08:00",
+   "document/content/docs/upgrading/4-11/4110.mdx": "2025-08-05T23:20:39+08:00",
+@@ -106,7 +106,8 @@
+   "document/content/docs/upgrading/4-12/4121.mdx": "2025-09-07T14:41:48+08:00",
+   "document/content/docs/upgrading/4-12/4122.mdx": "2025-09-07T14:41:48+08:00",
+   "document/content/docs/upgrading/4-12/4123.mdx": "2025-09-07T20:55:14+08:00",
+-  "document/content/docs/upgrading/4-12/4124.mdx": "2025-09-15T22:21:24+08:00",
++  "document/content/docs/upgrading/4-12/4124.mdx": "2025-09-16T10:46:55+08:00",
++  "document/content/docs/upgrading/4-12/4125.mdx": "2025-09-16T15:30:21+08:00",
+   "document/content/docs/upgrading/4-8/40.mdx": "2025-08-02T19:38:37+08:00",
+   "document/content/docs/upgrading/4-8/41.mdx": "2025-08-02T19:38:37+08:00",
+   "document/content/docs/upgrading/4-8/42.mdx": "2025-08-02T19:38:37+08:00",
+@@ -186,6 +187,6 @@
+   "document/content/docs/use-cases/external-integration/feishu.mdx": "2025-07-24T14:23:04+08:00",
+   "document/content/docs/use-cases/external-integration/official_account.mdx": "2025-08-05T23:20:39+08:00",
+   "document/content/docs/use-cases/external-integration/openapi.mdx": "2025-08-14T18:54:47+08:00",
+-  "document/content/docs/use-cases/external-integration/wecom.mdx": "2025-09-15T20:02:54+08:00",
++  "document/content/docs/use-cases/external-integration/wecom.mdx": "2025-09-16T14:22:28+08:00",
+   "document/content/docs/use-cases/index.mdx": "2025-07-24T14:23:04+08:00"
+-}
++}
+\ No newline at end of file
+diff --git a/packages/global/common/system/types/index.d.ts b/packages/global/common/system/types/index.d.ts
+index fa5bc8a7f68a..4fd196276fa2 100644
+--- a/packages/global/common/system/types/index.d.ts
++++ b/packages/global/common/system/types/index.d.ts
+@@ -130,10 +130,12 @@ export type FastGPTFeConfigsType = {
+ 
+ export type SystemEnvType = {
+   openapiPrefix?: string;
++  tokenWorkers: number; // token count max worker
++
++  datasetParseMaxProcess: number;
+   vectorMaxProcess: number;
+   qaMaxProcess: number;
+   vlmMaxProcess: number;
+-  tokenWorkers: number; // token count max worker
+ 
+   hnswEfSearch: number;
+   hnswMaxScanTuples: number;
+diff --git a/projects/app/data/config.json b/projects/app/data/config.json
+index 1d0303370ce9..5bfd987108a3 100644
+--- a/projects/app/data/config.json
++++ b/projects/app/data/config.json
+@@ -5,6 +5,7 @@
+     "mcpServerProxyEndpoint": "" // mcp server 代理地址，例如： http://localhost:3005
+   },
+   "systemEnv": {
++    "datasetParseMaxProcess": 10, // 知识库文件解析最大线程数量
+     "vectorMaxProcess": 10, // 向量处理线程数量
+     "qaMaxProcess": 10, // 问答拆分线程数量
+     "vlmMaxProcess": 10, // 图片理解模型最大处理进程
+diff --git a/projects/app/src/pageComponents/dataset/detail/CollectionCard/TrainingStates.tsx b/projects/app/src/pageComponents/dataset/detail/CollectionCard/TrainingStates.tsx
+index 4c985186b219..ca6937f69a6f 100644
+--- a/projects/app/src/pageComponents/dataset/detail/CollectionCard/TrainingStates.tsx
++++ b/projects/app/src/pageComponents/dataset/detail/CollectionCard/TrainingStates.tsx
+@@ -102,11 +102,10 @@ const ProgressView = ({ trainingDetail }: { trainingDetail: getTrainingDetailRes
+     }[] = [
+       {
+         label: t(TrainingProcess.parsing.label),
+-        status: (() => {
+-          if (trainingDetail.errorCounts.parse > 0) return TrainingStatus.Error;
+-          if (isContentParsing) return TrainingStatus.Running;
+-          return TrainingStatus.Ready;
+-        })(),
++        statusText: getStatusText(TrainingModeEnum.parse),
++        status: getTrainingStatus({
++          errorCount: trainingDetail.errorCounts.parse
++        }),
+         errorCount: trainingDetail.errorCounts.parse
+       },
+       ...(isImageParse
+diff --git a/projects/app/src/pageComponents/dataset/detail/CollectionCard/index.tsx b/projects/app/src/pageComponents/dataset/detail/CollectionCard/index.tsx
+index 851645f57a92..a2590596cc14 100644
+--- a/projects/app/src/pageComponents/dataset/detail/CollectionCard/index.tsx
++++ b/projects/app/src/pageComponents/dataset/detail/CollectionCard/index.tsx
+@@ -174,15 +174,16 @@ const CollectionCard = () => {
+ 
+   useRequest2(
+     async () => {
+-      if (!hasTrainingData && datasetDetail.status === DatasetStatusEnum.active) return;
+-      getData(pageNum);
+       if (datasetDetail.status !== DatasetStatusEnum.active) {
+         loadDatasetDetail(datasetDetail._id);
+       }
++      if (hasTrainingData) {
++        getData(pageNum);
++      }
+     },
+     {
+-      retryInterval: 6000,
+-      refreshDeps: [hasTrainingData, datasetDetail.status]
++      pollingInterval: 6000,
++      manual: false
+     }
+   );
+ 
+diff --git a/projects/app/src/pageComponents/dataset/detail/NavBar.tsx b/projects/app/src/pageComponents/dataset/detail/NavBar.tsx
+index eb37f294c5d5..9a6782b21f44 100644
+--- a/projects/app/src/pageComponents/dataset/detail/NavBar.tsx
++++ b/projects/app/src/pageComponents/dataset/detail/NavBar.tsx
+@@ -7,10 +7,7 @@ import { useContextSelector } from 'use-context-selector';
+ import { DatasetPageContext } from '@/web/core/dataset/context/datasetPageContext';
+ import LightRowTabs from '@fastgpt/web/components/common/Tabs/LightRowTabs';
+ import { useSystem } from '@fastgpt/web/hooks/useSystem';
+-import MyPopover from '@fastgpt/web/components/common/MyPopover';
+ import FolderPath from '@/components/common/folder/Path';
+-import { getTrainingQueueLen } from '@/web/core/dataset/api';
+-import { useRequest2 } from '@fastgpt/web/hooks/useRequest';
+ 
+ export enum TabEnum {
+   dataCard = 'dataCard',
+@@ -31,64 +28,6 @@ const NavBar = ({ currentTab }: { currentTab: TabEnum }) => {
+     (v) => v
+   );
+ 
+-  // global queue
+-  const {
+-    data: {
+-      vectorTrainingCount = 0,
+-      qaTrainingCount = 0,
+-      autoTrainingCount = 0,
+-      imageTrainingCount = 0
+-    } = {}
+-  } = useRequest2(getTrainingQueueLen, {
+-    manual: false,
+-    retryInterval: 10000
+-  });
+-  const { vectorTrainingMap, qaTrainingMap, autoTrainingMap, imageTrainingMap } = useMemo(() => {
+-    const vectorTrainingMap = (() => {
+-      if (vectorTrainingCount < 1000)
+-        return {
+-          colorSchema: 'green',
+-          tip: t('common:core.dataset.training.Leisure')
+-        };
+-      if (vectorTrainingCount < 20000)
+-        return {
+-          colorSchema: 'yellow',
+-          tip: t('common:core.dataset.training.Waiting')
+-        };
+-      return {
+-        colorSchema: 'red',
+-        tip: t('common:core.dataset.training.Full')
+-      };
+-    })();
+-
+-    const countLLMMap = (count: number) => {
+-      if (count < 100)
+-        return {
+-          colorSchema: 'green',
+-          tip: t('common:core.dataset.training.Leisure')
+-        };
+-      if (count < 1000)
+-        return {
+-          colorSchema: 'yellow',
+-          tip: t('common:core.dataset.training.Waiting')
+-        };
+-      return {
+-        colorSchema: 'red',
+-        tip: t('common:core.dataset.training.Full')
+-      };
+-    };
+-    const qaTrainingMap = countLLMMap(qaTrainingCount);
+-    const autoTrainingMap = countLLMMap(autoTrainingCount);
+-    const imageTrainingMap = countLLMMap(imageTrainingCount);
+-
+-    return {
+-      vectorTrainingMap,
+-      qaTrainingMap,
+-      autoTrainingMap,
+-      imageTrainingMap
+-    };
+-  }, [qaTrainingCount, autoTrainingCount, imageTrainingCount, vectorTrainingCount, t]);
+-
+   const tabList = [
+     {
+       label: t('common:core.dataset.Collection'),
+@@ -193,94 +132,6 @@ const NavBar = ({ currentTab }: { currentTab: TabEnum }) => {
+               }}
+             />
+           </Box>
+-
+-          {/* 训练情况hover弹窗 */}
+-          <MyPopover
+-            placement="bottom-end"
+-            visibility={currentTab === TabEnum.collectionCard ? 'visible' : 'hidden'}
+-            trigger="hover"
+-            Trigger={
+-              <Flex
+-                visibility={currentTab === TabEnum.collectionCard ? 'visible' : 'hidden'}
+-                alignItems={'center'}
+-                justifyContent={'center'}
+-                p={2}
+-                borderRadius={'md'}
+-                _hover={{
+-                  bg: 'myGray.05'
+-                }}
+-              >
+-                <MyIcon name={'common/monitor'} w={'18px'} h={'18px'} color={'myGray.500'} />
+-                <Box color={'myGray.600'} ml={1.5} fontWeight={500} userSelect={'none'}>
+-                  {t('common:core.dataset.training.tag')}
+-                </Box>
+-              </Flex>
+-            }
+-          >
+-            {({ onClose }) => (
+-              <Box p={6}>
+-                {rebuildingCount > 0 && (
+-                  <Box mb={3}>
+-                    <Box fontSize={'sm'}>
+-                      {t('dataset:rebuilding_index_count', { count: rebuildingCount })}
+-                    </Box>
+-                  </Box>
+-                )}
+-                <Box mb={3}>
+-                  <Box fontSize={'sm'} pb={1}>
+-                    {t('common:core.dataset.training.Agent queue')}({qaTrainingMap.tip})
+-                  </Box>
+-                  <Progress
+-                    value={100}
+-                    size={'xs'}
+-                    colorScheme={qaTrainingMap.colorSchema}
+-                    borderRadius={'md'}
+-                    isAnimated
+-                    hasStripe
+-                  />
+-                </Box>
+-                <Box mb={3}>
+-                  <Box fontSize={'sm'} pb={1}>
+-                    {t('dataset:auto_training_queue')}({autoTrainingMap.tip})
+-                  </Box>
+-                  <Progress
+-                    value={100}
+-                    size={'xs'}
+-                    colorScheme={autoTrainingMap.colorSchema}
+-                    borderRadius={'md'}
+-                    isAnimated
+-                    hasStripe
+-                  />
+-                </Box>
+-                <Box mb={3}>
+-                  <Box fontSize={'sm'} pb={1}>
+-                    {t('dataset:image_training_queue')}({imageTrainingMap.tip})
+-                  </Box>
+-                  <Progress
+-                    value={100}
+-                    size={'xs'}
+-                    colorScheme={imageTrainingMap.colorSchema}
+-                    borderRadius={'md'}
+-                    isAnimated
+-                    hasStripe
+-                  />
+-                </Box>
+-                <Box>
+-                  <Box fontSize={'sm'} pb={1}>
+-                    {t('common:core.dataset.training.Vector queue')}({vectorTrainingMap.tip})
+-                  </Box>
+-                  <Progress
+-                    value={100}
+-                    size={'xs'}
+-                    colorScheme={vectorTrainingMap.colorSchema}
+-                    borderRadius={'md'}
+-                    isAnimated
+-                    hasStripe
+-                  />
+-                </Box>
+-              </Box>
+-            )}
+-          </MyPopover>
+         </Flex>
+       ) : (
+         <Box mb={2}>
+diff --git a/projects/app/src/pages/api/core/dataset/collection/trainingDetail.ts b/projects/app/src/pages/api/core/dataset/collection/trainingDetail.ts
+index 0e54817a2a45..d54059ce9479 100644
+--- a/projects/app/src/pages/api/core/dataset/collection/trainingDetail.ts
++++ b/projects/app/src/pages/api/core/dataset/collection/trainingDetail.ts
+@@ -58,75 +58,58 @@ async function handler(
+ 
+   // Computed global queue
+   const minId = (
+-    await MongoDatasetTraining.findOne(
+-      {
+-        teamId: collection.teamId,
+-        datasetId: collection.datasetId,
+-        collectionId: collection._id
+-      },
+-      { sort: { _id: 1 }, select: '_id' },
+-      readFromSecondary
+-    ).lean()
++    await MongoDatasetTraining.findOne(match, { sort: { _id: 1 }, select: '_id' }).lean()
+   )?._id;
+ 
+   const [ququedCountData, trainingCountData, errorCountData, trainedCount] = (await Promise.all([
+     minId
+-      ? MongoDatasetTraining.aggregate(
+-          [
+-            {
+-              $match: {
+-                _id: { $lt: new Types.ObjectId(minId) },
+-                retryCount: { $gt: 0 },
+-                lockTime: { $lt: new Date('2050/1/1') }
+-              }
+-            },
+-            {
+-              $group: {
+-                _id: '$mode',
+-                count: { $sum: 1 }
+-              }
++      ? MongoDatasetTraining.aggregate([
++          {
++            $match: {
++              _id: { $lt: new Types.ObjectId(minId) },
++              retryCount: { $gt: 0 },
++              lockTime: { $lt: new Date('2050/1/1') }
++            }
++          },
++          {
++            $group: {
++              _id: '$mode',
++              count: { $sum: 1 }
+             }
+-          ],
+-          readFromSecondary
+-        )
+-      : Promise.resolve([]),
+-    MongoDatasetTraining.aggregate(
+-      [
+-        {
+-          $match: {
+-            ...match,
+-            retryCount: { $gt: 0 },
+-            lockTime: { $lt: new Date('2050/1/1') }
+-          }
+-        },
+-        {
+-          $group: {
+-            _id: '$mode',
+-            count: { $sum: 1 }
+           }
++        ])
++      : Promise.resolve([]),
++    MongoDatasetTraining.aggregate([
++      {
++        $match: {
++          ...match,
++          retryCount: { $gt: 0 },
++          lockTime: { $lt: new Date('2050/1/1') }
+         }
+-      ],
+-      readFromSecondary
+-    ),
+-    MongoDatasetTraining.aggregate(
+-      [
+-        {
+-          $match: {
+-            ...match,
+-            // retryCount: { $lte: 0 },
+-            errorMsg: { $exists: true }
+-          }
+-        },
+-        {
+-          $group: {
+-            _id: '$mode',
+-            count: { $sum: 1 }
+-          }
++      },
++      {
++        $group: {
++          _id: '$mode',
++          count: { $sum: 1 }
++        }
++      }
++    ]),
++    MongoDatasetTraining.aggregate([
++      {
++        $match: {
++          ...match,
++          // retryCount: { $lte: 0 },
++          errorMsg: { $exists: true }
++        }
++      },
++      {
++        $group: {
++          _id: '$mode',
++          count: { $sum: 1 }
+         }
+-      ],
+-      readFromSecondary
+-    ),
+-    MongoDatasetData.countDocuments(match, readFromSecondary)
++      }
++    ]),
++    MongoDatasetData.countDocuments(match)
+   ])) as [
+     { _id: TrainingModeEnum; count: number }[],
+     { _id: TrainingModeEnum; count: number }[],
+diff --git a/projects/app/src/pages/api/core/dataset/training/getQueueLen.ts b/projects/app/src/pages/api/core/dataset/training/getQueueLen.ts
+deleted file mode 100644
+index 313863968d95..000000000000
+--- a/projects/app/src/pages/api/core/dataset/training/getQueueLen.ts
++++ /dev/null
+@@ -1,51 +0,0 @@
+-import type { NextApiRequest } from 'next';
+-import { MongoDatasetTraining } from '@fastgpt/service/core/dataset/training/schema';
+-import { authCert } from '@fastgpt/service/support/permission/auth/common';
+-import { NextAPI } from '@/service/middleware/entry';
+-import { readFromSecondary } from '@fastgpt/service/common/mongo/utils';
+-import { TrainingModeEnum } from '@fastgpt/global/core/dataset/constants';
+-
+-export type GetQueueLenResponse = {
+-  vectorTrainingCount: number;
+-  qaTrainingCount: number;
+-  autoTrainingCount: number;
+-  imageTrainingCount: number;
+-};
+-
+-async function handler(req: NextApiRequest) {
+-  await authCert({ req, authToken: true });
+-
+-  // get queue data
+-  const data = await MongoDatasetTraining.aggregate(
+-    [
+-      {
+-        $match: {
+-          lockTime: { $lt: new Date('2040/1/1') }
+-        }
+-      },
+-      {
+-        $group: {
+-          _id: '$mode',
+-          count: { $sum: 1 }
+-        }
+-      }
+-    ],
+-    {
+-      ...readFromSecondary
+-    }
+-  );
+-
+-  const vectorTrainingCount = data.find((item) => item._id === TrainingModeEnum.chunk)?.count || 0;
+-  const qaTrainingCount = data.find((item) => item._id === TrainingModeEnum.qa)?.count || 0;
+-  const autoTrainingCount = data.find((item) => item._id === TrainingModeEnum.auto)?.count || 0;
+-  const imageTrainingCount = data.find((item) => item._id === TrainingModeEnum.image)?.count || 0;
+-
+-  return {
+-    vectorTrainingCount,
+-    qaTrainingCount,
+-    autoTrainingCount,
+-    imageTrainingCount
+-  };
+-}
+-
+-export default NextAPI(handler);
+diff --git a/projects/app/src/service/common/system/index.ts b/projects/app/src/service/common/system/index.ts
+index d22012ec2154..31630fd13c08 100644
+--- a/projects/app/src/service/common/system/index.ts
++++ b/projects/app/src/service/common/system/index.ts
+@@ -77,6 +77,7 @@ export function initGlobalVariables() {
+     };
+   }
+ 
++  global.datasetParseQueueLen = global.datasetParseQueueLen ?? 0;
+   global.qaQueueLen = global.qaQueueLen ?? 0;
+   global.vectorQueueLen = global.vectorQueueLen ?? 0;
+   initHttpAgent();
+diff --git a/projects/app/src/service/core/dataset/queues/datasetParse.ts b/projects/app/src/service/core/dataset/queues/datasetParse.ts
+index 68531efd07a1..7afc73b5be11 100644
+--- a/projects/app/src/service/core/dataset/queues/datasetParse.ts
++++ b/projects/app/src/service/core/dataset/queues/datasetParse.ts
+@@ -89,280 +89,298 @@ const requestLLMPargraph = async ({
+   return data;
+ };
+ 
++const reduceQueue = () => {
++  global.datasetParseQueueLen =
++    global.datasetParseQueueLen > 0 ? global.datasetParseQueueLen - 1 : 0;
++
++  return global.datasetParseQueueLen === 0;
++};
++
+ export const datasetParseQueue = async (): Promise<any> => {
+-  const startTime = Date.now();
+-
+-  while (true) {
+-    // 1. Get task and lock 20 minutes ago
+-    const {
+-      data,
+-      done = false,
+-      error = false
+-    } = await (async () => {
+-      try {
+-        const data = await MongoDatasetTraining.findOneAndUpdate(
+-          {
+-            mode: TrainingModeEnum.parse,
+-            retryCount: { $gt: 0 },
+-            lockTime: { $lte: addMinutes(new Date(), -10) }
+-          },
+-          {
+-            lockTime: new Date(),
+-            $inc: { retryCount: -1 }
+-          }
+-        )
+-          .populate<{
+-            dataset: DatasetSchemaType;
+-            collection: DatasetCollectionSchemaType;
+-          }>([
++  const max = global.systemEnv?.datasetParseMaxProcess || 10;
++  addLog.debug(`[Parse Queue] Queue size: ${global.datasetParseQueueLen}`);
++  if (global.datasetParseQueueLen >= max) return;
++  global.datasetParseQueueLen++;
++
++  try {
++    while (true) {
++      const startTime = Date.now();
++
++      // 1. Get task and lock 20 minutes ago
++      const {
++        data,
++        done = false,
++        error = false
++      } = await (async () => {
++        try {
++          const data = await MongoDatasetTraining.findOneAndUpdate(
+             {
+-              path: 'collection',
+-              select: '-qaPrompt'
++              mode: TrainingModeEnum.parse,
++              retryCount: { $gt: 0 },
++              lockTime: { $lte: addMinutes(new Date(), -10) }
+             },
+             {
+-              path: 'dataset'
++              lockTime: new Date(),
++              $inc: { retryCount: -1 }
+             }
+-          ])
+-          .lean();
+-
+-        // task preemption
+-        if (!data) {
+-          return {
+-            done: true
+-          };
+-        }
+-        return {
+-          data
+-        };
+-      } catch (error) {
+-        return {
+-          error: true
+-        };
+-      }
+-    })();
+-
+-    if (done || !data) {
+-      break;
+-    }
+-    if (error) {
+-      addLog.error(`[Parse Queue] Error`, error);
+-      await delay(500);
+-      continue;
+-    }
+-    // Check team points and lock(No mistakes will be thrown here)
+-    if (!(await checkTeamAiPointsAndLock(data.teamId))) {
+-      break;
+-    }
+-
+-    const dataset = data.dataset;
+-    const collection = data.collection;
+-
+-    if (!dataset || !collection) {
+-      addLog.warn(`[Parse Queue] data not found`, data);
+-      await MongoDatasetTraining.deleteOne({ _id: data._id });
+-      break;
+-    }
+-
+-    addLog.info(`[Parse Queue] Start`);
+-
+-    try {
+-      const trainingMode = getTrainingModeByCollection({
+-        trainingType: collection.trainingType,
+-        autoIndexes: collection.autoIndexes,
+-        imageIndex: collection.imageIndex
+-      });
++          )
++            .populate<{
++              dataset: DatasetSchemaType;
++              collection: DatasetCollectionSchemaType;
++            }>([
++              {
++                path: 'collection',
++                select: '-qaPrompt'
++              },
++              {
++                path: 'dataset'
++              }
++            ])
++            .lean();
+ 
+-      // 1. Parse rawtext
+-      const sourceReadType = await (async () => {
+-        if (collection.type === DatasetCollectionTypeEnum.link) {
+-          if (!collection.rawLink) return Promise.reject('rawLink is missing');
+-          return {
+-            type: DatasetSourceReadTypeEnum.link,
+-            sourceId: collection.rawLink,
+-            selector: collection.metadata?.webPageSelector
+-          };
+-        }
+-        if (collection.type === DatasetCollectionTypeEnum.file) {
+-          if (!collection.fileId) return Promise.reject('fileId is missing');
+-          return {
+-            type: DatasetSourceReadTypeEnum.fileLocal,
+-            sourceId: String(collection.fileId)
+-          };
+-        }
+-        if (collection.type === DatasetCollectionTypeEnum.apiFile) {
+-          if (!collection.apiFileId) return Promise.reject('apiFileId is missing');
++          // task preemption
++          if (!data) {
++            return {
++              done: true
++            };
++          }
+           return {
+-            type: DatasetSourceReadTypeEnum.apiFile,
+-            sourceId: collection.apiFileId,
+-            apiDatasetServer: dataset.apiDatasetServer
++            data
+           };
+-        }
+-        if (collection.type === DatasetCollectionTypeEnum.externalFile) {
+-          if (!collection.externalFileUrl) return Promise.reject('externalFileId is missing');
++        } catch (error) {
+           return {
+-            type: DatasetSourceReadTypeEnum.externalFile,
+-            sourceId: collection.externalFileUrl,
+-            externalFileId: collection.externalFileId
++            error: true
+           };
+         }
+-
+-        return null;
+       })();
+ 
+-      if (!sourceReadType) {
+-        addLog.warn(`[Parse Queue] Source read type is null, delete task`);
+-        await MongoDatasetTraining.deleteOne({
+-          _id: data._id
+-        });
++      if (done || !data) {
+         break;
+       }
++      if (error) {
++        addLog.error(`[Parse Queue] Error`, error);
++        await delay(500);
++        continue;
++      }
++      // Check team points and lock(No mistakes will be thrown here)
++      if (!(await checkTeamAiPointsAndLock(data.teamId))) {
++        continue;
++      }
++
++      const dataset = data.dataset;
++      const collection = data.collection;
++
++      if (!dataset || !collection) {
++        addLog.warn(`[Parse Queue] data not found`, data);
++        await MongoDatasetTraining.deleteOne({ _id: data._id });
++        continue;
++      }
++
++      addLog.info(`[Parse Queue] Start`);
+ 
+-      // 2. Read source
+-      const { title, rawText } = await readDatasetSourceRawText({
+-        teamId: data.teamId,
+-        tmbId: data.tmbId,
+-        customPdfParse: collection.customPdfParse,
+-        usageId: data.billId,
+-        ...sourceReadType
+-      });
+-
+-      // 3. LLM Pargraph
+-      const { resultText, totalInputTokens, totalOutputTokens } = await requestLLMPargraph({
+-        rawText,
+-        model: dataset.agentModel,
+-        billId: data.billId,
+-        paragraphChunkAIMode: collection.paragraphChunkAIMode
+-      });
+-      // Push usage
+-      pushLLMTrainingUsage({
+-        teamId: data.teamId,
+-        model: dataset.agentModel,
+-        inputTokens: totalInputTokens,
+-        outputTokens: totalOutputTokens,
+-        usageId: data.billId,
+-        type: UsageItemTypeEnum.training_paragraph
+-      });
+-
+-      // 4. Chunk split
+-      const chunks = await rawText2Chunks({
+-        rawText: resultText,
+-        chunkTriggerType: collection.chunkTriggerType,
+-        chunkTriggerMinSize: collection.chunkTriggerMinSize,
+-        chunkSize: collection.chunkSize,
+-        paragraphChunkDeep: collection.paragraphChunkDeep,
+-        paragraphChunkMinSize: collection.paragraphChunkMinSize,
+-        maxSize: getLLMMaxChunkSize(getLLMModel(dataset.agentModel)),
+-        overlapRatio:
+-          collection.trainingType === DatasetCollectionDataProcessModeEnum.chunk ? 0.2 : 0,
+-        customReg: collection.chunkSplitter ? [collection.chunkSplitter] : [],
+-        backupParse: collection.trainingType === DatasetCollectionDataProcessModeEnum.backup
+-      });
+-
+-      // Check dataset limit
+       try {
+-        await checkDatasetIndexLimit({
+-          teamId: data.teamId,
+-          insertLen: predictDataLimitLength(trainingMode, chunks)
++        const trainingMode = getTrainingModeByCollection({
++          trainingType: collection.trainingType,
++          autoIndexes: collection.autoIndexes,
++          imageIndex: collection.imageIndex
+         });
+-      } catch (error) {
+-        addLog.warn(`[Parse Queue] Check dataset limit failed, lock the task`);
+-        await MongoDatasetTraining.updateOne(
+-          {
+-            _id: data._id
+-          },
+-          {
+-            errorMsg: getErrText(error, 'Over dataset limit'),
+-            lockTime: new Date('2999/5/5')
++
++        // 1. Parse rawtext
++        const sourceReadType = await (async () => {
++          if (collection.type === DatasetCollectionTypeEnum.link) {
++            if (!collection.rawLink) return Promise.reject('rawLink is missing');
++            return {
++              type: DatasetSourceReadTypeEnum.link,
++              sourceId: collection.rawLink,
++              selector: collection.metadata?.webPageSelector
++            };
++          }
++          if (collection.type === DatasetCollectionTypeEnum.file) {
++            if (!collection.fileId) return Promise.reject('fileId is missing');
++            return {
++              type: DatasetSourceReadTypeEnum.fileLocal,
++              sourceId: String(collection.fileId)
++            };
++          }
++          if (collection.type === DatasetCollectionTypeEnum.apiFile) {
++            if (!collection.apiFileId) return Promise.reject('apiFileId is missing');
++            return {
++              type: DatasetSourceReadTypeEnum.apiFile,
++              sourceId: collection.apiFileId,
++              apiDatasetServer: dataset.apiDatasetServer
++            };
++          }
++          if (collection.type === DatasetCollectionTypeEnum.externalFile) {
++            if (!collection.externalFileUrl) return Promise.reject('externalFileId is missing');
++            return {
++              type: DatasetSourceReadTypeEnum.externalFile,
++              sourceId: collection.externalFileUrl,
++              externalFileId: collection.externalFileId
++            };
+           }
+-        );
+-        break;
+-      }
+ 
+-      await mongoSessionRun(async (session) => {
+-        // 5. Update collection title(Link)
+-        await MongoDatasetCollection.updateOne(
+-          { _id: collection._id },
+-          {
+-            ...(title && { name: title }),
+-            rawTextLength: resultText.length,
+-            hashRawText: hashStr(resultText)
+-          },
+-          { session }
+-        );
++          return null;
++        })();
++
++        if (!sourceReadType) {
++          addLog.warn(`[Parse Queue] Source read type is null, delete task`);
++          await MongoDatasetTraining.deleteOne({
++            _id: data._id
++          });
++          continue;
++        }
+ 
+-        // 6. Push to chunk queue
+-        await pushDataListToTrainingQueue({
++        // 2. Read source
++        const { title, rawText } = await readDatasetSourceRawText({
+           teamId: data.teamId,
+           tmbId: data.tmbId,
+-          datasetId: dataset._id,
+-          collectionId: collection._id,
+-          agentModel: dataset.agentModel,
+-          vectorModel: dataset.vectorModel,
+-          vlmModel: dataset.vlmModel,
+-          indexSize: collection.indexSize,
+-          mode: trainingMode,
++          customPdfParse: collection.customPdfParse,
++          usageId: data.billId,
++          ...sourceReadType
++        });
++
++        // 3. LLM Pargraph
++        const { resultText, totalInputTokens, totalOutputTokens } = await requestLLMPargraph({
++          rawText,
++          model: dataset.agentModel,
+           billId: data.billId,
+-          data: chunks.map((item, index) => ({
+-            ...item,
+-            indexes: item.indexes?.map((text) => ({
+-              type: DatasetDataIndexTypeEnum.custom,
+-              text
+-            })),
+-            chunkIndex: index
+-          })),
+-          session
++          paragraphChunkAIMode: collection.paragraphChunkAIMode
++        });
++        // Push usage
++        pushLLMTrainingUsage({
++          teamId: data.teamId,
++          model: dataset.agentModel,
++          inputTokens: totalInputTokens,
++          outputTokens: totalOutputTokens,
++          usageId: data.billId,
++          type: UsageItemTypeEnum.training_paragraph
+         });
+ 
+-        // 7. Delete task
+-        await MongoDatasetTraining.deleteOne(
+-          {
+-            _id: data._id
+-          },
+-          {
+-            session
+-          }
+-        );
++        // 4. Chunk split
++        const chunks = await rawText2Chunks({
++          rawText: resultText,
++          chunkTriggerType: collection.chunkTriggerType,
++          chunkTriggerMinSize: collection.chunkTriggerMinSize,
++          chunkSize: collection.chunkSize,
++          paragraphChunkDeep: collection.paragraphChunkDeep,
++          paragraphChunkMinSize: collection.paragraphChunkMinSize,
++          maxSize: getLLMMaxChunkSize(getLLMModel(dataset.agentModel)),
++          overlapRatio:
++            collection.trainingType === DatasetCollectionDataProcessModeEnum.chunk ? 0.2 : 0,
++          customReg: collection.chunkSplitter ? [collection.chunkSplitter] : [],
++          backupParse: collection.trainingType === DatasetCollectionDataProcessModeEnum.backup
++        });
+ 
+-        // 8. Remove image ttl
+-        const relatedImgId = collection.metadata?.relatedImgId;
+-        if (relatedImgId) {
+-          await MongoImage.updateMany(
++        // Check dataset limit
++        try {
++          await checkDatasetIndexLimit({
++            teamId: data.teamId,
++            insertLen: predictDataLimitLength(trainingMode, chunks)
++          });
++        } catch (error) {
++          addLog.info(`[Parse Queue] Check dataset limit failed, lock the task`);
++          await MongoDatasetTraining.updateOne(
+             {
+-              teamId: collection.teamId,
+-              'metadata.relatedId': relatedImgId
++              _id: data._id
+             },
+             {
+-              // Remove expiredTime to avoid ttl expiration
+-              $unset: {
+-                expiredTime: 1
+-              }
++              errorMsg: getErrText(error, 'Over dataset limit'),
++              lockTime: new Date('2999/5/5')
++            }
++          );
++        }
++
++        await mongoSessionRun(async (session) => {
++          // 5. Update collection title(Link)
++          await MongoDatasetCollection.updateOne(
++            { _id: collection._id },
++            {
++              ...(title && { name: title }),
++              rawTextLength: resultText.length,
++              hashRawText: hashStr(resultText)
++            },
++            { session }
++          );
++
++          // 6. Push to chunk queue
++          await pushDataListToTrainingQueue({
++            teamId: data.teamId,
++            tmbId: data.tmbId,
++            datasetId: dataset._id,
++            collectionId: collection._id,
++            agentModel: dataset.agentModel,
++            vectorModel: dataset.vectorModel,
++            vlmModel: dataset.vlmModel,
++            indexSize: collection.indexSize,
++            mode: trainingMode,
++            billId: data.billId,
++            data: chunks.map((item, index) => ({
++              ...item,
++              indexes: item.indexes?.map((text) => ({
++                type: DatasetDataIndexTypeEnum.custom,
++                text
++              })),
++              chunkIndex: index
++            })),
++            session
++          });
++
++          // 7. Delete task
++          await MongoDatasetTraining.deleteOne(
++            {
++              _id: data._id
+             },
+             {
+               session
+             }
+           );
+-        }
+-      });
+-
+-      addLog.debug(`[Parse Queue] Finish`, {
+-        time: Date.now() - startTime
+-      });
+-      break;
+-    } catch (err) {
+-      addLog.error(`[Parse Queue] Error`, err);
+-
+-      await MongoDatasetTraining.updateOne(
+-        {
+-          _id: data._id
+-        },
+-        {
+-          errorMsg: getErrText(err, 'unknown error'),
+-          lockTime: addMinutes(new Date(), -10)
+-        }
+-      );
+ 
+-      await delay(100);
++          // 8. Remove image ttl
++          const relatedImgId = collection.metadata?.relatedImgId;
++          if (relatedImgId) {
++            await MongoImage.updateMany(
++              {
++                teamId: collection.teamId,
++                'metadata.relatedId': relatedImgId
++              },
++              {
++                // Remove expiredTime to avoid ttl expiration
++                $unset: {
++                  expiredTime: 1
++                }
++              },
++              {
++                session
++              }
++            );
++          }
++        });
++
++        addLog.debug(`[Parse Queue] Finish`, {
++          time: Date.now() - startTime
++        });
++      } catch (err) {
++        addLog.error(`[Parse Queue] Error`, err);
++
++        await MongoDatasetTraining.updateOne(
++          {
++            _id: data._id
++          },
++          {
++            errorMsg: getErrText(err, 'unknown error'),
++            lockTime: addMinutes(new Date(), -10)
++          }
++        );
++
++        await delay(100);
++      }
+     }
++  } catch (error) {
++    addLog.error(`[Parse Queue] Error`, error);
++  }
++
++  if (reduceQueue()) {
++    addLog.info(`[Parse Queue] Done`);
+   }
+ 
+   addLog.debug(`[Parse Queue] break loop`);
+diff --git a/projects/app/src/types/index.d.ts b/projects/app/src/types/index.d.ts
+index 6d07318d6f7d..730d9e9a6b0b 100644
+--- a/projects/app/src/types/index.d.ts
++++ b/projects/app/src/types/index.d.ts
+@@ -13,6 +13,7 @@ import { SubPlanType } from '@fastgpt/global/support/wallet/sub/type';
+ declare global {
+   var qaQueueLen: number;
+   var vectorQueueLen: number;
++  var datasetParseQueueLen: number;
+ 
+   interface Window {
+     grecaptcha: any;
+diff --git a/projects/app/src/web/core/dataset/api.ts b/projects/app/src/web/core/dataset/api.ts
+index d0c273089250..a022dbf95689 100644
+--- a/projects/app/src/web/core/dataset/api.ts
++++ b/projects/app/src/web/core/dataset/api.ts
+@@ -57,7 +57,6 @@ import type {
+ } from '@/pages/api/core/dataset/apiDataset/listExistId';
+ import type { GetQuoteDataResponse } from '@/pages/api/core/dataset/data/getQuoteData';
+ import type { GetQuotePermissionResponse } from '@/pages/api/core/dataset/data/getPermission';
+-import type { GetQueueLenResponse } from '@/pages/api/core/dataset/training/getQueueLen';
+ import type { updateTrainingDataBody } from '@/pages/api/core/dataset/training/updateTrainingData';
+ import type {
+   getTrainingDataDetailBody,
+@@ -281,9 +280,6 @@ export const getQuoteData = (data: GetQuoteDataProps) =>
+ export const postRebuildEmbedding = (data: rebuildEmbeddingBody) =>
+   POST(`/core/dataset/training/rebuildEmbedding`, data);
+ 
+-/* get length of system training queue */
+-export const getTrainingQueueLen = () =>
+-  GET<GetQueueLenResponse>(`/core/dataset/training/getQueueLen`);
+ export const getDatasetTrainingQueue = (datasetId: string) =>
+   GET<getDatasetTrainingQueueResponse>(`/core/dataset/training/getDatasetTrainingQueue`, {
+     datasetId

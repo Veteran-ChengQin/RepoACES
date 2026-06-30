@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-6594",
+    "pr_number":  "6594",
+    "title":  "feat: Add limits for active sandbox instances",
+    "base_commit":  "ec37b831d3e4c1b0a6ce62c10746b917a2488226",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

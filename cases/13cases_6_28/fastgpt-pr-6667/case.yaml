@@ -1,0 +1,25 @@
+id: fastgpt-pr-6667
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "1920d283c74c2fee2ddb103c4e4f5ecf593bec9e"
+  pr_number: 6667
+  pr_url: https://github.com/labring/FastGPT/pull/6667
+  pr_title_raw: "feat(skill): add custom delete chat item for skill debug"
+  summary_source: generated_from_pr_patch
+  summary_raw_markdown: |
+    - Add a skill-specific debug-session chat item delete API for removing individual preview messages.
+    - Allow ChatBox callers to provide a custom message delete handler instead of always using the normal app chat delete flow.
+    - Wire SkillPreview chat testing to the new skill debug delete endpoint so regenerate/delete operations do not look up the skillId as an appId.
+
+validation:
+  head_commit: "326a7ea069913a09002a70de34e91c132d597fa5"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-6667.patch"
+  patch_sha256: "a0b6c22789d2851caba31f98e0d5d43112f82df6a4c76c1cd48a801c750d5c7a"
+  changed_files_file: "patches/fastgpt-pr-6667.changed_files.txt"
+  manual_functionality_description: |
+    Pending manual functionality description for this TypeScript-size candidate batch.

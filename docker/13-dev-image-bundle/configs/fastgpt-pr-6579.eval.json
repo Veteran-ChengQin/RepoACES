@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-6579",
+    "pr_number":  "6579",
+    "title":  "feat: sandbox in agent",
+    "base_commit":  "bfb52f211c7cfc782f94d4dbcbe5ca7e7336f9f2",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-5911",
+    "pr_number":  "5911",
+    "title":  "feat: add app option to agent editor",
+    "base_commit":  "eeea4d7ec0c93cc13a69eed7d6fb46b0cb770dcf",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

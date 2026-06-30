@@ -1,0 +1,25 @@
+id: fastgpt-pr-6162
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "29f61abcd3435c5622d42c85a1a3da2dce6c9c9b"
+  pr_number: 6162
+  pr_url: https://github.com/labring/FastGPT/pull/6162
+  pr_title_raw: "feat: add user ip filter for chat log table"
+  summary_source: generated_from_pr_patch
+  summary_raw_markdown: |
+    - Add origin IP to app log list API responses.
+    - Add a user IP display filter to the app log table with options for region plus IP, only IP, and only region.
+    - Add localized labels for the new IP/region display modes.
+
+validation:
+  head_commit: "cb587e44d96dbfff7a8c26d034cd2eae253e28fc"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-6162.patch"
+  patch_sha256: "9319266f2f96c079585a907d224337dbdf98df1a50f3531a4181007722006371"
+  changed_files_file: "patches/fastgpt-pr-6162.changed_files.txt"
+  manual_functionality_description: |
+    Pending manual functionality description for this TypeScript-size candidate batch.

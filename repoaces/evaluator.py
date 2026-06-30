@@ -156,11 +156,22 @@ class FinalEvaluator:
         return False
 
     def _find_compose_bundle_root(self, start: Path) -> Path | None:
+        configured = os.getenv("REPOACES_COMPOSE_BUNDLE_ROOT", "").strip()
+        if configured:
+            candidate = Path(configured).expanduser().resolve()
+            if (candidate / "configs").exists() and (candidate / "scripts" / "Run-PrEval.ps1").exists():
+                return candidate
         for parent in [start.resolve(), *start.resolve().parents]:
             candidate = parent / "docker" / "compose-bundle"
             if (candidate / "configs").exists() and (candidate / "scripts" / "Run-PrEval.ps1").exists():
                 return candidate
+            candidate = parent / "docker" / "13-evaluator-image-bundle"
+            if (candidate / "configs").exists() and (candidate / "scripts" / "Run-PrEval.ps1").exists():
+                return candidate
         cwd_candidate = Path.cwd() / "docker" / "compose-bundle"
+        if (cwd_candidate / "configs").exists() and (cwd_candidate / "scripts" / "Run-PrEval.ps1").exists():
+            return cwd_candidate
+        cwd_candidate = Path.cwd() / "docker" / "13-evaluator-image-bundle"
         if (cwd_candidate / "configs").exists() and (cwd_candidate / "scripts" / "Run-PrEval.ps1").exists():
             return cwd_candidate
         return None

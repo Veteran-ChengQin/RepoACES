@@ -1,0 +1,25 @@
+id: fastgpt-pr-6594
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "ec37b831d3e4c1b0a6ce62c10746b917a2488226"
+  pr_number: 6594
+  pr_url: https://github.com/labring/FastGPT/pull/6594
+  pr_title_raw: "feat: Add limits for active sandbox instances"
+  summary_source: generated_from_pr_patch
+  summary_raw_markdown: |
+    - Add environment-configurable limits for active Agent sandbox instances.
+    - Enforce separate limits for edit-debug sandboxes and session-runtime sandboxes before creating new sandbox instances.
+    - Report a failed progress state with a clear limit-reached message when the active sandbox count is already at the configured maximum.
+
+validation:
+  head_commit: "b37f0b983a3ce0e52da15c9331765d01343a5b24"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-6594.patch"
+  patch_sha256: "17ec701cc50804b9f416ba251af8612b4668712dad1321c9dfdd78e6a31bd353"
+  changed_files_file: "patches/fastgpt-pr-6594.changed_files.txt"
+  manual_functionality_description: |
+    Pending manual functionality description for this TypeScript-size candidate batch.

@@ -1,0 +1,890 @@
+diff --git a/packages/global/common/file/icon.ts b/packages/global/common/file/icon.ts
+index f2baf7613fdd..0d268e509ec0 100644
+--- a/packages/global/common/file/icon.ts
++++ b/packages/global/common/file/icon.ts
+@@ -1,19 +1,19 @@
+-export const fileImgs = [
+-  { suffix: 'pdf', src: 'file/fill/pdf' },
+-  { suffix: 'ppt', src: 'file/fill/ppt' },
+-  { suffix: 'xlsx', src: 'file/fill/xlsx' },
+-  { suffix: 'csv', src: 'file/fill/csv' },
+-  { suffix: '(doc|docs)', src: 'file/fill/doc' },
+-  { suffix: 'txt', src: 'file/fill/txt' },
+-  { suffix: 'md', src: 'file/fill/markdown' },
+-  { suffix: 'html', src: 'file/fill/html' },
+-  { suffix: '(jpg|jpeg|png|gif|bmp|webp|svg|ico|tiff|tif)', src: 'image' }
++export const getFileIcon = (name = '', defaultImg = 'file/fill/file') => {
++  const fileImgs = [
++    { suffix: 'pdf', src: 'file/fill/pdf' },
++    { suffix: 'ppt', src: 'file/fill/ppt' },
++    { suffix: 'xlsx', src: 'file/fill/xlsx' },
++    { suffix: 'csv', src: 'file/fill/csv' },
++    { suffix: '(doc|docs)', src: 'file/fill/doc' },
++    { suffix: 'txt', src: 'file/fill/txt' },
++    { suffix: 'md', src: 'file/fill/markdown' },
++    { suffix: 'html', src: 'file/fill/html' },
++    { suffix: '(jpg|jpeg|png|gif|bmp|webp|svg|ico|tiff|tif)', src: 'image' },
++    { suffix: '(mp3|wav|ogg|m4a|amr|mpga)', src: 'file/fill/audio' },
++    { suffix: '(mp4|mov|avi|mpeg|webm)', src: 'file/fill/video' }
++  ];
+ 
+-  // { suffix: '.', src: '/imgs/files/file.svg' }
+-];
+-
+-export function getFileIcon(name = '', defaultImg = 'file/fill/file') {
+   return (
+     fileImgs.find((item) => new RegExp(`\.${item.suffix}`, 'gi').test(name))?.src || defaultImg
+   );
+-}
++};
+diff --git a/packages/global/core/app/constants.ts b/packages/global/core/app/constants.ts
+index e44d1fedf147..b8807d21daa9 100644
+--- a/packages/global/core/app/constants.ts
++++ b/packages/global/core/app/constants.ts
+@@ -50,7 +50,11 @@ export const defaultChatInputGuideConfig = {
+ export const defaultAppSelectFileConfig: AppFileSelectConfigType = {
+   canSelectFile: false,
+   canSelectImg: false,
+-  maxFiles: 10
++  maxFiles: 10,
++  canSelectVideo: false,
++  canSelectAudio: false,
++  canSelectCustomFileExtension: false,
++  customFileExtensionList: []
+ };
+ 
+ export enum AppTemplateTypeEnum {
+@@ -64,3 +68,12 @@ export enum AppTemplateTypeEnum {
+   // special type
+   contribute = 'contribute'
+ }
++
++export const defaultFileExtensionTypes = {
++  canSelectFile: ['.pdf', '.docx', '.pptx', '.xlsx', '.txt', '.md', '.html', '.csv'],
++  canSelectImg: ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'],
++  canSelectVideo: ['.mp4', '.mov', '.avi', '.mpeg', '.webm'],
++  canSelectAudio: ['.mp3', '.wav', '.ogg', '.m4a', '.amr', '.mpga'],
++  canSelectCustomFileExtension: []
++};
++export type FileExtensionKeyType = keyof typeof defaultFileExtensionTypes;
+diff --git a/packages/global/core/app/type.d.ts b/packages/global/core/app/type.d.ts
+index 40ff44c8b433..28ee636be836 100644
+--- a/packages/global/core/app/type.d.ts
++++ b/packages/global/core/app/type.d.ts
+@@ -241,10 +241,14 @@ export type AppAutoExecuteConfigType = {
+ };
+ // File
+ export type AppFileSelectConfigType = {
+-  canSelectFile: boolean;
+-  customPdfParse?: boolean;
+-  canSelectImg: boolean;
+   maxFiles: number;
++  canSelectFile?: boolean;
++  customPdfParse?: boolean;
++  canSelectImg?: boolean;
++  canSelectVideo?: boolean;
++  canSelectAudio?: boolean;
++  canSelectCustomFileExtension?: boolean;
++  customFileExtensionList?: string[];
+ };
+ 
+ export type SystemPluginListItemType = {
+diff --git a/packages/web/components/common/Icon/constants.ts b/packages/web/components/common/Icon/constants.ts
+index 1dec87576f71..8ebd47b284ed 100644
+--- a/packages/web/components/common/Icon/constants.ts
++++ b/packages/web/components/common/Icon/constants.ts
+@@ -273,10 +273,6 @@ export const iconPaths = {
+   'core/workflow/inputType/customVariable': () =>
+     import('./icons/core/workflow/inputType/customVariable.svg'),
+   'core/workflow/inputType/dataset': () => import('./icons/core/workflow/inputType/dataset.svg'),
+-  'core/workflow/inputType/timePointSelect': () =>
+-    import('./icons/core/workflow/inputType/timePointSelect.svg'),
+-  'core/workflow/inputType/timeRangeSelect': () =>
+-    import('./icons/core/workflow/inputType/timeRangeSelect.svg'),
+   'core/workflow/inputType/dynamic': () => import('./icons/core/workflow/inputType/dynamic.svg'),
+   'core/workflow/inputType/external': () => import('./icons/core/workflow/inputType/external.svg'),
+   'core/workflow/inputType/file': () => import('./icons/core/workflow/inputType/file.svg'),
+@@ -302,6 +298,10 @@ export const iconPaths = {
+     import('./icons/core/workflow/inputType/selectLLM.svg'),
+   'core/workflow/inputType/switch': () => import('./icons/core/workflow/inputType/switch.svg'),
+   'core/workflow/inputType/textarea': () => import('./icons/core/workflow/inputType/textarea.svg'),
++  'core/workflow/inputType/timePointSelect': () =>
++    import('./icons/core/workflow/inputType/timePointSelect.svg'),
++  'core/workflow/inputType/timeRangeSelect': () =>
++    import('./icons/core/workflow/inputType/timeRangeSelect.svg'),
+   'core/workflow/mouse': () => import('./icons/core/workflow/mouse.svg'),
+   'core/workflow/publish': () => import('./icons/core/workflow/publish.svg'),
+   'core/workflow/redo': () => import('./icons/core/workflow/redo.svg'),
+@@ -386,6 +386,7 @@ export const iconPaths = {
+   export: () => import('./icons/export.svg'),
+   feedback: () => import('./icons/feedback.svg'),
+   'file/csv': () => import('./icons/file/csv.svg'),
++  'file/fill/audio': () => import('./icons/file/fill/audio.svg'),
+   'file/fill/csv': () => import('./icons/file/fill/csv.svg'),
+   'file/fill/doc': () => import('./icons/file/fill/doc.svg'),
+   'file/fill/file': () => import('./icons/file/fill/file.svg'),
+@@ -396,6 +397,7 @@ export const iconPaths = {
+   'file/fill/pdf': () => import('./icons/file/fill/pdf.svg'),
+   'file/fill/ppt': () => import('./icons/file/fill/ppt.svg'),
+   'file/fill/txt': () => import('./icons/file/fill/txt.svg'),
++  'file/fill/video': () => import('./icons/file/fill/video.svg'),
+   'file/fill/xlsx': () => import('./icons/file/fill/xlsx.svg'),
+   'file/html': () => import('./icons/file/html.svg'),
+   'file/indexImport': () => import('./icons/file/indexImport.svg'),
+diff --git a/packages/web/components/common/Icon/icons/file/fill/audio.svg b/packages/web/components/common/Icon/icons/file/fill/audio.svg
+new file mode 100644
+index 000000000000..88035258050a
+--- /dev/null
++++ b/packages/web/components/common/Icon/icons/file/fill/audio.svg
+@@ -0,0 +1 @@
++<svg t="1761221292635" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="5576" width="64" height="64"><path d="M661.942857 73.142857H146.285714c-20.114286 0-36.571429 16.457143-36.571428 36.571429v804.571428c0 20.114286 16.457143 36.571429 36.571428 36.571429h731.428572c20.114286 0 36.571429-16.457143 36.571428-36.571429V325.485714L661.942857 73.142857z" fill="#8450EA" p-id="5577"></path><path d="M661.942857 288.914286c0 20.114286 16.457143 36.571429 36.571429 36.571428H914.285714L661.942857 73.142857v215.771429z" fill="#9C72ED" p-id="5578"></path><path d="M696.685714 694.857143V420.571429v-1.828572c0-5.485714 0-9.142857-1.828571-14.628571-5.485714-20.114286-25.6-31.085714-45.714286-25.6l-254.171428 71.314285c-16.457143 5.485714-27.428571 20.114286-27.428572 38.4V731.428571c-12.8-1.828571-29.257143-1.828571-43.885714 5.485715-31.085714 14.628571-47.542857 47.542857-34.742857 73.142857 10.971429 25.6 47.542857 34.742857 78.628571 20.114286 16.457143-7.314286 29.257143-20.114286 34.742857-34.742858v-1.828571c3.657143-9.142857 3.657143-20.114286 1.828572-29.257143v-138.971428L658.285714 555.885714v109.714286c-12.8-3.657143-29.257143-1.828571-43.885714 5.485714-31.085714 14.628571-47.542857 47.542857-34.742857 73.142857 10.971429 25.6 47.542857 34.742857 78.628571 20.114286 16.457143-7.314286 29.257143-21.942857 34.742857-36.571428v-1.828572c5.485714-10.971429 7.314286-21.942857 3.657143-31.085714z m-36.571428-179.2L407.771429 585.142857v-62.171428c3.657143 0 7.314286 0 9.142857-1.828572l243.2-67.657143v62.171429z" fill="#FFFFFF" p-id="5579"></path></svg>
+\ No newline at end of file
+diff --git a/packages/web/components/common/Icon/icons/file/fill/video.svg b/packages/web/components/common/Icon/icons/file/fill/video.svg
+new file mode 100644
+index 000000000000..dbc3283d6fd1
+--- /dev/null
++++ b/packages/web/components/common/Icon/icons/file/fill/video.svg
+@@ -0,0 +1 @@
++<svg t="1761221339416" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="7562" width="64" height="64"><path d="M160 0h512l256 256v704c0 35.3472-28.6528 64-64 64H160c-35.3472 0-64-28.6528-64-64V64c0-35.3472 28.6528-64 64-64z" fill="#7C8EEE" p-id="7563"></path><path d="M702.2976 579.2896l-298.5664 177.984c-19.9488 12.0192-45.3312-2.4128-45.3312-25.856v-355.968c0-22.848 25.3824-37.2736 45.3312-25.856l298.56 177.984c19.3408 12.032 19.3408 40.288 0 51.712z" fill="#FFFFFF" p-id="7564"></path><path d="M672 0l256 256h-192c-35.3472 0-64-28.6528-64-64V0z" fill="#CAD1F8" p-id="7565"></path></svg>
+\ No newline at end of file
+diff --git a/packages/web/i18n/en/app.json b/packages/web/i18n/en/app.json
+index 13e74b501362..c6e73b352544 100644
+--- a/packages/web/i18n/en/app.json
++++ b/packages/web/i18n/en/app.json
+@@ -339,6 +339,13 @@
+   "un_auth": "No permission",
+   "upload_file_max_amount": "Maximum File Quantity",
+   "upload_file_max_amount_tip": "Maximum number of files uploaded in a single round of conversation",
++  "upload_file_extension_types": "Supported file types",
++  "upload_file_extension_type_canSelectFile": "Documents",
++  "upload_file_extension_type_canSelectImg": "Image",
++  "upload_file_extension_type_canSelectVideo": "Video",
++  "upload_file_extension_type_canSelectAudio": "Audio",
++  "upload_file_extension_type_canSelectCustomFileExtension": "Custom file extension type",
++  "upload_file_extension_type_canSelectCustomFileExtension_placeholder": "file extension name",
+   "variable.internal_type_desc": "Use only inside the workflow and will not appear in the dialog box",
+   "variable.select type_desc": "The input box will be displayed in the site conversation and run preview, and this variable will not be displayed in the sharing link.",
+   "variable.textarea_type_desc": "Allows users to input up to 4000 characters in the dialogue box.",
+diff --git a/packages/web/i18n/zh-CN/app.json b/packages/web/i18n/zh-CN/app.json
+index b41320f1e704..0abaa6e70797 100644
+--- a/packages/web/i18n/zh-CN/app.json
++++ b/packages/web/i18n/zh-CN/app.json
+@@ -356,6 +356,13 @@
+   "un_auth": "无权限",
+   "upload_file_max_amount": "最大文件数量",
+   "upload_file_max_amount_tip": "单轮对话中最大上传文件数量",
++  "upload_file_extension_types": "支持上传的类型",
++  "upload_file_extension_type_canSelectFile": "文档",
++  "upload_file_extension_type_canSelectImg": "图片",
++  "upload_file_extension_type_canSelectVideo": "视频",
++  "upload_file_extension_type_canSelectAudio": "音频",
++  "upload_file_extension_type_canSelectCustomFileExtension": "自定义文件扩展类型",
++  "upload_file_extension_type_canSelectCustomFileExtension_placeholder": "文件扩展名",
+   "variable.internal_type_desc": "仅在工作流内部使用，不会出现在对话框中",
+   "variable.select type_desc": "会在站内对话和运行预览中显示输入框，在分享链接中不会显示此变量",
+   "variable.textarea_type_desc": "允许用户最多输入4000字的对话框。",
+diff --git a/packages/web/i18n/zh-Hant/app.json b/packages/web/i18n/zh-Hant/app.json
+index a13316d8d062..5e8628a68a60 100644
+--- a/packages/web/i18n/zh-Hant/app.json
++++ b/packages/web/i18n/zh-Hant/app.json
+@@ -339,6 +339,13 @@
+   "un_auth": "無權限",
+   "upload_file_max_amount": "最大檔案數量",
+   "upload_file_max_amount_tip": "單輪對話中最大上傳檔案數量",
++  "upload_file_extension_types": "支持上傳的類型",
++  "upload_file_extension_type_canSelectFile": "文檔",
++  "upload_file_extension_type_canSelectImg": "圖片",
++  "upload_file_extension_type_canSelectVideo": "視頻",
++  "upload_file_extension_type_canSelectAudio": "音頻",
++  "upload_file_extension_type_canSelectCustomFileExtension": "自定義文件擴展類型",
++  "upload_file_extension_type_canSelectCustomFileExtension_placeholder": "文件擴展名",
+   "variable.internal_type_desc": "僅在工作流內部使用，不會出現在對話框中",
+   "variable.select type_desc": "會在站內對話和運行預覽中顯示輸入框，在分享鏈接中不會顯示此變量",
+   "variable.textarea_type_desc": "允許使用者最多輸入 4000 字的對話框。",
+diff --git a/projects/app/src/components/Select/FileSelector.tsx b/projects/app/src/components/Select/FileSelector.tsx
+index bf10bd09c7b7..17ca46210729 100644
+--- a/projects/app/src/components/Select/FileSelector.tsx
++++ b/projects/app/src/components/Select/FileSelector.tsx
+@@ -59,7 +59,10 @@ const FileSelector = ({
+     fileSelectConfig: {
+       canSelectFile,
+       canSelectImg,
+-      maxFiles
++      maxFiles,
++      canSelectVideo: false,
++      canSelectAudio: false,
++      canSelectCustomFileExtension: false
+     },
+     outLinkAuthData,
+     appId,
+diff --git a/projects/app/src/components/core/app/FileSelect.tsx b/projects/app/src/components/core/app/FileSelect.tsx
+index 6ba44f6b2f6a..18ca6c328adc 100644
+--- a/projects/app/src/components/core/app/FileSelect.tsx
++++ b/projects/app/src/components/core/app/FileSelect.tsx
+@@ -7,12 +7,13 @@ import {
+   ModalBody,
+   useDisclosure,
+   HStack,
+-  Switch,
+   ModalFooter,
+   type BoxProps,
+-  Checkbox
++  Checkbox,
++  VStack,
++  Input
+ } from '@chakra-ui/react';
+-import React, { useMemo } from 'react';
++import React, { useState } from 'react';
+ import { useTranslation } from 'next-i18next';
+ import type { AppFileSelectConfigType } from '@fastgpt/global/core/app/type.d';
+ import MyModal from '@fastgpt/web/components/common/MyModal';
+@@ -23,8 +24,13 @@ import { useMount } from 'ahooks';
+ import { useSystemStore } from '@/web/common/system/useSystemStore';
+ import QuestionTip from '@fastgpt/web/components/common/MyTooltip/QuestionTip';
+ import MyTag from '@fastgpt/web/components/common/Tag/index';
+-import MyDivider from '@fastgpt/web/components/common/MyDivider';
+-import { defaultAppSelectFileConfig } from '@fastgpt/global/core/app/constants';
++import type { FileExtensionKeyType } from '@fastgpt/global/core/app/constants';
++import {
++  defaultAppSelectFileConfig,
++  defaultFileExtensionTypes
++} from '@fastgpt/global/core/app/constants';
++import InputSlider from '@fastgpt/web/components/common/MySlider/InputSlider';
++import { shadowLight } from '@fastgpt/web/styles/theme';
+ 
+ const FileSelect = ({
+   forbidVision = false,
+@@ -41,13 +47,61 @@ const FileSelect = ({
+   const { isOpen, onOpen, onClose } = useDisclosure();
+   const maxSelectFiles = Math.min(feConfigs?.uploadFileMaxAmount ?? 20, 30);
+ 
+-  const formLabel = useMemo(
+-    () =>
+-      value.canSelectFile || value.canSelectImg
+-        ? t('common:core.app.whisper.Open')
+-        : t('common:core.app.whisper.Close'),
+-    [t, value.canSelectFile, value.canSelectImg]
+-  );
++  const [localValue, setLocalValue] = useState(value);
++  const [isAddingCustomFileExtension, setIsAddingCustomFileExtension] = useState(false);
++  const [customFileExtension, setCustomFileExtension] = useState('.');
++
++  const canUploadFile =
++    value.canSelectFile ||
++    value.canSelectImg ||
++    value.canSelectVideo ||
++    value.canSelectAudio ||
++    value.canSelectCustomFileExtension;
++  const formLabel = canUploadFile
++    ? t('common:core.app.whisper.Open')
++    : t('common:core.app.whisper.Close');
++
++  const handleCheckboxChange = (type: FileExtensionKeyType, checked: boolean) => {
++    if (type === 'canSelectFile') {
++      setLocalValue((state) => ({
++        ...state,
++        canSelectFile: checked
++      }));
++    } else if (type === 'canSelectImg') {
++      setLocalValue((state) => ({
++        ...state,
++        canSelectImg: checked
++      }));
++    } else if (type === 'canSelectVideo') {
++      setLocalValue((state) => ({
++        ...state,
++        canSelectVideo: checked
++      }));
++    } else if (type === 'canSelectAudio') {
++      setLocalValue((state) => ({
++        ...state,
++        canSelectAudio: checked
++      }));
++    } else if (type === 'canSelectCustomFileExtension') {
++      setLocalValue((state) => ({
++        ...state,
++        canSelectCustomFileExtension: checked
++      }));
++    }
++  };
++
++  const handleConfirmCustomFileExtension = () => {
++    const exists = localValue?.customFileExtensionList?.includes(customFileExtension);
++    if (customFileExtension !== '.' && !exists) {
++      setLocalValue((state) => ({
++        ...state,
++        customFileExtensionList: [...(state.customFileExtensionList || []), customFileExtension]
++      }));
++      handleCheckboxChange('canSelectCustomFileExtension', true);
++    }
++    setCustomFileExtension('.');
++    setIsAddingCustomFileExtension(false);
++  };
+ 
+   // Close select img switch when vision is forbidden
+   useMount(() => {
+@@ -74,7 +128,10 @@ const FileSelect = ({
+           size={'sm'}
+           mr={'-5px'}
+           color={'myGray.600'}
+-          onClick={onOpen}
++          onClick={() => {
++            setLocalValue(value);
++            onOpen();
++          }}
+         >
+           {formLabel}
+         </Button>
+@@ -84,110 +141,256 @@ const FileSelect = ({
+         title={t('app:file_upload')}
+         isOpen={isOpen}
+         onClose={onClose}
++        w={'500px'}
+       >
+         <ModalBody>
+-          <HStack>
+-            <FormLabel flex={'1 0 0'}>{t('app:document_upload')}</FormLabel>
+-            <Switch
+-              isChecked={value.canSelectFile}
+-              onChange={(e) => {
+-                onChange({
+-                  ...value,
+-                  canSelectFile: e.target.checked
+-                });
+-              }}
+-            />
+-          </HStack>
+-          {value.canSelectFile && feConfigs.showCustomPdfParse && (
+-            <>
+-              <HStack justifyContent={'end'} spacing={1} mt={2}>
+-                <Checkbox
+-                  isChecked={value.customPdfParse}
+-                  onChange={(e) => {
+-                    onChange({
+-                      ...value,
+-                      customPdfParse: e.target.checked
+-                    });
+-                  }}
+-                >
+-                  <FormLabel>{t('app:pdf_enhance_parse')}</FormLabel>
+-                </Checkbox>
+-                <QuestionTip label={t('app:pdf_enhance_parse_tips')} />
+-                {feConfigs?.show_pay && (
+-                  <MyTag
+-                    type={'borderSolid'}
+-                    borderColor={'myGray.200'}
+-                    bg={'myGray.100'}
+-                    color={'primary.600'}
+-                    py={1.5}
+-                    borderRadius={'md'}
+-                    px={3}
+-                    whiteSpace={'wrap'}
+-                    ml={1}
+-                  >
+-                    {t('app:pdf_enhance_parse_price', {
+-                      price: feConfigs.customPdfParsePrice || 0
+-                    })}
+-                  </MyTag>
+-                )}
+-              </HStack>
+-              <MyDivider my={2} />
+-            </>
+-          )}
+-          <HStack mt={6}>
+-            <FormLabel flex={'1 0 0'}>{t('app:image_upload')}</FormLabel>
+-            {forbidVision ? (
+-              <Box fontSize={'sm'} color={'myGray.500'}>
+-                {t('app:llm_not_support_vision')}
+-              </Box>
+-            ) : (
+-              <Switch
+-                isChecked={value.canSelectImg}
+-                onChange={(e) => {
+-                  onChange({
+-                    ...value,
+-                    canSelectImg: e.target.checked
+-                  });
+-                }}
+-              />
+-            )}
+-          </HStack>
+-          {!forbidVision && (
+-            <Flex mt={2} color={'myGray.500'}>
+-              <Box fontSize={'xs'}>{t('app:image_upload_tip')}</Box>
+-              <ChatFunctionTip type="visionModel" />
+-            </Flex>
+-          )}
+-
+-          <Box mt={6}>
++          <Box>
+             <HStack spacing={1}>
+               <FormLabel>{t('app:upload_file_max_amount')}</FormLabel>
+               <QuestionTip label={t('app:upload_file_max_amount_tip')} />
+             </HStack>
+ 
+-            <Box mt={5}>
+-              <MySlider
+-                markList={[
+-                  { label: '1', value: 1 },
+-                  { label: `${maxSelectFiles}`, value: maxSelectFiles }
+-                ]}
+-                width={'100%'}
++            <Box mt={2} alignItems={'center'} gap={5}>
++              <InputSlider
+                 min={1}
+                 max={maxSelectFiles}
+                 step={1}
+-                value={value.maxFiles ?? 5}
++                value={localValue.maxFiles ?? 5}
+                 onChange={(e) => {
+-                  onChange({
+-                    ...value,
++                  setLocalValue((state) => ({
++                    ...state,
+                     maxFiles: e
+-                  });
++                  }));
+                 }}
+               />
+             </Box>
+           </Box>
++
++          <VStack spacing={2} alignItems={'flex-start'} mt={6}>
++            <FormLabel>{t('app:upload_file_extension_types')}</FormLabel>
++
++            <VStack
++              w="full"
++              spacing={3}
++              alignItems={'flex-start'}
++              border="1px solid"
++              borderColor="myGray.200"
++              borderRadius="md"
++              p={4}
++            >
++              {Object.entries(defaultFileExtensionTypes).map(([type, exts]) =>
++                type === 'canSelectCustomFileExtension' ? (
++                  <VStack key={type} w="full" spacing={2} alignItems={'flex-start'}>
++                    <Checkbox
++                      w="full"
++                      alignItems={'flex-start'}
++                      cursor="pointer"
++                      isChecked={localValue.canSelectCustomFileExtension}
++                      onChange={(e) => {
++                        handleCheckboxChange('canSelectCustomFileExtension', e.target.checked);
++                      }}
++                    >
++                      <Box color={'myGray.900'} lineHeight={1} mb={2}>
++                        {t('app:upload_file_extension_type_canSelectCustomFileExtension')}
++                      </Box>
++                      <Flex
++                        gap={1}
++                        alignItems={'center'}
++                        flexWrap={'wrap'}
++                        fontSize={'xs'}
++                        color={'myGray.500'}
++                        whiteSpace={'wrap'}
++                        w="full"
++                      >
++                        {localValue.customFileExtensionList?.map((ext) => (
++                          <Box
++                            position={'relative'}
++                            key={ext}
++                            border="base"
++                            borderRadius={'sm'}
++                            color={'myGray.600'}
++                            userSelect="none"
++                            px={1}
++                            py={0.5}
++                            fontSize={'xs'}
++                            minW={'50px'}
++                            h={'22px'}
++                            textAlign={'center'}
++                          >
++                            <Box>{ext}</Box>
++                            <Flex
++                              position="absolute"
++                              top={0}
++                              left={0}
++                              right={0}
++                              bottom={0}
++                              alignItems="center"
++                              justifyContent="center"
++                              bg="rgba(255, 255, 255, 0.85)"
++                              borderRadius={'sm'}
++                              opacity={0}
++                              cursor="pointer"
++                              transition="opacity 0.2s"
++                              _hover={{
++                                opacity: 1
++                              }}
++                              onClick={(e) => {
++                                e.stopPropagation();
++                                e.preventDefault();
++                                setLocalValue((state) => ({
++                                  ...state,
++                                  customFileExtensionList: (
++                                    state.customFileExtensionList || []
++                                  ).filter((prev) => prev !== ext)
++                                }));
++                              }}
++                            >
++                              <MyIcon
++                                name={'delete'}
++                                w={'14px'}
++                                h={'14px'}
++                                color={'red.600'}
++                                _hover={{
++                                  color: 'red.700'
++                                }}
++                              />
++                            </Flex>
++                          </Box>
++                        ))}
++
++                        <Flex
++                          gap={1}
++                          alignItems={'center'}
++                          border="base"
++                          borderRadius={'sm'}
++                          cursor="pointer"
++                          color={'myGray.600'}
++                          _hover={{
++                            color: 'primary.600',
++                            borderColor: 'primary.600'
++                          }}
++                          _focusWithin={{
++                            borderColor: 'primary.600',
++                            boxShadow: shadowLight
++                          }}
++                          userSelect="none"
++                          px={1}
++                          py={0.5}
++                          h={'22px'}
++                          onClick={(e) => {
++                            e.stopPropagation();
++                            e.preventDefault();
++                            setIsAddingCustomFileExtension(true);
++                          }}
++                        >
++                          {isAddingCustomFileExtension ? (
++                            <Input
++                              variant={'unstyled'}
++                              value={customFileExtension}
++                              autoFocus
++                              fontSize={'xs'}
++                              w={'50px'}
++                              maxLength={7}
++                              onChange={(e) =>
++                                setCustomFileExtension(
++                                  `.${e.target.value.replace(/^\./, '').trim()}`
++                                )
++                              }
++                              onBlur={handleConfirmCustomFileExtension}
++                              onKeyDown={(e) => {
++                                if (e.key.toLowerCase() !== 'enter') return;
++                                handleConfirmCustomFileExtension();
++                              }}
++                            />
++                          ) : (
++                            <Flex gap={1} alignItems={'center'} h={'22px'}>
++                              <MyIcon name={'common/add2'} w={'12px'} h={'12px'} />
++                              <Box fontSize={'xs'}>
++                                {t(
++                                  'app:upload_file_extension_type_canSelectCustomFileExtension_placeholder'
++                                )}
++                              </Box>
++                            </Flex>
++                          )}
++                        </Flex>
++                      </Flex>
++                    </Checkbox>
++                  </VStack>
++                ) : (
++                  <VStack key={type} w="full" spacing={2} alignItems={'flex-start'}>
++                    <Checkbox
++                      w="full"
++                      alignItems={'flex-start'}
++                      borderBottom="1px solid"
++                      borderColor="myGray.200"
++                      pb={3}
++                      cursor="pointer"
++                      isChecked={localValue[type as FileExtensionKeyType]}
++                      onChange={(e) =>
++                        handleCheckboxChange(type as FileExtensionKeyType, e.target.checked)
++                      }
++                    >
++                      <Box color={'myGray.900'} lineHeight={1}>
++                        {t(`app:upload_file_extension_type_${type}`)}
++                      </Box>
++                      <Box
++                        mt={1}
++                        fontSize={'xs'}
++                        color={'myGray.500'}
++                        wordBreak={'break-word'}
++                        w="full"
++                      >
++                        {exts.map((ext) => ext.slice(1)).join('/')}
++                      </Box>
++                    </Checkbox>
++                  </VStack>
++                )
++              )}
++            </VStack>
++          </VStack>
++
++          {localValue.canSelectFile && feConfigs?.showCustomPdfParse && (
++            <HStack justifyContent={'flex-start'} spacing={1} mt={2}>
++              <Checkbox
++                isChecked={localValue.customPdfParse}
++                onChange={(e) => {
++                  setLocalValue((state) => ({
++                    ...state,
++                    customPdfParse: e.target.checked
++                  }));
++                }}
++              >
++                <FormLabel>{t('app:pdf_enhance_parse')}</FormLabel>
++              </Checkbox>
++              <QuestionTip label={t('app:pdf_enhance_parse_tips')} />
++              {feConfigs?.show_pay && (
++                <MyTag
++                  type={'borderSolid'}
++                  borderColor={'myGray.200'}
++                  bg={'myGray.100'}
++                  color={'primary.600'}
++                  py={1.5}
++                  borderRadius={'md'}
++                  px={3}
++                  whiteSpace={'wrap'}
++                  ml={1}
++                >
++                  {t('app:pdf_enhance_parse_price', {
++                    price: feConfigs.customPdfParsePrice || 0
++                  })}
++                </MyTag>
++              )}
++            </HStack>
++          )}
+         </ModalBody>
+         <ModalFooter>
+-          <Button onClick={onClose} px={8}>
++          <Button
++            onClick={() => {
++              onChange(localValue);
++              onClose();
++            }}
++            px={8}
++          >
+             {t('common:Confirm')}
+           </Button>
+         </ModalFooter>
+diff --git a/projects/app/src/components/core/chat/ChatContainer/ChatBox/Input/ChatInput.tsx b/projects/app/src/components/core/chat/ChatContainer/ChatBox/Input/ChatInput.tsx
+index 0e87d496d280..3fa6508d889b 100644
+--- a/projects/app/src/components/core/chat/ChatContainer/ChatBox/Input/ChatInput.tsx
++++ b/projects/app/src/components/core/chat/ChatContainer/ChatBox/Input/ChatInput.tsx
+@@ -80,6 +80,9 @@ const ChatInput = ({
+     selectFileLabel,
+     showSelectFile,
+     showSelectImg,
++    showSelectVideo,
++    showSelectAudio,
++    showSelectCustomFileExtension,
+     removeFiles,
+     replaceFiles,
+     hasFileUploading
+@@ -92,6 +95,12 @@ const ChatInput = ({
+   });
+   const havInput = !!inputValue || fileList.length > 0;
+   const canSendMessage = havInput && !hasFileUploading;
++  const canUploadFile =
++    showSelectFile ||
++    showSelectImg ||
++    showSelectVideo ||
++    showSelectAudio ||
++    showSelectCustomFileExtension;
+ 
+   // Upload files
+   useRequest2(uploadFiles, {
+@@ -201,7 +210,7 @@ const ChatInput = ({
+             }}
+             onPaste={(e) => {
+               const clipboardData = e.clipboardData;
+-              if (clipboardData && (showSelectFile || showSelectImg)) {
++              if (clipboardData && canUploadFile) {
+                 const items = clipboardData.items;
+                 const files = Array.from(items)
+                   .map((item) => (item.kind === 'file' ? item.getAsFile() : undefined))
+@@ -233,8 +242,7 @@ const ChatInput = ({
+       offFocus,
+       setValue,
+       handleSend,
+-      showSelectFile,
+-      showSelectImg,
++      canUploadFile,
+       onSelectFile
+     ]
+   );
+@@ -266,7 +274,7 @@ const ChatInput = ({
+           {/* Attachment and Voice Group */}
+           <Flex alignItems={'center'} h={[8, 9]}>
+             {/* file selector button */}
+-            {(showSelectFile || showSelectImg) && (
++            {canUploadFile && (
+               <Flex
+                 alignItems={'center'}
+                 justifyContent={'center'}
+@@ -312,7 +320,7 @@ const ChatInput = ({
+           </Flex>
+ 
+           {/* Divider Container */}
+-          {((whisperConfig?.open && !inputValue) || showSelectFile || showSelectImg) && (
++          {((whisperConfig?.open && !inputValue) || canUploadFile) && (
+             <Flex alignItems={'center'} justifyContent={'center'} w={2} h={4} mr={2}>
+               <Box w={'2px'} h={5} bg={'myGray.200'} />
+             </Flex>
+@@ -353,8 +361,8 @@ const ChatInput = ({
+     );
+   }, [
+     isPc,
+-    showSelectFile,
+-    showSelectImg,
++    InputLeftComponent,
++    canUploadFile,
+     selectFileLabel,
+     selectFileIcon,
+     File,
+@@ -366,8 +374,7 @@ const ChatInput = ({
+     onOpenSelectFile,
+     onSelectFile,
+     handleSend,
+-    onStop,
+-    InputLeftComponent
++    onStop
+   ]);
+ 
+   const activeStyles: FlexProps = {
+@@ -381,7 +388,7 @@ const ChatInput = ({
+       onDrop={(e) => {
+         e.preventDefault();
+ 
+-        if (!(showSelectFile || showSelectImg)) return;
++        if (!canUploadFile) return;
+         const files = Array.from(e.dataTransfer.files);
+ 
+         const droppedFiles = files.filter((file) => fileTypeFilter(file));
+diff --git a/projects/app/src/components/core/chat/ChatContainer/ChatBox/hooks/useFileUpload.tsx b/projects/app/src/components/core/chat/ChatContainer/ChatBox/hooks/useFileUpload.tsx
+index 1a6bc79e0521..d4931e1309c3 100644
+--- a/projects/app/src/components/core/chat/ChatContainer/ChatBox/hooks/useFileUpload.tsx
++++ b/projects/app/src/components/core/chat/ChatContainer/ChatBox/hooks/useFileUpload.tsx
+@@ -11,11 +11,11 @@ import { getErrText } from '@fastgpt/global/common/error/utils';
+ import { type UseFieldArrayReturn } from 'react-hook-form';
+ import { type ChatBoxInputFormType, type UserInputFileItemType } from '../type';
+ import { type AppFileSelectConfigType } from '@fastgpt/global/core/app/type';
+-import { documentFileType } from '@fastgpt/global/common/file/constants';
+ import { useSystemStore } from '@/web/common/system/useSystemStore';
+ import { type OutLinkChatAuthProps } from '@fastgpt/global/support/permission/chat';
+ import { getPresignedChatFileGetUrl, getUploadChatFilePresignedUrl } from '@/web/common/file/api';
+ import { POST } from '@/web/common/api/request';
++import { defaultFileExtensionTypes } from '@fastgpt/global/core/app/constants';
+ 
+ type UseFileUploadOptions = {
+   fileSelectConfig: AppFileSelectConfigType;
+@@ -43,32 +43,58 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
+ 
+   const showSelectFile = fileSelectConfig?.canSelectFile;
+   const showSelectImg = fileSelectConfig?.canSelectImg;
++  const showSelectVideo = fileSelectConfig?.canSelectVideo;
++  const showSelectAudio = fileSelectConfig?.canSelectAudio;
++  const showSelectCustomFileExtension = fileSelectConfig?.canSelectCustomFileExtension;
++  const canUploadFile =
++    showSelectFile ||
++    showSelectImg ||
++    showSelectVideo ||
++    showSelectAudio ||
++    showSelectCustomFileExtension;
+   const maxSelectFiles = fileSelectConfig?.maxFiles ?? 10;
+   const maxSize = (feConfigs?.uploadFileMaxSize || 1024) * 1024 * 1024; // nkb
+   const canSelectFileAmount = maxSelectFiles - fileList.length;
+ 
+   const { icon: selectFileIcon, label: selectFileLabel } = useMemo(() => {
+-    if (showSelectFile && showSelectImg) {
+-      return {
+-        icon: 'core/chat/fileSelect',
+-        label: t('chat:select_file_img')
+-      };
+-    } else if (showSelectFile) {
++    if (canUploadFile) {
+       return {
+         icon: 'core/chat/fileSelect',
+         label: t('chat:select_file')
+       };
+-    } else if (showSelectImg) {
+-      return {
+-        icon: 'core/chat/imgSelect',
+-        label: t('chat:select_img')
+-      };
+     }
+     return {};
+-  }, [showSelectFile, showSelectImg, t]);
++  }, [canUploadFile, t]);
++
++  const fileType = useMemo(() => {
++    const types: string[] = [];
++    if (showSelectFile) {
++      types.push(...defaultFileExtensionTypes.canSelectFile);
++    }
++    if (showSelectImg) {
++      types.push(...defaultFileExtensionTypes.canSelectImg);
++    }
++    if (showSelectVideo) {
++      types.push(...defaultFileExtensionTypes.canSelectVideo);
++    }
++    if (showSelectAudio) {
++      types.push(...defaultFileExtensionTypes.canSelectAudio);
++    }
++    if (showSelectCustomFileExtension) {
++      types.push(...(fileSelectConfig.customFileExtensionList || []));
++    }
++    return types.join(', ');
++  }, [
++    showSelectFile,
++    showSelectImg,
++    showSelectVideo,
++    showSelectAudio,
++    showSelectCustomFileExtension,
++    fileSelectConfig?.customFileExtensionList
++  ]);
+ 
+   const { File, onOpen: onOpenSelectFile } = useSelectFile({
+-    fileType: `${showSelectImg ? 'image/*,' : ''} ${showSelectFile ? documentFileType : ''}`,
++    fileType,
+     multiple: true,
+     maxCount: canSelectFileAmount
+   });
+@@ -228,6 +254,9 @@ export const useFileUpload = (props: UseFileUploadOptions) => {
+     selectFileLabel,
+     showSelectFile,
+     showSelectImg,
++    showSelectVideo,
++    showSelectAudio,
++    showSelectCustomFileExtension,
+     removeFiles,
+     replaceFiles,
+     hasFileUploading
+diff --git a/projects/app/src/pageComponents/chat/ChatWindow/HomeChatWindow.tsx b/projects/app/src/pageComponents/chat/ChatWindow/HomeChatWindow.tsx
+index abbd5c71e529..f4d9179f6c44 100644
+--- a/projects/app/src/pageComponents/chat/ChatWindow/HomeChatWindow.tsx
++++ b/projects/app/src/pageComponents/chat/ChatWindow/HomeChatWindow.tsx
+@@ -55,8 +55,11 @@ type Props = {
+ 
+ const defaultFileSelectConfig: AppFileSelectConfigType = {
+   maxFiles: 20,
++  canSelectFile: true,
+   canSelectImg: false,
+-  canSelectFile: true
++  canSelectVideo: false,
++  canSelectAudio: false,
++  canSelectCustomFileExtension: false
+ };
+ 
+ const defaultWhisperConfig: AppWhisperConfigType = {

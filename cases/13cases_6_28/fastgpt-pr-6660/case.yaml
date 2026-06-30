@@ -1,0 +1,26 @@
+id: fastgpt-pr-6660
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "154107557f0002e6a7df94b6b04fd275d5fafb0d"
+  pr_number: 6660
+  pr_url: https://github.com/labring/FastGPT/pull/6660
+  pr_title_raw: "feat: add skill version update and switch"
+  summary_source: pr_body_summary_section
+  summary_raw_markdown: |
+    - Add `POST /core/agentSkills/version/update` to rename a skill version (`versionName`)
+    - Add `POST /core/agentSkills/version/switch` to set a specific version as active; uses a MongoDB transaction to atomically deactivate all other versions before activating the target
+    - Define `UpdateSkillVersionBody/Response` and `SwitchSkillVersionBody/Response` Zod schemas in `packages/global/openapi/core/agentSkills/api.ts`
+    - Register both routes in `AgentSkillsPath` OpenAPI spec (`packages/global/openapi/core/agentSkills/index.ts`)
+
+validation:
+  head_commit: "55f0088c82f6ba4c2835500a460547642f85f650"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-6660.patch"
+  patch_sha256: "90a1ad1aa3859dae596f63038c38593bc3365a41344e765c7852ec8bf3265296"
+  changed_files_file: "patches/fastgpt-pr-6660.changed_files.txt"
+  manual_functionality_description: |
+    Pending manual functionality description for this TypeScript-size candidate batch.

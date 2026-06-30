@@ -1,0 +1,69 @@
+﻿{
+    "case_id":  "fastgpt-pr-6594",
+    "pr_number":  6594,
+    "title":  "feat: Add limits for active sandbox instances",
+    "base_commit":  "ec37b831d3e4c1b0a6ce62c10746b917a2488226",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false,
+    "source_batch":  "typescript_similar_cases_2026-06-28",
+    "head_commit":  "b37f0b983a3ce0e52da15c9331765d01343a5b24",
+    "patch_sha256":  "17ec701cc50804b9f416ba251af8612b4668712dad1321c9dfdd78e6a31bd353",
+    "changed_file_count":  5,
+    "known_problem":  "Generic final evaluator image for repository-wide env/build/test/docker feedback. Hidden functional tests are not included.",
+    "commands":  [
+                     {
+                         "name":  "toolchain",
+                         "phase":  "env",
+                         "cwd":  ".",
+                         "shell":  "node --version \u0026\u0026 npm --version \u0026\u0026 pnpm --version \u0026\u0026 git --version \u0026\u0026 rg --version | head -1",
+                         "timeout_seconds":  120,
+                         "required":  true,
+                         "reason":  "Verify evaluator toolchain."
+                     },
+                     {
+                         "name":  "install_dependencies",
+                         "phase":  "env",
+                         "cwd":  ".",
+                         "shell":  "bash /opt/repoaces-pr/install-fastgpt-deps.sh",
+                         "timeout_seconds":  1800,
+                         "required":  true,
+                         "reason":  "Install dependencies after applying candidate patch; falls back for old outdated lockfiles and restores pnpm-lock.yaml."
+                     },
+                     {
+                         "name":  "git_diff_check",
+                         "phase":  "env",
+                         "cwd":  ".",
+                         "shell":  "git diff --check",
+                         "timeout_seconds":  300,
+                         "required":  true,
+                         "reason":  "Check candidate patch whitespace and formatting."
+                     },
+                     {
+                         "name":  "root_build",
+                         "phase":  "build",
+                         "cwd":  ".",
+                         "shell":  "pnpm build",
+                         "timeout_seconds":  3600,
+                         "required":  true,
+                         "reason":  "Repository-wide build gate for final evaluation."
+                     },
+                     {
+                         "name":  "root_test",
+                         "phase":  "test",
+                         "cwd":  ".",
+                         "shell":  "pnpm test",
+                         "timeout_seconds":  3600,
+                         "required":  false,
+                         "reason":  "Repository-wide test feedback; kept non-required because historical FastGPT root tests can be slow/noisy on some base commits."
+                     },
+                     {
+                         "name":  "compose_config",
+                         "phase":  "docker",
+                         "cwd":  ".",
+                         "shell":  "bash /opt/repoaces-pr/docker-compose-config.sh",
+                         "timeout_seconds":  900,
+                         "required":  false,
+                         "reason":  "Validate common real FastGPT docker compose files when present."
+                     }
+                 ]
+}

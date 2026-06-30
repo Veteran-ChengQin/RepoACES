@@ -1,0 +1,25 @@
+id: fastgpt-pr-6257
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "d4f8c9e29214e7f20c3a9d484e49699500c5ca4f"
+  pr_number: 6257
+  pr_url: https://github.com/labring/FastGPT/pull/6257
+  pr_title_raw: "feat: system tool config tags"
+  summary_source: generated_from_pr_patch
+  summary_raw_markdown: |
+    - Add tag configuration support for system tools in the admin tool configuration modal.
+    - Persist selected system tool tags through customConfig and return configured tags from tool detail/template APIs.
+    - Limit selected tags in the UI and reuse the existing plugin tool tag list for system tool tag selection.
+
+validation:
+  head_commit: "d659a0bced85483d3d301ff93629cffc02d08587"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-6257.patch"
+  patch_sha256: "5b50488c35ca6d7a14c60597448551834a25e53820f0b8426434e51f14e6a14b"
+  changed_files_file: "patches/fastgpt-pr-6257.changed_files.txt"
+  manual_functionality_description: |
+    Pending manual functionality description for this TypeScript-size candidate batch.

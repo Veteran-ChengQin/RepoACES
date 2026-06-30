@@ -1,0 +1,25 @@
+id: fastgpt-pr-5661
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "b6224a2f2aed8fb48921336f821665d503a4b82e"
+  pr_number: 5661
+  pr_url: https://github.com/labring/FastGPT/pull/5661
+  pr_title_raw: "feat: dataset parse queue"
+  summary_source: generated_from_pr_patch
+  summary_raw_markdown: |
+    - Add a dataset parse queue with a configurable maximum number of concurrent parse tasks.
+    - Move dataset source reading, paragraphing, chunking, limit checks, and training queue enqueueing into queued parse processing.
+    - Add APIs and UI data for training detail and parse queue length so dataset pages can show parsing progress and queue state.
+
+validation:
+  head_commit: "21934549b98317871f8bd86c543eedc2b5dbc2a9"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-5661.patch"
+  patch_sha256: "cf2c0c424c5b12ecf0514fa04650b76fb60b3c757ac613551e970b22930986d0"
+  changed_files_file: "patches/fastgpt-pr-5661.changed_files.txt"
+  manual_functionality_description: |
+    Pending manual functionality description for this TypeScript-size candidate batch.

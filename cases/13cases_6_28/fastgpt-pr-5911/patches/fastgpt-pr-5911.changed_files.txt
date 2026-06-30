@@ -1,0 +1,8 @@
+M	packages/web/components/common/Textarea/PromptEditor/plugins/SkillPickerPlugin/index.tsx
+M	packages/web/i18n/en/app.json
+M	packages/web/i18n/zh-CN/app.json
+M	packages/web/i18n/zh-Hant/app.json
+M	projects/app/src/pageComponents/app/detail/Edit/Agent/hooks/useSkillManager.tsx
+M	projects/app/src/pageComponents/dashboard/agent/TypeTag.tsx
+M	projects/app/src/pageComponents/dashboard/agent/context.tsx
+M	projects/app/src/web/core/app/api/tool.ts

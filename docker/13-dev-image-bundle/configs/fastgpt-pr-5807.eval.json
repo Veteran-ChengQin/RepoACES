@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-5807",
+    "pr_number":  "5807",
+    "title":  "feat: add more file type for uploading",
+    "base_commit":  "e84ec1c48c5308ad9df629d5468141c0502ea4c0",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

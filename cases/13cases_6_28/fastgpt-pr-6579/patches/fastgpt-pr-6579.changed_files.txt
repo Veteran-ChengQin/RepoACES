@@ -1,0 +1,10 @@
+M	packages/global/core/chat/helperBot/topAgent/type.ts
+M	packages/service/core/chat/HelperBot/dispatch/topAgent/index.ts
+M	packages/service/core/chat/HelperBot/dispatch/topAgent/prompt.ts
+M	packages/service/core/chat/HelperBot/dispatch/topAgent/type.ts
+M	packages/service/core/chat/HelperBot/dispatch/topAgent/utils.ts
+M	packages/web/components/common/Textarea/PromptEditor/Editor.tsx
+M	projects/app/src/components/core/chat/HelperBot/context.tsx
+M	projects/app/src/pageComponents/app/detail/Edit/ChatAgent/ChatTest.tsx
+M	projects/app/src/pageComponents/app/detail/Edit/ChatAgent/EditForm.tsx
+M	projects/app/src/pageComponents/app/detail/Edit/ChatAgent/hooks/useSkillManager.tsx

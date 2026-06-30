@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-6257",
+    "pr_number":  "6257",
+    "title":  "feat: system tool config tags",
+    "base_commit":  "d4f8c9e29214e7f20c3a9d484e49699500c5ca4f",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}

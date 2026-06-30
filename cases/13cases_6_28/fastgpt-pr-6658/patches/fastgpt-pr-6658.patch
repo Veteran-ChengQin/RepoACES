@@ -1,0 +1,1196 @@
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 155703daa4a1..6508aeaf2105 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -707,6 +707,9 @@ importers:
+       framer-motion:
+         specifier: 9.1.7
+         version: 9.1.7(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
++      http-proxy:
++        specifier: ^1.18.1
++        version: 1.18.1
+       hyperdown:
+         specifier: ^2.4.29
+         version: 2.4.29
+@@ -831,6 +834,9 @@ importers:
+       '@types/archiver':
+         specifier: ^6.0.2
+         version: 6.0.4
++      '@types/http-proxy':
++        specifier: ^1.17.15
++        version: 1.17.17
+       '@types/js-yaml':
+         specifier: ^4.0.9
+         version: 4.0.9
+@@ -4864,6 +4870,9 @@ packages:
+   '@types/http-errors@2.0.4':
+     resolution: {integrity: sha512-D0CFMMtydbJAegzOyHjtiKPLlvnm3iTZyZRSZoLq2mRhDdmLfIWOCYPfQJ4cu2erKghU++QvjcUjp/5h7hESpA==}
+ 
++  '@types/http-proxy@1.17.17':
++    resolution: {integrity: sha512-ED6LB+Z1AVylNTu7hdzuBqOgMnvG/ld6wGCG8wFnAzKX5uyW2K3WD52v0gnLCTK/VLpXtKckgWuyScYK6cSPaw==}
++
+   '@types/js-cookie@3.0.6':
+     resolution: {integrity: sha512-wkw9yd1kEXOPnvEeEV1Go1MmxtBJL0RR79aOTAApecWFVu7w0NNXNqhcWgvw2YgZDYadliXkl14pa3WXw5jlCQ==}
+ 
+@@ -7579,6 +7588,10 @@ packages:
+     resolution: {integrity: sha512-T1gkAiYYDWYx3V5Bmyu7HcfcvL7mUrTWiM6yOfa3PIphViJ/gFPbvidQ+veqSOHci/PxBcDabeUNCzpOODJZig==}
+     engines: {node: '>= 14'}
+ 
++  http-proxy@1.18.1:
++    resolution: {integrity: sha512-7mz/721AbnJwIVbnaSv1Cz3Am0ZLT/UBwkC92VlxhXv/k/BBQfM2fXElQNC27BVGr0uwUpplYPQM9LnaBMR5NQ==}
++    engines: {node: '>=8.0.0'}
++
+   http-signature@1.2.0:
+     resolution: {integrity: sha512-CAbnr6Rz4CYQkLYUtSNXxQPUH2gK8f3iWexVlsnMeD+GjlsQ0Xsy1cOX+mN3dtxYomRy21CiOzU8Uhw6OwncEQ==}
+     engines: {node: '>=0.8', npm: '>=1.3.7'}
+@@ -10053,6 +10066,9 @@ packages:
+   require-main-filename@2.0.0:
+     resolution: {integrity: sha512-NKN5kMDylKuldxYLSUfrbo5Tuzh4hd+2E8NPPX02mZtn1VuREQToYe/ZdlJy+J3uCpfaiGF05e7B8W0iXbQHmg==}
+ 
++  requires-port@1.0.0:
++    resolution: {integrity: sha512-KigOCHcocU3XODJxsu8i/j8T9tzT4adHiecwORRQ0ZZFcp7ahwXuRU1m+yuO90C5ZUyGeGfocHDI14M3L3yDAQ==}
++
+   resize-observer-polyfill@1.5.1:
+     resolution: {integrity: sha512-LwZrotdHOo12nQuZlHEmtuXdqGoOD0OhaxopaNFxWzInpEgaLWoVuAMbTzixuosCx2nEG58ngzW3vxdWoxIgdg==}
+ 
+@@ -16211,6 +16227,10 @@ snapshots:
+ 
+   '@types/http-errors@2.0.4': {}
+ 
++  '@types/http-proxy@1.17.17':
++    dependencies:
++      '@types/node': 20.17.24
++
+   '@types/js-cookie@3.0.6': {}
+ 
+   '@types/js-yaml@4.0.9': {}
+@@ -19671,6 +19691,14 @@ snapshots:
+     transitivePeerDependencies:
+       - supports-color
+ 
++  http-proxy@1.18.1:
++    dependencies:
++      eventemitter3: 4.0.7
++      follow-redirects: 1.15.11(debug@4.4.0)
++      requires-port: 1.0.0
++    transitivePeerDependencies:
++      - debug
++
+   http-signature@1.2.0:
+     dependencies:
+       assert-plus: 1.0.0
+@@ -22647,6 +22675,8 @@ snapshots:
+ 
+   require-main-filename@2.0.0: {}
+ 
++  requires-port@1.0.0: {}
++
+   resize-observer-polyfill@1.5.1: {}
+ 
+   resolve-alpn@1.2.1: {}
+diff --git a/projects/app/next.config.ts b/projects/app/next.config.ts
+index fdd1f449d8ad..082a68d35fa0 100644
+--- a/projects/app/next.config.ts
++++ b/projects/app/next.config.ts
+@@ -21,7 +21,7 @@ const nextConfig: NextConfig = {
+   async headers() {
+     return [
+       {
+-        source: '/((?!chat/share$).*)',
++        source: '/((?!chat\\/share$)(?!proxy\\/)(?!absproxy\\/).*)',
+         headers: [
+           {
+             key: 'X-Frame-Options',
+diff --git a/projects/app/package.json b/projects/app/package.json
+index f6eb287aa06e..e0bcfcf83824 100644
+--- a/projects/app/package.json
++++ b/projects/app/package.json
+@@ -3,9 +3,9 @@
+   "version": "4.14.9",
+   "private": false,
+   "scripts": {
+-    "dev": "NODE_OPTIONS='--max-old-space-size=8192' npm run build:workers && next dev",
++    "dev": "NODE_OPTIONS='--max-old-space-size=8192' npm run build:workers && tsx server.ts",
+     "build": "npm run build:workers && next build --debug --webpack",
+-    "start": "next start",
++    "start": "NODE_ENV=production tsx server.ts",
+     "build:workers": "npx tsx scripts/build-workers.ts",
+     "typecheck": "tsc --noEmit --pretty",
+     "build:workers:watch": "npx tsx scripts/build-workers.ts --watch"
+@@ -78,11 +78,13 @@
+     "remark-math": "^6.0.0",
+     "request-ip": "^3.3.0",
+     "sass": "^1.58.3",
++    "http-proxy": "^1.18.1",
+     "undici": "^7.18.2",
+     "use-context-selector": "^1.4.4",
+     "zod": "catalog:"
+   },
+   "devDependencies": {
++    "@types/http-proxy": "^1.17.15",
+     "@next/bundle-analyzer": "16.1.6",
+     "@svgr/webpack": "^6.5.1",
+     "@types/archiver": "^6.0.2",
+diff --git a/projects/app/server.ts b/projects/app/server.ts
+new file mode 100644
+index 000000000000..e42643bcbf51
+--- /dev/null
++++ b/projects/app/server.ts
+@@ -0,0 +1,519 @@
++import type { IncomingMessage } from 'http';
++import { createServer, ServerResponse } from 'http';
++import { parse } from 'url';
++import next from 'next';
++import httpProxy from 'http-proxy';
++import { Readable } from 'stream';
++import net from 'net';
++import crypto from 'crypto';
++
++const dev = process.env.NODE_ENV !== 'production';
++const port = parseInt(process.env.PORT || '3000', 10);
++
++// sandboxId: alphanumeric + hyphens, 8–64 chars, must start/end with alnum.
++// Explicitly excludes '.', '/', '%', '..', and other path-traversal characters.
++const SANDBOX_ID_RE = /[a-zA-Z0-9][a-zA-Z0-9-]{6,62}[a-zA-Z0-9]/;
++
++// Match /proxy/{sandboxId}/{port} or /absproxy/{sandboxId}/{port}
++const PATH_PROXY_RE = new RegExp(`^\\/(proxy|absproxy)\\/(${SANDBOX_ID_RE.source})\\/(\\d+)`);
++
++// Match /tcptunnel/{sandboxId}/{port} — WebSocket upgrade only
++const TCPTUNNEL_RE = new RegExp(`^\\/tcptunnel\\/(${SANDBOX_ID_RE.source})\\/(\\d+)`);
++
++// Strip subdomain prefix from a host string (may include :port).
++// "port--uuid.localhost:3000" → "localhost:3000"
++function deriveBaseHost(subdomainHost: string): string {
++  const dotIdx = subdomainHost.indexOf('.');
++  return dotIdx >= 0 ? subdomainHost.substring(dotIdx + 1) : subdomainHost;
++}
++
++async function main() {
++  const app = next({ dev });
++  const handle = app.getRequestHandler();
++  await app.prepare();
++
++  // Import pure utilities from sandboxProxyUtils — no service-layer deps, safe in tsx CJS mode.
++  // getSandboxProxyTarget is NOT imported here; auth is delegated to the proxyAuth API route.
++  const { parseSubdomainProxy, rewriteHtml, redeemRelayToken } = (await import(
++    './src/service/sandboxProxyUtils'
++  )) as typeof import('./src/service/sandboxProxyUtils');
++
++  const proxy = httpProxy.createProxyServer({ xfwd: true, changeOrigin: true });
++  proxy.on(
++    'error',
++    (err: Error, _req: IncomingMessage, res: ServerResponse | import('stream').Duplex) => {
++      if (res instanceof ServerResponse && !res.headersSent) {
++        res.writeHead(502, { 'Content-Type': 'text/plain' });
++        res.end(`Proxy error: ${err.message}`);
++      }
++    }
++  );
++
++  // absproxy: fetch upstream then rewrite HTML paths with base prefix
++  async function handleAbsProxy(
++    req: IncomingMessage,
++    res: ServerResponse,
++    target: string,
++    sandboxId: string,
++    targetPort: string
++  ) {
++    const upstreamUrl = `${target}${req.url || '/'}`;
++    const response = await fetch(upstreamUrl, {
++      method: req.method,
++      headers: buildProxyHeaders(req.headers),
++      // @ts-ignore — Node 18+ supports duplex on fetch body streams
++      duplex: 'half',
++      body: req.method !== 'GET' && req.method !== 'HEAD' ? (req as any) : undefined
++    });
++
++    const skipHeaders = new Set([
++      'content-encoding',
++      'transfer-encoding',
++      'x-frame-options',
++      'content-security-policy'
++    ]);
++    response.headers.forEach((value, key) => {
++      if (!skipHeaders.has(key.toLowerCase())) res.setHeader(key, value);
++    });
++    res.statusCode = response.status;
++
++    const contentType = response.headers.get('content-type') || '';
++    const contentLength = Number(response.headers.get('content-length') || 0);
++
++    // Only rewrite HTML; stream large or binary responses directly
++    if (contentType.includes('text/html') && response.body && contentLength < 10 * 1024 * 1024) {
++      const html = await response.text();
++      const basePath = `/absproxy/${sandboxId}/${targetPort}`;
++      const rewritten = rewriteHtml(html, basePath);
++      res.setHeader('content-length', Buffer.byteLength(rewritten));
++      res.end(rewritten);
++    } else if (response.body) {
++      Readable.fromWeb(response.body as any).pipe(res);
++    } else {
++      res.end();
++    }
++  }
++
++  async function handleProxy(
++    req: IncomingMessage,
++    res: ServerResponse,
++    sandboxId: string,
++    portNum: number,
++    proxyType: string
++  ) {
++    try {
++      const target = await authProxyTarget(req.headers, sandboxId, portNum);
++      if (proxyType === 'absproxy') {
++        await handleAbsProxy(req, res, target, sandboxId, String(portNum));
++      } else {
++        // Rewrite Origin so code-server's CSRF check passes (changeOrigin only rewrites Host).
++        const targetUrl = new URL(target);
++        proxy.web(req, res, {
++          target,
++          headers: { origin: `${targetUrl.protocol}//${targetUrl.host}` }
++        });
++      }
++    } catch (err: any) {
++      const status = err.statusCode || 502;
++      if (!res.headersSent) {
++        res.writeHead(status, { 'Content-Type': 'text/plain' });
++        res.end(err.message || 'Proxy error');
++      }
++    }
++  }
++
++  // Subdomain proxy handler: on auth failure (401/403) redirect to proxyAuth for cross-domain cookie hand-off.
++  async function handleSubdomainProxy(
++    req: IncomingMessage,
++    res: ServerResponse,
++    sandboxId: string,
++    portNum: number
++  ) {
++    // Check for relay token in query string (?__pt=<nonce>).
++    // proxyAuth GET redirects here after storing fastgptToken server-side.
++    // We set the cookie from this subdomain so Chrome scopes it correctly.
++    const urlObj = new URL(`http://placeholder${req.url || '/'}`);
++    const relayToken = urlObj.searchParams.get('__pt');
++    if (relayToken) {
++      const fastgptToken = redeemRelayToken(relayToken);
++      if (fastgptToken) {
++        urlObj.searchParams.delete('__pt');
++        const cleanUrl = urlObj.pathname + (urlObj.search !== '?' ? urlObj.search : '');
++        dev &&
++          console.log(
++            `[proxy:subdomain] relay token redeemed, setting cookie and redirecting to ${cleanUrl}`
++          );
++        res.setHeader(
++          'Set-Cookie',
++          `fastgpt_token=${fastgptToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`
++        );
++        res.writeHead(302, { Location: cleanUrl || '/' });
++        res.end();
++        return;
++      }
++      console.warn(`[proxy:subdomain] relay token invalid or expired: ${relayToken}`);
++    }
++
++    try {
++      const target = await authProxyTarget(req.headers, sandboxId, portNum);
++      const targetUrl = new URL(target);
++      proxy.web(req, res, {
++        target,
++        headers: { origin: `${targetUrl.protocol}//${targetUrl.host}` }
++      });
++    } catch (err: any) {
++      const status = err.statusCode || 502;
++      // Auth failure — redirect to proxyAuth on the base origin for cookie hand-off
++      if (status === 401 || status === 403) {
++        const host = req.headers.host!;
++        const proto = (req.headers['x-forwarded-proto'] as string) || 'http';
++        const originalUrl = `${proto}://${host}${req.url || '/'}`;
++        const authBase = `${proto}://${deriveBaseHost(host)}`;
++        const authUrl = new URL(`${authBase}/api/core/sandbox/proxyAuth`);
++        authUrl.searchParams.set('sandboxId', sandboxId);
++        authUrl.searchParams.set('port', String(portNum));
++        authUrl.searchParams.set('next', originalUrl);
++        console.warn(
++          `[proxy:subdomain] auth failed (${status}), redirecting to proxyAuth. next=${originalUrl}`
++        );
++        res.writeHead(302, { Location: authUrl.toString() });
++        res.end();
++        return;
++      }
++      if (!res.headersSent) {
++        res.writeHead(status, { 'Content-Type': 'text/plain' });
++        res.end(err.message || 'Proxy error');
++      }
++    }
++  }
++
++  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
++    const parsedUrl = parse(req.url || '');
++
++    // ① Check subdomain proxy first: {port}--{sandboxId}.{baseDomain}
++    const subdomain = parseSubdomainProxy(req.headers.host);
++    if (subdomain) {
++      await handleSubdomainProxy(req, res, subdomain.sandboxId, subdomain.port);
++      return;
++    }
++
++    // ② Path-based proxy: /proxy/{sandboxId}/{port} or /absproxy/{sandboxId}/{port}
++    const match = parsedUrl.pathname?.match(PATH_PROXY_RE);
++    if (match) {
++      const [, proxyType, sandboxId, portStr] = match;
++      // Strip proxy prefix so upstream sees the real path
++      req.url = req.url!.replace(`/${proxyType}/${sandboxId}/${portStr}`, '') || '/';
++      await handleProxy(req, res, sandboxId, Number(portStr), proxyType);
++      return;
++    }
++
++    // ③ Fall through to Next.js handler
++    handle(req, res, parsedUrl as any);
++  });
++
++  // WebSocket upgrade handler — supports all three proxy modes
++  server.on('upgrade', async (req: IncomingMessage, socket, head) => {
++    // ① tcptunnel: raw TCP-over-WebSocket, handled before all other upgrade logic
++    const tunnelMatch = req.url?.match(TCPTUNNEL_RE);
++    if (tunnelMatch) {
++      const tunnelSandboxId = tunnelMatch[1];
++      const tunnelPort = Number(tunnelMatch[2]);
++      dev &&
++        console.log(
++          `[proxy:tcptunnel] upgrade sandboxId=${tunnelSandboxId} port=${tunnelPort} hasCookie=${!!req.headers.cookie}`
++        );
++
++      let target: string;
++      try {
++        target = await authProxyTarget(req.headers, tunnelSandboxId, tunnelPort);
++        dev && console.log(`[proxy:tcptunnel] auth ok target=${target}`);
++      } catch (err: any) {
++        const status = err.statusCode || 502;
++        console.error(`[proxy:tcptunnel] auth failed status=${status} message=${err.message}`);
++        socket.write(`HTTP/1.1 ${status} ${err.message || 'Auth error'}\r\n\r\n`);
++        socket.destroy();
++        return;
++      }
++
++      // Parse host from auth target URL
++      const targetUrl = new URL(target);
++      const containerHost = targetUrl.hostname;
++      const containerPort = tunnelPort;
++
++      // Complete WebSocket handshake (RFC 6455 §4.2.2)
++      const wsKey = req.headers['sec-websocket-key'];
++      if (!wsKey) {
++        socket.write('HTTP/1.1 400 Missing Sec-WebSocket-Key\r\n\r\n');
++        socket.destroy();
++        return;
++      }
++      const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
++      const acceptKey = crypto
++        .createHash('sha1')
++        .update(wsKey + WS_GUID)
++        .digest('base64');
++
++      // Connect to TCP target first, then send 101 after connect
++      const tcpSocket = net.createConnection({ host: containerHost, port: containerPort });
++      let closed = false;
++
++      function cleanup() {
++        if (closed) return;
++        closed = true;
++        tcpSocket.destroy();
++        socket.destroy();
++      }
++
++      tcpSocket.once('connect', () => {
++        dev &&
++          console.log(
++            `[proxy:tcptunnel] TCP connected host=${containerHost} port=${containerPort}`
++          );
++
++        // Send 101 after TCP is ready
++        socket.write(
++          'HTTP/1.1 101 Switching Protocols\r\n' +
++            'Upgrade: websocket\r\n' +
++            'Connection: Upgrade\r\n' +
++            `Sec-WebSocket-Accept: ${acceptKey}\r\n` +
++            '\r\n'
++        );
++
++        // Flush any buffered data that came in with the upgrade request
++        const decoder = new WsFrameDecoder();
++        if (head && head.length > 0) {
++          for (const payload of decoder.push(head)) {
++            if (payload.length === 0) {
++              cleanup();
++              return;
++            }
++            tcpSocket.write(payload);
++          }
++        }
++
++        // Browser → TCP: decode WS frames, write raw bytes to tcpSocket
++        socket.on('data', (chunk: Buffer) => {
++          if (closed) return;
++          for (const payload of decoder.push(chunk)) {
++            if (payload.length === 0) {
++              cleanup();
++              return;
++            }
++            tcpSocket.write(payload);
++          }
++        });
++
++        // TCP → Browser: wrap raw bytes in WS binary frames
++        tcpSocket.on('data', (chunk: Buffer) => {
++          if (closed) return;
++          socket.write(encodeWsFrame(chunk));
++        });
++      });
++
++      tcpSocket.once('error', (err) => {
++        console.error(`[proxy:tcptunnel] TCP error: ${err.message}`);
++        cleanup();
++      });
++      tcpSocket.once('close', cleanup);
++      socket.once('error', cleanup);
++      socket.once('close', cleanup);
++      return;
++    }
++
++    let sandboxId: string;
++    let portNum: number;
++    let proxyType = 'proxy';
++
++    const subdomain = parseSubdomainProxy(req.headers.host);
++    if (subdomain) {
++      sandboxId = subdomain.sandboxId;
++      portNum = subdomain.port;
++    } else {
++      const match = req.url?.match(PATH_PROXY_RE);
++      if (!match) {
++        dev && console.log(`[proxy:ws] no match, destroying socket. url=${req.url}`);
++        socket.destroy();
++        return;
++      }
++      proxyType = match[1];
++      sandboxId = match[2];
++      portNum = Number(match[3]);
++      req.url = req.url!.replace(`/${proxyType}/${sandboxId}/${portNum}`, '') || '/';
++    }
++
++    dev &&
++      console.log(
++        `[proxy:ws] upgrade sandboxId=${sandboxId} port=${portNum} url=${req.url} hasCookie=${!!req.headers.cookie}`
++      );
++
++    try {
++      const target = await authProxyTarget(req.headers, sandboxId, portNum);
++      dev && console.log(`[proxy:ws] auth ok, forwarding to target=${target}`);
++      // Rewrite Origin to match the target host so code-server's CSRF check passes.
++      // changeOrigin:true only rewrites Host, not Origin.
++      const targetUrl = new URL(target);
++      proxy.ws(req, socket, head, {
++        target,
++        headers: { origin: `${targetUrl.protocol}//${targetUrl.host}` }
++      });
++    } catch (err: any) {
++      const status = err.statusCode || 502;
++      console.error(`[proxy:ws] auth failed status=${status} message=${err.message}`);
++      socket.write(`HTTP/1.1 ${status} ${err.message || 'Proxy error'}\r\n\r\n`);
++      socket.destroy();
++    }
++  });
++
++  server.listen(port, () => {
++    console.log(`> Ready on http://localhost:${port} [${dev ? 'dev' : 'production'}]`);
++  });
++}
++
++// Authenticate a sandbox proxy request via the internal Next.js API route.
++// This avoids importing @fastgpt/service (ESM-only deps) directly in server.ts.
++async function authProxyTarget(
++  reqHeaders: IncomingMessage['headers'],
++  sandboxId: string,
++  targetPort: number
++): Promise<string> {
++  dev &&
++    console.log(
++      `[proxy:auth] POST proxyAuth sandboxId=${sandboxId} port=${targetPort} hasCookie=${!!reqHeaders.cookie}`
++    );
++  const authResp = await fetch(`http://127.0.0.1:${port}/api/core/sandbox/proxyAuth`, {
++    method: 'POST',
++    headers: {
++      'content-type': 'application/json',
++      ...(reqHeaders.cookie ? { cookie: reqHeaders.cookie as string } : {}),
++      ...(reqHeaders.authorization ? { authorization: reqHeaders.authorization as string } : {})
++    },
++    body: JSON.stringify({ sandboxId, targetPort })
++  });
++
++  if (!authResp.ok) {
++    // NextAPI always returns HTTP 500 for errors; read the real code from JSON body
++    const body = await authResp.json().catch(() => ({ code: authResp.status }));
++    const code = body?.code || authResp.status;
++    const msg = body?.message || body?.error || 'Auth failed';
++    console.error(
++      `[proxy:auth] proxyAuth failed httpStatus=${authResp.status} code=${code} message=${msg}`
++    );
++    throw Object.assign(new Error(msg), { statusCode: code });
++  }
++
++  const { target } = await authResp.json();
++  dev && console.log(`[proxy:auth] proxyAuth ok target=${target}`);
++  return target as string;
++}
++
++// Build upstream request headers, dropping hop-by-hop headers
++function buildProxyHeaders(headers: IncomingMessage['headers']): Record<string, string> {
++  const hopByHop = new Set([
++    'host',
++    'connection',
++    'keep-alive',
++    'proxy-authenticate',
++    'proxy-authorization',
++    'te',
++    'trailers',
++    'transfer-encoding',
++    'upgrade'
++  ]);
++  const result: Record<string, string> = {};
++  for (const [key, value] of Object.entries(headers)) {
++    if (hopByHop.has(key.toLowerCase())) continue;
++    if (value) result[key] = Array.isArray(value) ? value.join(', ') : value;
++  }
++  return result;
++}
++
++// RFC 6455 WebSocket frame decoder with buffer accumulation.
++// Handles fragmented frames that arrive across multiple TCP chunks.
++class WsFrameDecoder {
++  private buf: Buffer = Buffer.alloc(0);
++
++  // Push a new chunk; returns list of decoded payloads.
++  // An empty Buffer in the list signals a close frame (opcode 0x8).
++  push(chunk: Buffer): Buffer[] {
++    this.buf = Buffer.concat([this.buf, chunk]);
++    const payloads: Buffer[] = [];
++
++    while (this.buf.length >= 2) {
++      const b0 = this.buf[0];
++      const b1 = this.buf[1];
++      const opcode = b0 & 0x0f;
++      const masked = (b1 & 0x80) !== 0;
++      let payloadLen = b1 & 0x7f;
++      let headerLen = 2;
++
++      if (payloadLen === 126) {
++        if (this.buf.length < 4) break;
++        payloadLen = this.buf.readUInt16BE(2);
++        headerLen = 4;
++      } else if (payloadLen === 127) {
++        if (this.buf.length < 10) break;
++        // Only handle payloads up to 2^32; high 4 bytes are expected to be 0
++        payloadLen = this.buf.readUInt32BE(6);
++        headerLen = 10;
++      }
++
++      if (masked) headerLen += 4;
++      const totalLen = headerLen + payloadLen;
++      if (this.buf.length < totalLen) break;
++
++      const payload = Buffer.allocUnsafe(payloadLen);
++      if (masked) {
++        const maskOffset = headerLen - 4;
++        for (let i = 0; i < payloadLen; i++) {
++          payload[i] = this.buf[headerLen + i] ^ this.buf[maskOffset + (i & 3)];
++        }
++      } else {
++        this.buf.copy(payload, 0, headerLen, totalLen);
++      }
++
++      this.buf = this.buf.subarray(totalLen);
++
++      if (opcode === 0x8) {
++        // Close frame — signal EOF
++        payloads.push(Buffer.alloc(0));
++        break;
++      }
++      // data frame (text=0x1, binary=0x2, continuation=0x0) or ping(0x9)/pong(0xa) ignored
++      if (opcode === 0x1 || opcode === 0x2 || opcode === 0x0) {
++        payloads.push(payload);
++      }
++    }
++
++    return payloads;
++  }
++}
++
++// Encode raw bytes as a WebSocket binary frame (server→client, no masking).
++function encodeWsFrame(data: Buffer): Buffer {
++  const len = data.length;
++  let header: Buffer;
++
++  if (len <= 125) {
++    header = Buffer.allocUnsafe(2);
++    header[0] = 0x82; // FIN=1, opcode=0x2 (binary)
++    header[1] = len;
++  } else if (len <= 65535) {
++    header = Buffer.allocUnsafe(4);
++    header[0] = 0x82;
++    header[1] = 126;
++    header.writeUInt16BE(len, 2);
++  } else {
++    header = Buffer.allocUnsafe(10);
++    header[0] = 0x82;
++    header[1] = 127;
++    header.writeUInt32BE(0, 2);
++    header.writeUInt32BE(len, 6);
++  }
++
++  return Buffer.concat([header, data]);
++}
++
++main().catch((err) => {
++  console.error('Failed to start server:', err);
++  process.exit(1);
++});
+diff --git a/projects/app/src/pageComponents/dashboard/skill/detail/context.tsx b/projects/app/src/pageComponents/dashboard/skill/detail/context.tsx
+index 571756d2ad8d..66217579b62b 100644
+--- a/projects/app/src/pageComponents/dashboard/skill/detail/context.tsx
++++ b/projects/app/src/pageComponents/dashboard/skill/detail/context.tsx
+@@ -129,8 +129,8 @@ const SkillDetailContextProvider = ({ children }: { children: ReactNode }) => {
+         };
+         setSandboxLogs((prev) => [...prev, entry]);
+ 
+-        if (status.phase === 'ready' && status.endpoint?.url) {
+-          setSandboxEndpointUrl(status.endpoint.url);
++        if (status.phase === 'ready' && status.providerSandboxId && status.endpoint?.port) {
++          setSandboxEndpointUrl(`/proxy/${status.providerSandboxId}/${status.endpoint.port}/`);
+           setSandboxState('ready');
+         } else if (status.phase === 'failed') {
+           setSandboxError(status.message || t('skill:sandbox_error_title'));
+diff --git a/projects/app/src/pages/api/core/sandbox/proxyAuth.ts b/projects/app/src/pages/api/core/sandbox/proxyAuth.ts
+new file mode 100644
+index 000000000000..8f5adb7c5b3c
+--- /dev/null
++++ b/projects/app/src/pages/api/core/sandbox/proxyAuth.ts
+@@ -0,0 +1,106 @@
++import type { NextApiRequest, NextApiResponse } from 'next';
++import { NextAPI } from '@/service/middleware/entry';
++import { getSandboxProxyTarget } from '@/service/sandboxProxy';
++import { createRelayToken } from '@/service/sandboxProxyUtils';
++
++const dev = process.env.NODE_ENV !== 'production';
++// Internal proxy auth endpoint called by server.ts before forwarding to sandbox.
++// POST: returns { target } so server.ts can proxy without importing service packages.
++// GET:  cross-domain cookie hand-off — validates session, stores a relay token,
++//       then redirects to the subdomain with ?__pt=<nonce> so the subdomain
++//       can set the cookie itself (Chrome does not share Domain=.localhost cookies).
++async function handler(req: NextApiRequest, res: NextApiResponse) {
++  if (req.method === 'GET') {
++    return handleAuthRedirectGet(req, res);
++  }
++
++  const { sandboxId, targetPort } = req.body as { sandboxId: string; targetPort: number };
++
++  if (!sandboxId || !targetPort) {
++    return Promise.reject('Missing sandboxId or targetPort');
++  }
++
++  const target = await getSandboxProxyTarget(req.headers, sandboxId, Number(targetPort));
++  return res.json({ target });
++}
++
++// GET handler: redirect flow for subdomain cookie hand-off.
++// Flow:
++//   1. server.ts redirects unauthenticated subdomain request here (on the base origin).
++//   2. This handler validates the main session (cookie is available on the base origin).
++//   3. Creates a one-time relay token storing fastgptToken in memory.
++//   4. Redirects browser to {next}?__pt=<nonce> (on the subdomain).
++//   5. server.ts intercepts ?__pt=, redeems the token, sets cookie scoped to the subdomain.
++async function handleAuthRedirectGet(req: NextApiRequest, res: NextApiResponse) {
++  const {
++    sandboxId,
++    port,
++    next: nextUrl
++  } = req.query as {
++    sandboxId?: string;
++    port?: string;
++    next?: string;
++  };
++
++  if (!sandboxId || !port || !nextUrl) {
++    res.statusCode = 400;
++    res.end('Missing parameters');
++    return;
++  }
++
++  // Validate next is a safe URL: must be http(s) and hostname must be the base host or a subdomain
++  let parsedNext: URL;
++  try {
++    parsedNext = new URL(nextUrl);
++    if (parsedNext.protocol !== 'http:' && parsedNext.protocol !== 'https:') {
++      throw new Error('disallowed protocol');
++    }
++  } catch {
++    res.statusCode = 400;
++    res.end('Invalid next URL');
++    return;
++  }
++
++  // Only allow redirects to the same host or its subdomains to prevent open redirect
++  const baseHostname = (req.headers.host || '').split(':')[0];
++  const nextHostname = parsedNext.hostname;
++  if (baseHostname && nextHostname !== baseHostname && !nextHostname.endsWith(`.${baseHostname}`)) {
++    res.statusCode = 400;
++    res.end('Invalid next URL: hostname not allowed');
++    return;
++  }
++
++  // Validate sandbox ownership (throws → NextAPI returns JSON error if auth fails)
++  await getSandboxProxyTarget(req.headers, sandboxId, Number(port));
++
++  // Extract fastgpt_token from the main-origin cookie
++  const fastgptToken = extractCookieValue(req.headers.cookie, 'fastgpt_token');
++  if (!fastgptToken) {
++    res.statusCode = 401;
++    res.end('No fastgpt_token cookie found');
++    return;
++  }
++
++  // Store the token server-side and give the browser an opaque nonce in the URL.
++  // The subdomain will redeem this nonce and set its own scoped cookie.
++  const relayToken = createRelayToken(fastgptToken);
++  parsedNext.searchParams.set('__pt', relayToken);
++
++  dev && console.log(`[proxy:auth] relay token created, redirecting to subdomain next=${nextUrl}`);
++  res.redirect(302, parsedNext.toString());
++}
++
++// Parse a named cookie value from a raw Cookie header string.
++function extractCookieValue(cookieHeader: string | undefined, name: string): string | undefined {
++  if (!cookieHeader) return undefined;
++  for (const part of cookieHeader.split(';')) {
++    const eqIdx = part.indexOf('=');
++    if (eqIdx < 0) continue;
++    if (part.substring(0, eqIdx).trim() === name) {
++      return part.substring(eqIdx + 1).trim();
++    }
++  }
++  return undefined;
++}
++
++export default NextAPI(handler);
+diff --git a/projects/app/src/pages/api/support/user/account/loginout.ts b/projects/app/src/pages/api/support/user/account/loginout.ts
+index 5e86d3c66ba1..91d85987d70b 100644
+--- a/projects/app/src/pages/api/support/user/account/loginout.ts
++++ b/projects/app/src/pages/api/support/user/account/loginout.ts
+@@ -2,11 +2,15 @@ import type { NextApiRequest, NextApiResponse } from 'next';
+ import { NextAPI } from '@/service/middleware/entry';
+ import { authCert, clearCookie } from '@fastgpt/service/support/permission/auth/common';
+ import { delUserAllSession } from '@fastgpt/service/support/user/session';
++import { deleteProxySessionsByTeam } from '@/service/sandboxProxyUtils';
+ 
+ async function handler(req: NextApiRequest, res: NextApiResponse<any>) {
+   try {
+-    const { userId } = await authCert({ req, authToken: true });
++    const { userId, teamId } = await authCert({ req, authToken: true });
+     await delUserAllSession(userId);
++    // Clear all in-process proxy sessions for this team so sandboxed iframes
++    // cannot continue to access the proxy after the user signs out.
++    deleteProxySessionsByTeam(teamId);
+   } catch (error) {}
+   clearCookie(res);
+ }
+diff --git a/projects/app/src/service/sandboxProxy.ts b/projects/app/src/service/sandboxProxy.ts
+new file mode 100644
+index 000000000000..3e3c218b6590
+--- /dev/null
++++ b/projects/app/src/service/sandboxProxy.ts
+@@ -0,0 +1,61 @@
++import { MongoSandboxInstance } from '@fastgpt/service/core/ai/sandbox/schema';
++import { SandboxStatusEnum } from '@fastgpt/global/core/ai/sandbox/constants';
++import { parseHeaderCert } from '@fastgpt/service/support/permission/auth/common';
++import type { IncomingHttpHeaders } from 'http';
++import { upsertProxySession, getProxySession } from './sandboxProxyUtils';
++
++const dev = process.env.NODE_ENV !== 'production';
++
++// Resolve the proxy target URL after authenticating the request.
++// Used by the proxyAuth API route (loaded via Next.js webpack, not tsx).
++export async function getSandboxProxyTarget(
++  headers: IncomingHttpHeaders,
++  sandboxId: string,
++  targetPort: number
++): Promise<string> {
++  if (targetPort < 1 || targetPort > 65535) {
++    throw Object.assign(new Error('Invalid port'), { statusCode: 400 });
++  }
++
++  // Try full cookie/token auth first.
++  // On success: upsert a proxy session so that subsequent requests from
++  // sandboxed iframes (opaque origin, no cookies) can still be served.
++  // On auth failure only: fall back to an existing proxy session.
++  let authTeamId: string;
++  try {
++    const { teamId } = await parseHeaderCert({
++      req: { headers, query: {} } as any,
++      authToken: true,
++      authApiKey: true
++    });
++    authTeamId = teamId;
++  } catch {
++    // No valid credential — check in-process proxy session for this sandboxId
++    const session = getProxySession(sandboxId);
++    if (session) {
++      dev && console.log(`[sandboxProxy] session fallback sandboxId=${sandboxId}`);
++      return `${session.protocol}://${session.host}:${targetPort}`;
++    }
++    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });
++  }
++
++  dev && console.log(`[sandboxProxy] lookup sandboxId=${sandboxId} authTeamId=${authTeamId}`);
++  const sandbox = await MongoSandboxInstance.findOne({ sandboxId }).lean();
++  if (!sandbox) throw Object.assign(new Error('Sandbox not found'), { statusCode: 404 });
++
++  dev &&
++    console.log(
++      `[sandboxProxy] found sandbox _id=${sandbox._id} sandboxTeamId=${sandbox.detail?.teamId} authTeamId=${authTeamId} status=${sandbox.status}`
++    );
++  if (String(sandbox.detail?.teamId) !== authTeamId) {
++    throw Object.assign(new Error('Access denied'), { statusCode: 403 });
++  }
++  if (sandbox.status !== SandboxStatusEnum.running) {
++    throw Object.assign(new Error('Sandbox is not running'), { statusCode: 503 });
++  }
++
++  const { host, protocol } = sandbox.detail!.endpoint!;
++  // Cache target for subsequent cookie-less sub-requests (sandboxed iframe)
++  upsertProxySession(sandboxId, authTeamId, host, protocol);
++  return `${protocol}://${host}:${targetPort}`;
++}
+diff --git a/projects/app/src/service/sandboxProxyUtils.ts b/projects/app/src/service/sandboxProxyUtils.ts
+new file mode 100644
+index 000000000000..b5c9882a2958
+--- /dev/null
++++ b/projects/app/src/service/sandboxProxyUtils.ts
+@@ -0,0 +1,141 @@
++// Pure utility functions with minimal imports.
++// Kept separate so server.ts (tsx CJS mode) can import without triggering
++// the ESM-only @fastgpt-sdk/otel dependency chain.
++import { randomBytes } from 'crypto';
++
++// Parse subdomain proxy from Host header.
++// Formats: {port}--{sandboxId-with-hyphens}.{domain} or {port}-{sandboxId-alphanumeric}.{domain}
++export function parseSubdomainProxy(
++  host: string | undefined
++): { port: number; sandboxId: string } | null {
++  if (!host) return null;
++  // Strip optional :port suffix to get the pure hostname
++  const hostname = host.split(':')[0];
++
++  // New format: {port}--{sandboxId-with-hyphens}.{domain}
++  // sandboxId: starts/ends with alnum, may contain hyphens, 8–36 chars
++  let match = hostname.match(/^(\d+)--([a-zA-Z0-9][a-zA-Z0-9-]{6,34}[a-zA-Z0-9])\./);
++  if (!match) {
++    // Legacy format: {port}-{sandboxId-alphanumeric}.{domain}
++    match = hostname.match(/^(\d+)-([a-zA-Z0-9]{8,32})\./);
++  }
++
++  if (!match) return null;
++  const port = Number(match[1]);
++  if (port < 1 || port > 65535) return null;
++  return { port, sandboxId: match[2] };
++}
++
++// In-process relay token store for cross-domain proxy cookie hand-off.
++// Uses globalThis so the Map is shared between server.ts (dynamic import) and
++// Next.js API routes (webpack bundle) running in the same Node.js process.
++const _relayStore = (): Map<string, { fastgptToken: string; exp: number }> => {
++  const g = globalThis as any;
++  if (!g.__proxyRelayStore) g.__proxyRelayStore = new Map();
++  return g.__proxyRelayStore;
++};
++
++// Create a one-time relay token (60 s TTL).
++// The token is an opaque nonce; the actual fastgptToken is stored server-side.
++export function createRelayToken(fastgptToken: string): string {
++  const store = _relayStore();
++  const nonce = randomBytes(16).toString('hex');
++  store.set(nonce, { fastgptToken, exp: Date.now() + 60_000 });
++  // Prune expired entries on each write
++  for (const [k, v] of store) if (v.exp < Date.now()) store.delete(k);
++  return nonce;
++}
++
++// Redeem a relay token (one-time use). Returns fastgptToken or null if not found / expired.
++export function redeemRelayToken(nonce: string): string | null {
++  const store = _relayStore();
++  const entry = store.get(nonce);
++  if (!entry || entry.exp < Date.now()) {
++    store.delete(nonce);
++    return null;
++  }
++  store.delete(nonce);
++  return entry.fastgptToken;
++}
++
++// Proxy session store — keyed by sandboxId.
++// Populated on first cookie-authenticated request so that subsequent requests
++// from a sandboxed iframe (opaque origin, no cookies) are still authorised.
++// TTL is refreshed on every access; idle sessions expire after 2 hours.
++const PROXY_SESSION_TTL = 2 * 60 * 60 * 1000;
++const MAX_SESSION_STORE_SIZE = 1000;
++
++type ProxySession = {
++  teamId: string;
++  host: string;
++  protocol: string;
++  exp: number;
++};
++
++const _sessionStore = (): Map<string, ProxySession> => {
++  const g = globalThis as any;
++  if (!g.__proxySessionStore) g.__proxySessionStore = new Map();
++  return g.__proxySessionStore;
++};
++
++export function upsertProxySession(
++  sandboxId: string,
++  teamId: string,
++  host: string,
++  protocol: string
++): void {
++  const store = _sessionStore();
++  // Enforce capacity cap: evict the soonest-to-expire entry before adding a new one
++  if (!store.has(sandboxId) && store.size >= MAX_SESSION_STORE_SIZE) {
++    let evictKey: string | null = null;
++    let minExp = Infinity;
++    for (const [k, v] of store) {
++      if (v.exp < minExp) {
++        minExp = v.exp;
++        evictKey = k;
++      }
++    }
++    if (evictKey) store.delete(evictKey);
++  }
++  store.set(sandboxId, { teamId, host, protocol, exp: Date.now() + PROXY_SESSION_TTL });
++  // Prune expired entries on each write
++  for (const [k, v] of store) if (v.exp < Date.now()) store.delete(k);
++}
++
++// Returns the session if active, refreshing its TTL; returns null if absent/expired.
++export function getProxySession(sandboxId: string): ProxySession | null {
++  const store = _sessionStore();
++  const s = store.get(sandboxId);
++  if (!s || s.exp < Date.now()) {
++    store.delete(sandboxId);
++    return null;
++  }
++  s.exp = Date.now() + PROXY_SESSION_TTL;
++  return s;
++}
++
++export function deleteProxySession(sandboxId: string): void {
++  _sessionStore().delete(sandboxId);
++}
++
++// Remove all proxy sessions belonging to a given team.
++// Called on user logout to prevent stale sessions from surviving after sign-out.
++export function deleteProxySessionsByTeam(teamId: string): void {
++  const store = _sessionStore();
++  for (const [k, v] of store) {
++    if (v.teamId === teamId) store.delete(k);
++  }
++}
++
++// Rewrite absolute paths in HTML for the absproxy mode
++export function rewriteHtml(html: string, basePath: string): string {
++  return (
++    html
++      // Rewrite src/href/action attributes pointing to absolute paths (not protocol-relative)
++      .replace(/((?:src|href|action)=["'])(\/(?!\/))/g, `$1${basePath}/`)
++      // Rewrite url() in CSS with absolute paths
++      .replace(/(url\(['"]?)(\/(?!\/))/g, `$1${basePath}/`)
++      // Inject <base> tag last to avoid self-rewrite by the replacements above
++      .replace(/(<head[^>]*>)/i, `$1<base href="${basePath}/">`)
++  );
++}
+diff --git a/projects/app/test/service/sandboxProxy.test.ts b/projects/app/test/service/sandboxProxy.test.ts
+new file mode 100644
+index 000000000000..7776934d40a4
+--- /dev/null
++++ b/projects/app/test/service/sandboxProxy.test.ts
+@@ -0,0 +1,170 @@
++import { describe, it, expect } from 'vitest';
++import { parseSubdomainProxy, rewriteHtml } from '@/service/sandboxProxyUtils';
++
++describe('parseSubdomainProxy', () => {
++  it('returns null for undefined host', () => {
++    expect(parseSubdomainProxy(undefined)).toBeNull();
++  });
++
++  it('returns null for empty string', () => {
++    expect(parseSubdomainProxy('')).toBeNull();
++  });
++
++  it('returns null for plain localhost', () => {
++    expect(parseSubdomainProxy('localhost:3000')).toBeNull();
++  });
++
++  it('returns null for normal domain without port-sandboxId prefix', () => {
++    expect(parseSubdomainProxy('example.com')).toBeNull();
++    expect(parseSubdomainProxy('app.example.com')).toBeNull();
++  });
++
++  it('parses valid subdomain with host port', () => {
++    expect(parseSubdomainProxy('5000-abcdefgh1234.localhost:3000')).toEqual({
++      port: 5000,
++      sandboxId: 'abcdefgh1234'
++    });
++  });
++
++  it('parses valid subdomain without host port', () => {
++    expect(parseSubdomainProxy('8080-abc123defabc1.example.com')).toEqual({
++      port: 8080,
++      sandboxId: 'abc123defabc1'
++    });
++  });
++
++  it('parses 16-char sandboxId', () => {
++    expect(parseSubdomainProxy('3000-a1b2c3d4e5f6g7h8.localhost')).toEqual({
++      port: 3000,
++      sandboxId: 'a1b2c3d4e5f6g7h8'
++    });
++  });
++
++  it('returns null when sandboxId is shorter than 8 chars', () => {
++    expect(parseSubdomainProxy('5000-short.localhost')).toBeNull();
++  });
++
++  it('returns null when sandboxId is longer than 32 chars', () => {
++    expect(
++      parseSubdomainProxy('5000-averylongsandboxidthatexceedsthethirtytwocharacterlimit.localhost')
++    ).toBeNull();
++  });
++
++  it('returns null for port 0', () => {
++    expect(parseSubdomainProxy('0-abcdefgh1234.localhost')).toBeNull();
++  });
++
++  it('returns null for port > 65535', () => {
++    expect(parseSubdomainProxy('99999-abcdefgh1234.localhost')).toBeNull();
++  });
++
++  it('returns null for port 65535 boundary', () => {
++    expect(parseSubdomainProxy('65535-abcdefgh1234.localhost')).toEqual({
++      port: 65535,
++      sandboxId: 'abcdefgh1234'
++    });
++  });
++
++  it('returns null for port 65536 (just over boundary)', () => {
++    expect(parseSubdomainProxy('65536-abcdefgh1234.localhost')).toBeNull();
++  });
++
++  // double-hyphen format (sandboxId with hyphens)
++  it('double-hyphen: parses UUID sandboxId', () => {
++    const result = parseSubdomainProxy('55914--a535c42a-9c94-4aa3-8953-db78bb96d56b.example.com');
++    expect(result).toEqual({ port: 55914, sandboxId: 'a535c42a-9c94-4aa3-8953-db78bb96d56b' });
++  });
++
++  it('double-hyphen: parses with host port suffix', () => {
++    const result = parseSubdomainProxy(
++      '55914--a535c42a-9c94-4aa3-8953-db78bb96d56b.example.com:3000'
++    );
++    expect(result).toEqual({ port: 55914, sandboxId: 'a535c42a-9c94-4aa3-8953-db78bb96d56b' });
++  });
++
++  it('double-hyphen: returns null if sandboxId starts with hyphen', () => {
++    expect(parseSubdomainProxy('55914---bad-id.example.com')).toBeNull();
++  });
++
++  it('double-hyphen: returns null if sandboxId ends with hyphen', () => {
++    expect(parseSubdomainProxy('55914--a535c42a-.example.com')).toBeNull();
++  });
++
++  // legacy single-hyphen format still works
++  it('legacy: still parses alphanumeric sandboxId', () => {
++    const result = parseSubdomainProxy('55914-a535c42a9c944aa38953db78bb96d56b.example.com');
++    expect(result).toEqual({ port: 55914, sandboxId: 'a535c42a9c944aa38953db78bb96d56b' });
++  });
++});
++
++describe('rewriteHtml', () => {
++  const basePath = '/absproxy/abc123def456/5000';
++
++  it('injects <base> tag right after <head> opening tag', () => {
++    const html = '<html><head><title>Test</title></head><body></body></html>';
++    const result = rewriteHtml(html, basePath);
++    expect(result).toContain(`<head><base href="${basePath}/">`);
++  });
++
++  it('handles <head> with attributes', () => {
++    const html = '<html><head lang="en"><title>Test</title></head><body></body></html>';
++    const result = rewriteHtml(html, basePath);
++    expect(result).toContain(`<head lang="en"><base href="${basePath}/">`);
++  });
++
++  it('rewrites absolute src paths', () => {
++    const html = '<html><head></head><body><script src="/app.js"></script></body></html>';
++    const result = rewriteHtml(html, basePath);
++    expect(result).toContain(`src="${basePath}/app.js"`);
++  });
++
++  it('rewrites absolute href paths', () => {
++    const html = '<html><head><link href="/style.css"></head><body></body></html>';
++    const result = rewriteHtml(html, basePath);
++    expect(result).toContain(`href="${basePath}/style.css"`);
++  });
++
++  it('rewrites action attributes', () => {
++    const html = '<html><head></head><body><form action="/submit"></form></body></html>';
++    const result = rewriteHtml(html, basePath);
++    expect(result).toContain(`action="${basePath}/submit"`);
++  });
++
++  it('does not rewrite protocol-relative URLs (//)', () => {
++    const html = '<html><head></head><body><a href="//example.com">x</a></body></html>';
++    const result = rewriteHtml(html, basePath);
++    expect(result).toContain('href="//example.com"');
++  });
++
++  it('does not rewrite relative paths', () => {
++    const html = '<html><head></head><body><a href="relative/path">x</a></body></html>';
++    const result = rewriteHtml(html, basePath);
++    expect(result).toContain('href="relative/path"');
++  });
++
++  it('rewrites url() in inline CSS with absolute paths', () => {
++    const html = '<html><head></head><body style="background: url(/img.png)"></body></html>';
++    const result = rewriteHtml(html, basePath);
++    expect(result).toContain(`url(${basePath}/img.png)`);
++  });
++
++  it('rewrites url() with quoted paths', () => {
++    const html = '<html><head></head><body style="background: url(\'/img.png\')"></body></html>';
++    const result = rewriteHtml(html, basePath);
++    expect(result).toContain(`url('${basePath}/img.png')`);
++  });
++
++  it('does not rewrite url() with protocol-relative paths', () => {
++    const html =
++      '<html><head></head><body style="background: url(//example.com/img.png)"></body></html>';
++    const result = rewriteHtml(html, basePath);
++    expect(result).toContain('url(//example.com/img.png)');
++  });
++
++  it('rewrites multiple occurrences', () => {
++    const html = '<html><head></head><body><img src="/a.png"><img src="/b.png"></body></html>';
++    const result = rewriteHtml(html, basePath);
++    expect(result).toContain(`src="${basePath}/a.png"`);
++    expect(result).toContain(`src="${basePath}/b.png"`);
++  });
++});

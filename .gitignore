@@ -29,9 +29,13 @@ recycle_bin/
 # Logs and local reports
 *.log
 *.tmp
+docker/**/.docker-config/
 
 # OS/editor noise
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
+.obsidian/
+docs/.obsidian/
+~$*.docx

@@ -1,0 +1,25 @@
+id: fastgpt-pr-6579
+
+input:
+  repo: labring/FastGPT
+  repo_url: https://github.com/labring/FastGPT
+  base_branch: main
+  base_commit: "bfb52f211c7cfc782f94d4dbcbe5ca7e7336f9f2"
+  pr_number: 6579
+  pr_url: https://github.com/labring/FastGPT/pull/6579
+  pr_title_raw: "feat: sandbox in agent"
+  summary_source: generated_from_pr_patch
+  summary_raw_markdown: |
+    - Add sandbox enablement metadata to HelperBot TopAgent generation and prompts.
+    - Let ChatAgent testing pass the current useAgentSandbox setting into HelperBot generation and write the generated sandbox choice back to app AI settings.
+    - Include the sandbox tool in Agent skill/tool selection with status driven by whether sandbox is enabled for the agent.
+
+validation:
+  head_commit: "8bf802e3d73f1c611a69f5f2abae7656f856ca56"
+  merge_commit: null
+  patch_source: base_to_head
+  patch_file: "patches/fastgpt-pr-6579.patch"
+  patch_sha256: "60f2f576ecc3146ccabacb842429ede8934bfa57c8b4bfe235c38b7819183b05"
+  changed_files_file: "patches/fastgpt-pr-6579.changed_files.txt"
+  manual_functionality_description: |
+    Pending manual functionality description for this TypeScript-size candidate batch.

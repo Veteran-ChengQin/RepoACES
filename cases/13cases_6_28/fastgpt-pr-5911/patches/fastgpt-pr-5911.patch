@@ -1,0 +1,861 @@
+diff --git a/packages/web/components/common/Textarea/PromptEditor/plugins/SkillPickerPlugin/index.tsx b/packages/web/components/common/Textarea/PromptEditor/plugins/SkillPickerPlugin/index.tsx
+index b5d93caea92f..7026317e8a49 100644
+--- a/packages/web/components/common/Textarea/PromptEditor/plugins/SkillPickerPlugin/index.tsx
++++ b/packages/web/components/common/Textarea/PromptEditor/plugins/SkillPickerPlugin/index.tsx
+@@ -25,6 +25,7 @@ import MyBox from '../../../../MyBox';
+ import { useMount } from 'ahooks';
+ import { useRequest2 } from '../../../../../../hooks/useRequest';
+ import type { ParentIdType } from '@fastgpt/global/common/parentFolder/type';
++import { useTranslation } from 'next-i18next';
+ 
+ export type SkillOptionItemType = {
+   description?: string;
+@@ -32,7 +33,7 @@ export type SkillOptionItemType = {
+ 
+   onSelect?: (id: string) => Promise<SkillOptionItemType | undefined>;
+   onClick?: (id: string) => Promise<string | undefined>;
+-  onFolderLoad?: (id: string) => Promise<SkillOptionItemType | undefined>;
++  onFolderLoad?: (id: string) => Promise<SkillItemType[] | undefined>;
+ };
+ 
+ export type SkillItemType = {
+@@ -41,7 +42,8 @@ export type SkillItemType = {
+   label: string;
+   icon?: string;
+   showArrow?: boolean;
+-  isFolder?: boolean;
++  canOpen?: boolean;
++  canUse?: boolean;
+   open?: boolean;
+   children?: SkillOptionItemType;
+   folderChildren?: SkillItemType[];
+@@ -54,6 +56,7 @@ export default function SkillPickerPlugin({
+   skillOption: SkillOptionItemType;
+   isFocus: boolean;
+ }) {
++  const { t } = useTranslation();
+   const [skillOptions, setSkillOptions] = useState<SkillOptionItemType[]>([skillOption]);
+   const [isMenuOpen, setIsMenuOpen] = useState(false);
+ 
+@@ -71,6 +74,8 @@ export default function SkillPickerPlugin({
+   });
+   const [currentColumnIndex, setCurrentColumnIndex] = useState<number>(0);
+   const [currentRowIndex, setCurrentRowIndex] = useState<number>(0);
++  const [interactionMode, setInteractionMode] = useState<'mouse' | 'keyboard'>('mouse');
++  const [loadingFolderIds, setLoadingFolderIds] = useState(new Set());
+ 
+   // Refs for scroll management
+   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+@@ -80,11 +85,18 @@ export default function SkillPickerPlugin({
+     const itemKey = `${columnIndex}-${rowIndex}`;
+     const itemElement = itemRefs.current.get(itemKey);
+     if (itemElement) {
+-      itemElement.scrollIntoView({
+-        behavior: 'smooth',
+-        block: 'nearest',
+-        inline: 'nearest'
+-      });
++      if (rowIndex === 0) {
++        const container = itemElement.parentElement;
++        if (container) {
++          container.scrollTop = 0;
++        }
++      } else {
++        itemElement.scrollIntoView({
++          behavior: 'smooth',
++          block: 'nearest',
++          inline: 'nearest'
++        });
++      }
+     } else if (retryCount < 5) {
+       // Retry if element not found yet (DOM not ready)
+       setTimeout(() => {
+@@ -97,6 +109,28 @@ export default function SkillPickerPlugin({
+     minLength: 0
+   });
+ 
++  // Recursively collects all visible items including expanded folder children for keyboard navigation
++  const getFlattenedVisibleItems = useCallback(
++    (columnIndex: number): SkillItemType[] => {
++      const column = skillOptions[columnIndex];
++
++      const flatten = (items: SkillItemType[]): SkillItemType[] => {
++        const result: SkillItemType[] = [];
++        items.forEach((item) => {
++          result.push(item);
++          // Include folder children only if folder is expanded
++          if (item.canOpen && item.open && item.folderChildren) {
++            result.push(...flatten(item.folderChildren));
++          }
++        });
++        return result;
++      };
++
++      return flatten(column.list);
++    },
++    [skillOptions]
++  );
++
+   // Handle item selection (hover/keyboard navigation)
+   const { runAsync: handleItemSelect, loading: isItemSelectLoading } = useRequest2(
+     async ({
+@@ -179,9 +213,87 @@ export default function SkillPickerPlugin({
+   );
+ 
+   // Handle folder toggle
+-  const handleFolderToggle = useCallback(
+-    (folderId: string, columnIndex: number, item?: SkillItemType) => {},
+-    []
++  const { runAsync: handleFolderToggle, loading: isFolderLoading } = useRequest2(
++    async ({
++      currentColumnIndex,
++      item,
++      option
++    }: {
++      currentColumnIndex: number;
++      item?: SkillItemType;
++      option?: SkillOptionItemType;
++    }) => {
++      if (!item || !item.canOpen) return;
++      const currentFolder = item;
++
++      // Step 1: Toggle folder open/closed state
++      setSkillOptions((prev) => {
++        const newOptions = [...prev];
++        const columnData = { ...newOptions[currentColumnIndex] };
++
++        // Recursively find and toggle the target folder
++        const toggleFolderOpen = (items: SkillItemType[]): SkillItemType[] => {
++          return items.map((item) => {
++            // Found the target folder, toggle its open state
++            if (item.id === currentFolder.id) {
++              return { ...item, open: !currentFolder.open };
++            }
++            // Recursively search in nested folders
++            if (item.folderChildren) {
++              return { ...item, folderChildren: toggleFolderOpen(item.folderChildren) };
++            }
++            return item;
++          });
++        };
++
++        columnData.list = toggleFolderOpen(columnData.list);
++        newOptions[currentColumnIndex] = columnData;
++        return newOptions;
++      });
++
++      // Step 2: Load folder children only if folder has no data
++      if (!currentFolder.open && currentFolder?.folderChildren === undefined) {
++        setLoadingFolderIds((prev) => {
++          const next = new Set(prev);
++          next.add(currentFolder.id);
++          return next;
++        });
++
++        try {
++          const result = await option?.onFolderLoad?.(currentFolder.id);
++
++          setSkillOptions((prev) => {
++            const newOptions = [...prev];
++            const columnData = { ...newOptions[currentColumnIndex] };
++
++            const addFolderChildren = (items: SkillItemType[]): SkillItemType[] => {
++              return items.map((item) => {
++                if (item.id === currentFolder.id) {
++                  return {
++                    ...item,
++                    folderChildren: result || []
++                  };
++                }
++                if (item.folderChildren) {
++                  return { ...item, folderChildren: addFolderChildren(item.folderChildren) };
++                }
++                return item;
++              });
++            };
++
++            columnData.list = addFolderChildren(columnData.list);
++            newOptions[currentColumnIndex] = columnData;
++            return newOptions;
++          });
++        } finally {
++          setLoadingFolderIds((prev) => {
++            const next = new Set(prev);
++            next.delete(currentFolder.id);
++            return next;
++          });
++        }
++      }
++    }
+   );
+ 
+   // First init
+@@ -210,8 +322,10 @@ export default function SkillPickerPlugin({
+         e.preventDefault();
+         e.stopPropagation();
+ 
++        setInteractionMode('keyboard');
++
+         if (currentColumnIndex >= 0 && currentColumnIndex < skillOptions.length) {
+-          const columnItems = skillOptions[currentColumnIndex]?.list;
++          const columnItems = getFlattenedVisibleItems(currentColumnIndex);
+           if (!columnItems || columnItems.length === 0) return true;
+ 
+           // Use functional update to get the latest row index
+@@ -246,8 +360,10 @@ export default function SkillPickerPlugin({
+         e.preventDefault();
+         e.stopPropagation();
+ 
++        setInteractionMode('keyboard');
++
+         if (currentColumnIndex >= 0 && currentColumnIndex < skillOptions.length) {
+-          const columnItems = skillOptions[currentColumnIndex]?.list;
++          const columnItems = getFlattenedVisibleItems(currentColumnIndex);
+           if (!columnItems || columnItems.length === 0) return true;
+ 
+           // Use functional update to get the latest row index
+@@ -282,6 +398,8 @@ export default function SkillPickerPlugin({
+         e.preventDefault();
+         e.stopPropagation();
+ 
++        setInteractionMode('keyboard');
++
+         // Use functional updates to get the latest state
+         setCurrentColumnIndex((prevColumnIndex) => {
+           if (prevColumnIndex >= skillOptions.length - 1) return prevColumnIndex;
+@@ -327,6 +445,8 @@ export default function SkillPickerPlugin({
+         e.preventDefault();
+         e.stopPropagation();
+ 
++        setInteractionMode('keyboard');
++
+         // Use functional updates to get the latest state
+         setCurrentColumnIndex((prevColumnIndex) => {
+           if (prevColumnIndex <= 0) return prevColumnIndex;
+@@ -364,14 +484,20 @@ export default function SkillPickerPlugin({
+       (e: KeyboardEvent) => {
+         if (!isMenuOpen) return true;
+ 
+-        // Use the latest values from closure to avoid stale state
++        setInteractionMode('keyboard');
++
++        const flattenedItems = getFlattenedVisibleItems(currentColumnIndex);
++        const latestItem = flattenedItems[currentRowIndex];
+         const latestOption = skillOptions[currentColumnIndex];
+-        const latestItem = latestOption?.list[currentRowIndex];
+ 
+-        if (latestItem?.isFolder) {
++        if (latestItem?.canOpen && !(latestItem.open && latestItem.folderChildren?.length === 0)) {
+           e.preventDefault();
+           e.stopPropagation();
+-          handleFolderToggle(latestItem.id, currentColumnIndex, latestItem);
++          handleFolderToggle({
++            currentColumnIndex,
++            item: latestItem,
++            option: latestOption
++          });
+           return true;
+         }
+ 
+@@ -385,11 +511,13 @@ export default function SkillPickerPlugin({
+       (e: KeyboardEvent) => {
+         if (!isMenuOpen) return true;
+ 
+-        // Use the latest values from closure to avoid stale state
++        setInteractionMode('keyboard');
++
++        const flattenedItems = getFlattenedVisibleItems(currentColumnIndex);
++        const latestItem = flattenedItems[currentRowIndex];
+         const latestOption = skillOptions[currentColumnIndex];
+-        const latestItem = latestOption?.list[currentRowIndex];
+ 
+-        if (latestItem && latestOption) {
++        if (latestItem?.canUse && latestOption) {
+           e.preventDefault();
+           e.stopPropagation();
+           handleItemClick({ item: latestItem, option: latestOption });
+@@ -421,13 +549,164 @@ export default function SkillPickerPlugin({
+     handleFolderToggle,
+     handleItemClick,
+     selectedRowIndex,
+-    scrollIntoView
++    scrollIntoView,
++    getFlattenedVisibleItems
+   ]);
+ 
++  // Recursively render item list
++  const renderItemList = useCallback(
++    (
++      items: SkillItemType[],
++      columnData: SkillOptionItemType,
++      columnIndex: number,
++      depth: number = 0,
++      startFlatIndex: number = 0
++    ): { elements: JSX.Element[]; nextFlatIndex: number } => {
++      const result: JSX.Element[] = [];
++      const activeRowIndex = selectedRowIndex[columnIndex];
++      let currentFlatIndex = startFlatIndex;
++      console.log('items', { selectedRowIndex, columnIndex, activeRowIndex });
++
++      items.forEach((item) => {
++        const flatIndex = currentFlatIndex;
++        currentFlatIndex++;
++
++        // 前面的列，才有激活态
++        const isActive = columnIndex < currentColumnIndex && flatIndex === activeRowIndex;
++        // 当前选中的东西
++        const isSelected = columnIndex === currentColumnIndex && flatIndex === currentRowIndex;
++
++        result.push(
++          <MyBox
++            key={item.id}
++            ref={(el) => {
++              if (el) {
++                itemRefs.current.set(`${columnIndex}-${flatIndex}`, el as HTMLDivElement);
++              } else {
++                itemRefs.current.delete(`${columnIndex}-${flatIndex}`);
++              }
++            }}
++            px={2}
++            py={1.5}
++            gap={2}
++            pl={1 + depth * 4}
++            borderRadius={'4px'}
++            cursor={'pointer'}
++            bg={isActive || isSelected ? 'myGray.100' : ''}
++            color={isSelected ? 'primary.700' : 'myGray.600'}
++            display={'flex'}
++            alignItems={'center'}
++            isLoading={loadingFolderIds.has(item.id)}
++            size={'sm'}
++            onMouseDown={(e) => {
++              e.preventDefault();
++            }}
++            onMouseMove={(e) => {
++              if (interactionMode === 'keyboard') {
++                setInteractionMode('mouse');
++              }
++            }}
++            onClick={(e) => {
++              e.preventDefault();
++              e.stopPropagation();
++              if (item.canOpen) {
++                handleFolderToggle({
++                  currentColumnIndex: columnIndex,
++                  item,
++                  option: columnData
++                });
++              } else if (item.canUse) {
++                handleItemClick({
++                  item,
++                  option: columnData
++                });
++              }
++            }}
++            onMouseEnter={(e) => {
++              e.preventDefault();
++
++              // Ignore mouse hover in keyboard mode
++              if (interactionMode === 'keyboard') {
++                return;
++              }
++
++              if (columnIndex !== currentColumnIndex) {
++                setSelectedRowIndex((state) => ({
++                  ...state,
++                  [currentColumnIndex]: currentRowIndex
++                }));
++              }
++
++              setCurrentRowIndex(flatIndex);
++              setCurrentColumnIndex(columnIndex);
++              if (item.canUse) {
++                handleItemSelect({
++                  currentColumnIndex: columnIndex,
++                  item,
++                  option: columnData
++                });
++              }
++            }}
++          >
++            {item.canOpen && !(item.open && item.folderChildren?.length === 0) ? (
++              <MyIcon
++                name={'core/chat/chevronRight'}
++                w={4}
++                color={'myGray.500'}
++                transform={item.open ? 'rotate(90deg)' : 'none'}
++                transition={'transform 0.2s'}
++                mr={-1}
++              />
++            ) : columnData.onFolderLoad ? (
++              <Box w={3} flexShrink={0} />
++            ) : null}
++            {item.icon && <Avatar src={item.icon} w={'1.2rem'} borderRadius={'xs'} />}
++            <Box fontSize={'sm'} fontWeight={'medium'} flex={1}>
++              {item.label}
++              {item.canOpen && item.open && item.folderChildren?.length === 0 && (
++                <Box as="span" color={'myGray.400'} fontSize={'xs'} ml={2}>
++                  {t('app:empty_folder')}
++                </Box>
++              )}
++            </Box>
++            {item.showArrow && (
++              <MyIcon name={'core/chat/chevronRight'} w={'0.8rem'} color={'myGray.400'} />
++            )}
++          </MyBox>
++        );
++
++        // render folderChildren
++        if (item.canOpen && item.open && !!item.folderChildren && item.folderChildren.length > 0) {
++          const { elements, nextFlatIndex } = renderItemList(
++            item.folderChildren,
++            columnData,
++            columnIndex,
++            depth + 1,
++            currentFlatIndex
++          );
++          result.push(...elements);
++          currentFlatIndex = nextFlatIndex;
++        }
++      });
++
++      return { elements: result, nextFlatIndex: currentFlatIndex };
++    },
++    [
++      selectedRowIndex,
++      currentColumnIndex,
++      currentRowIndex,
++      handleFolderToggle,
++      handleItemClick,
++      handleItemSelect,
++      interactionMode,
++      loadingFolderIds
++    ]
++  );
++
+   // Render single column
+   const renderColumn = useCallback(
+     (columnData: SkillOptionItemType, columnIndex: number) => {
+-      const activeRowIndex = selectedRowIndex[columnIndex]; // Active item in this column
++      const columnWidth = columnData.onFolderLoad ? '280px' : '200px';
+ 
+       return (
+         <MyBox
+@@ -436,7 +715,7 @@ export default function SkillPickerPlugin({
+           ml={columnIndex > 0 ? 2 : 0}
+           p={1.5}
+           borderRadius={'sm'}
+-          w={'200px'}
++          w={columnWidth}
+           boxShadow={'0 4px 10px 0 rgba(19, 51, 107, 0.10), 0 0 1px 0 rgba(19, 51, 107, 0.10)'}
+           bg={'white'}
+           flexShrink={0}
+@@ -448,89 +727,11 @@ export default function SkillPickerPlugin({
+               {columnData.description}
+             </Box>
+           )}
+-          {columnData.list.map((item, index) => {
+-            // 前面的列，才有激活态
+-            const isActive = columnIndex < currentColumnIndex && index === activeRowIndex;
+-            // 当前选中的东西
+-            const isSelected = columnIndex === currentColumnIndex && index === currentRowIndex;
+-
+-            return (
+-              <Flex
+-                key={item.id}
+-                ref={(el) => {
+-                  if (el) {
+-                    itemRefs.current.set(`${columnIndex}-${index}`, el);
+-                  } else {
+-                    itemRefs.current.delete(`${columnIndex}-${index}`);
+-                  }
+-                }}
+-                px={2}
+-                py={1.5}
+-                gap={2}
+-                pl={2}
+-                borderRadius={'4px'}
+-                cursor={'pointer'}
+-                bg={isActive || isSelected ? 'myGray.100' : ''}
+-                color={isSelected ? 'primary.700' : 'myGray.600'}
+-                onMouseDown={(e) => {
+-                  e.preventDefault();
+-                }}
+-                onClick={(e) => {
+-                  e.preventDefault();
+-                  e.stopPropagation();
+-                  if (item.isFolder) {
+-                    handleFolderToggle(item.id, columnIndex, item);
+-                  } else {
+-                    handleItemClick({
+-                      item,
+-                      option: columnData
+-                    });
+-                  }
+-                }}
+-                onMouseEnter={(e) => {
+-                  e.preventDefault();
+-                  setCurrentRowIndex(index);
+-                  setCurrentColumnIndex(columnIndex);
+-                  if (!item.isFolder) {
+-                    handleItemSelect({
+-                      currentColumnIndex: columnIndex,
+-                      item,
+-                      option: columnData
+-                    });
+-                  }
+-                }}
+-              >
+-                {/* Folder expand/collapse icon */}
+-                {item.isFolder && (
+-                  <MyIcon
+-                    name={'core/chat/chevronRight'}
+-                    w={'12px'}
+-                    color={'myGray.400'}
+-                    // transform={foldedIds.has(item.id) ? 'rotate(90deg)' : 'none'}
+-                  />
+-                )}
+-                {item.icon && <Avatar src={item.icon} w={'1.2rem'} borderRadius={'xs'} />}
+-                <Box fontSize={'sm'} fontWeight={'medium'} flex={1}>
+-                  {item.label}
+-                </Box>
+-                {item.showArrow && (
+-                  <MyIcon name={'core/chat/chevronRight'} w={'0.8rem'} color={'myGray.400'} />
+-                )}
+-              </Flex>
+-            );
+-          })}
++          {renderItemList(columnData.list, columnData, columnIndex).elements}
+         </MyBox>
+       );
+     },
+-    [
+-      selectedRowIndex,
+-      currentColumnIndex,
+-      isItemClickLoading,
+-      currentRowIndex,
+-      handleFolderToggle,
+-      handleItemClick,
+-      handleItemSelect
+-    ]
++    [currentColumnIndex, isItemClickLoading, renderItemList]
+   );
+ 
+   // For LexicalTypeaheadMenuPlugin compatibility
+diff --git a/packages/web/i18n/en/app.json b/packages/web/i18n/en/app.json
+index ede1cf7f8ec0..81e172604521 100644
+--- a/packages/web/i18n/en/app.json
++++ b/packages/web/i18n/en/app.json
+@@ -58,8 +58,8 @@
+   "auto_execute_default_prompt_placeholder": "Default questions sent when executing automatically",
+   "auto_execute_tip": "After turning it on, the workflow will be automatically triggered when the user enters the conversation interface. \nExecution order: 1. Dialogue starter; 2. Global variables; 3. Automatic execution.",
+   "auto_save": "Auto save",
+-  "change_app_type": "Change App Type",
+   "can_select_toolset": "Entire toolset available for selection",
++  "change_app_type": "Change App Type",
+   "chat_debug": "Chat Preview",
+   "chat_logs": "Logs",
+   "chat_logs_tips": "Logs will record the online, shared, and API (requires chatId) conversation records of this app.",
+@@ -136,6 +136,7 @@
+   "document_upload": "Document Upload",
+   "edit_app": "Application details",
+   "edit_info": "Edit",
++  "empty_folder": "(empty folder)",
+   "empty_tool_tips": "Please add tools on the left side",
+   "execute_time": "Execution Time",
+   "expand_tool_create": "Expand MCP/Http create",
+@@ -305,6 +306,7 @@
+   "show_top_p_tip": "An alternative method of temperature sampling, called Nucleus sampling, the model considers the results of tokens with TOP_P probability mass quality. \nTherefore, 0.1 means that only tokens containing the highest probability quality are considered. \nThe default is 1.",
+   "simple_tool_tips": "This tool contains special inputs and does not support being called by simple applications.",
+   "source_updateTime": "Update time",
++  "space_to_expand_folder": "Press \"Space\" to expand the folder",
+   "stop_sign": "Stop",
+   "stop_sign_placeholder": "Multiple serial numbers are separated by |, for example: aaa|stop",
+   "stream_response": "Stream",
+diff --git a/packages/web/i18n/zh-CN/app.json b/packages/web/i18n/zh-CN/app.json
+index da83d0cc24f4..ea9d8a9a6a7c 100644
+--- a/packages/web/i18n/zh-CN/app.json
++++ b/packages/web/i18n/zh-CN/app.json
+@@ -60,8 +60,8 @@
+   "auto_execute_default_prompt_placeholder": "自动执行时，发送的默认问题",
+   "auto_execute_tip": "开启后，用户进入对话界面将自动触发工作流。执行顺序：1、对话开场白；2、全局变量；3、自动执行。",
+   "auto_save": "自动保存",
+-  "change_app_type": "更改应用类型",
+   "can_select_toolset": "可选择整个工具集",
++  "change_app_type": "更改应用类型",
+   "chat_debug": "调试预览",
+   "chat_logs": "对话日志",
+   "chat_logs_tips": "日志会记录该应用的在线、分享和 API（需填写 chatId）对话记录",
+@@ -140,6 +140,7 @@
+   "edit_app": "应用详情",
+   "edit_info": "编辑信息",
+   "edit_param": "编辑参数",
++  "empty_folder": "(空文件夹)",
+   "empty_tool_tips": "请在左侧添加工具",
+   "execute_time": "执行时间",
+   "expand_tool_create": "展开MCP、Http创建",
+@@ -318,6 +319,7 @@
+   "show_top_p_tip": "用温度采样的替代方法，称为Nucleus采样，该模型考虑了具有TOP_P概率质量质量的令牌的结果。因此，0.1表示仅考虑包含最高概率质量的令牌。默认为 1。",
+   "simple_tool_tips": "该工具含有特殊输入，暂不支持被简易应用调用",
+   "source_updateTime": "更新时间",
++  "space_to_expand_folder": "按\"空格\"展开文件夹",
+   "stop_sign": "停止序列",
+   "stop_sign_placeholder": "多个序列号通过 | 隔开，例如：aaa|stop",
+   "stream_response": "流输出",
+diff --git a/packages/web/i18n/zh-Hant/app.json b/packages/web/i18n/zh-Hant/app.json
+index 365b0807c1f9..6306f3041366 100644
+--- a/packages/web/i18n/zh-Hant/app.json
++++ b/packages/web/i18n/zh-Hant/app.json
+@@ -58,8 +58,8 @@
+   "auto_execute_default_prompt_placeholder": "自動執行時，傳送的預設問題",
+   "auto_execute_tip": "開啟後，使用者進入對話式介面將自動觸發工作流程。\n執行順序：1、對話開場白；2、全域變數；3、自動執行。",
+   "auto_save": "自動儲存",
+-  "change_app_type": "更改應用程式類型",
+   "can_select_toolset": "可選擇整個工具集",
++  "change_app_type": "更改應用程式類型",
+   "chat_debug": "聊天預覽",
+   "chat_logs": "對話紀錄",
+   "chat_logs_tips": "紀錄會記錄此應用程式的線上、分享和 API（需填寫 chatId）對話紀錄",
+@@ -135,6 +135,7 @@
+   "document_upload": "文件上傳",
+   "edit_app": "應用詳情",
+   "edit_info": "編輯資訊",
++  "empty_folder": "(空文件夾)",
+   "empty_tool_tips": "請在左側添加工具",
+   "execute_time": "執行時間",
+   "expand_tool_create": "展開 MCP、Http 創建",
+@@ -304,6 +305,7 @@
+   "show_top_p_tip": "用溫度取樣的替代方法，稱為 Nucleus 取樣，該模型考慮了具有 TOP_P 機率質量質量的令牌的結果。\n因此，0.1 表示僅考慮包含最高機率質量的令牌。\n預設為 1。",
+   "simple_tool_tips": "該工具含有特殊輸入，暫不支持被簡易應用調用",
+   "source_updateTime": "更新時間",
++  "space_to_expand_folder": "按\"空格\"展開文件夾",
+   "stop_sign": "停止序列",
+   "stop_sign_placeholder": "多個序列號透過 | 隔開，例如：aaa|stop",
+   "stream_response": "流輸出",
+diff --git a/projects/app/src/pageComponents/app/detail/Edit/Agent/hooks/useSkillManager.tsx b/projects/app/src/pageComponents/app/detail/Edit/Agent/hooks/useSkillManager.tsx
+index 4c25a41b8def..9fc001cd3cfe 100644
+--- a/projects/app/src/pageComponents/app/detail/Edit/Agent/hooks/useSkillManager.tsx
++++ b/projects/app/src/pageComponents/app/detail/Edit/Agent/hooks/useSkillManager.tsx
+@@ -19,7 +19,12 @@ import { getNanoid } from '@fastgpt/global/common/string/tools';
+ import type { SkillLabelItemType } from '@fastgpt/web/components/common/Textarea/PromptEditor/plugins/SkillLabelPlugin';
+ import dynamic from 'next/dynamic';
+ import type { AppFormEditFormType } from '@fastgpt/global/core/app/type';
+-import { getAppToolTemplates, getToolPreviewNode } from '@/web/core/app/api/tool';
++import {
++  getAppToolTemplates,
++  getToolPreviewNode,
++  getTeamAppTemplates
++} from '@/web/core/app/api/tool';
++import { AppTypeEnum, AppTypeList, ToolTypeList } from '@fastgpt/global/core/app/constants';
+ 
+ const ConfigToolModal = dynamic(() => import('../../component/ConfigToolModal'));
+ 
+@@ -55,13 +60,15 @@ export const useSkillManager = ({
+       const data = await getAppToolTemplates({ getAll: true }).catch((err) => {
+         return [];
+       });
+-      return data.map<SkillItemType>((item) => ({
+-        id: item.id,
+-        parentId: item.parentId,
+-        label: item.name,
+-        icon: item.avatar,
+-        showArrow: item.isFolder
+-      }));
++      return data.map<SkillItemType>((item) => {
++        return {
++          id: item.id,
++          parentId: item.parentId,
++          label: item.name,
++          icon: item.avatar,
++          showArrow: item.isFolder
++        };
++      });
+     },
+     {
+       manual: false
+@@ -76,8 +83,62 @@ export const useSkillManager = ({
+     [systemTools]
+   );
+ 
+-  /* ===== Workflow tool ===== */
++  /* ===== Team Apps ===== */
++  const { data: allTeamApps = [] } = useRequest2(
++    async () => {
++      return await getTeamAppTemplates({ parentId: null });
++    },
++    {
++      manual: false
++    }
++  );
++  const myTools = useMemo(
++    () =>
++      allTeamApps
++        .filter((item) => [AppTypeEnum.toolFolder, ...ToolTypeList].includes(item.appType))
++        .map((item) => ({
++          id: item.id,
++          label: item.name,
++          icon: item.avatar,
++          canOpen: item.isFolder ?? false,
++          canUse: item.appType !== AppTypeEnum.folder && item.appType !== AppTypeEnum.toolFolder
++        })),
++    [allTeamApps]
++  );
++  const agentApps = useMemo(
++    () =>
++      allTeamApps
++        .filter((item) => [AppTypeEnum.folder, ...AppTypeList].includes(item.appType))
++        .map((item) => ({
++          id: item.id,
++          label: item.name,
++          icon: item.avatar,
++          canOpen: item.isFolder ?? false,
++          canUse: item.appType !== AppTypeEnum.folder && item.appType !== AppTypeEnum.toolFolder
++        })),
++    [allTeamApps]
++  );
++
++  const onFolderLoadTeamApps = useCallback(async (folderId: string, types: AppTypeEnum[]) => {
++    const children = await getTeamAppTemplates({ parentId: folderId, type: types });
++
++    if (!children || children.length === 0) {
++      return [];
++    }
+ 
++    return children.map<SkillItemType>((item) => {
++      return {
++        parentId: folderId,
++        id: item.id,
++        label: item.name,
++        icon: item.avatar,
++        canOpen: item.isFolder ?? false,
++        canUse: item.appType !== AppTypeEnum.folder && item.appType !== AppTypeEnum.toolFolder
++      };
++    });
++  }, []);
++
++  /* ===== Workflow tool ===== */
+   const { runAsync: onAddAppOrTool } = useRequest2(
+     async (appId: string) => {
+       const toolTemplate = await getToolPreviewNode({ appId });
+@@ -144,7 +205,20 @@ export const useSkillManager = ({
+             },
+             onClick: onAddAppOrTool
+           };
+-        } else if (id === 'app') {
++        } else if (id === 'myTools') {
++          return {
++            description: t('app:space_to_expand_folder'),
++            list: myTools,
++            onFolderLoad: (folderId: string) => onFolderLoadTeamApps(folderId, ToolTypeList),
++            onClick: onAddAppOrTool
++          };
++        } else if (id === 'agent') {
++          return {
++            description: t('app:space_to_expand_folder'),
++            list: agentApps,
++            onFolderLoad: (folderId: string) => onFolderLoadTeamApps(folderId, AppTypeList),
++            onClick: onAddAppOrTool
++          };
+         }
+         return undefined;
+       },
+@@ -152,16 +226,21 @@ export const useSkillManager = ({
+         {
+           id: 'systemTool',
+           label: t('app:core.module.template.System Tools'),
++          icon: 'core/workflow/template/toolCall'
++        },
++        {
++          id: 'myTools',
++          label: t('common:navbar.Tools'),
+           icon: 'core/app/type/pluginFill'
+         },
+         {
+-          id: 'app',
+-          label: t('common:core.module.template.Team app'),
+-          icon: 'core/app/type/simpleFill'
++          id: 'agent',
++          label: 'Agent',
++          icon: 'core/workflow/template/runApp'
+         }
+       ]
+     };
+-  }, [onAddAppOrTool, onLoadSystemTool, t]);
++  }, [onAddAppOrTool, onLoadSystemTool, myTools, agentApps, onFolderLoadTeamApps, t]);
+ 
+   /* ===== Selected skills ===== */
+   const selectedSkills = useMemoEnhance<SkillLabelItemType[]>(() => {
+diff --git a/projects/app/src/pageComponents/dashboard/agent/TypeTag.tsx b/projects/app/src/pageComponents/dashboard/agent/TypeTag.tsx
+index a4879a137ac3..460572032140 100644
+--- a/projects/app/src/pageComponents/dashboard/agent/TypeTag.tsx
++++ b/projects/app/src/pageComponents/dashboard/agent/TypeTag.tsx
+@@ -10,9 +10,7 @@ const AppTypeTag = ({ type }: { type: AppTypeEnum }) => {
+   const map = useRef({
+     [AppTypeEnum.agent]: {
+       label: 'Agent',
+-      icon: 'core/app/type/simple',
+-      bg: '#DBF3FF',
+-      color: '#0884DD'
++      icon: 'core/app/type/simple'
+     },
+     [AppTypeEnum.simple]: {
+       label: t('app:type.Chat_Agent'),
+@@ -40,8 +38,7 @@ const AppTypeTag = ({ type }: { type: AppTypeEnum }) => {
+     },
+     [AppTypeEnum.tool]: undefined,
+     [AppTypeEnum.folder]: undefined,
+-    [AppTypeEnum.hidden]: undefined,
+-    [AppTypeEnum.agent]: undefined
++    [AppTypeEnum.hidden]: undefined
+   });
+ 
+   const data = map.current[type as keyof typeof map.current];
+diff --git a/projects/app/src/pageComponents/dashboard/agent/context.tsx b/projects/app/src/pageComponents/dashboard/agent/context.tsx
+index 42b2da2d9148..7ac3e87a98f3 100644
+--- a/projects/app/src/pageComponents/dashboard/agent/context.tsx
++++ b/projects/app/src/pageComponents/dashboard/agent/context.tsx
+@@ -75,7 +75,7 @@ const AppListContextProvider = ({ children }: { children: ReactNode }) => {
+       const isAgent = router.pathname.includes('/agent');
+       const formatType = isAgent
+         ? !type || type === 'all'
+-          ? [AppTypeEnum.folder, AppTypeEnum.simple, AppTypeEnum.workflow]
++          ? [AppTypeEnum.folder, AppTypeEnum.simple, AppTypeEnum.workflow, AppTypeEnum.agent]
+           : [AppTypeEnum.folder, type]
+         : !type || type === 'all'
+           ? [
+diff --git a/projects/app/src/web/core/app/api/tool.ts b/projects/app/src/web/core/app/api/tool.ts
+index 295f3076f11e..a41938a2cd82 100644
+--- a/projects/app/src/web/core/app/api/tool.ts
++++ b/projects/app/src/web/core/app/api/tool.ts
+@@ -47,7 +47,9 @@ export const getTeamAppTemplates = async (data?: {
+         ...item,
+         intro: item.description || '',
+         flowNodeType: FlowNodeTypeEnum.tool,
+-        templateType: FlowNodeTemplateTypeEnum.teamApp
++        templateType: FlowNodeTemplateTypeEnum.teamApp,
++        appType: app.type,
++        isFolder: false
+       }));
+       // handle http toolset
+     } else if (app.type === AppTypeEnum.httpToolSet) {
+@@ -59,7 +61,9 @@ export const getTeamAppTemplates = async (data?: {
+         name: item.name,
+         intro: item.description || '',
+         flowNodeType: FlowNodeTypeEnum.tool,
+-        templateType: FlowNodeTemplateTypeEnum.teamApp
++        templateType: FlowNodeTemplateTypeEnum.teamApp,
++        appType: app.type,
++        isFolder: false
+       }));
+     }
+   }
+@@ -87,7 +91,8 @@ export const getTeamAppTemplates = async (data?: {
+       showStatus: false,
+       version: app.pluginData?.nodeVersion,
+       isTool: true,
+-      sourceMember: app.sourceMember
++      sourceMember: app.sourceMember,
++      appType: app.type
+     }))
+   );
+ };

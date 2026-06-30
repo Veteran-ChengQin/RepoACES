@@ -1,0 +1,5 @@
+M	packages/global/core/app/tool/systemTool/type/base.ts
+M	packages/global/core/workflow/type/node.ts
+M	packages/service/core/app/tool/systemTool/systemTool.repo.ts
+M	projects/app/src/pages/api/core/app/tool/getSystemToolTemplates.ts
+M	projects/app/test/api/core/app/tool/getSystemToolTemplates.test.ts

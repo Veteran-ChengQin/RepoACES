@@ -1,0 +1,8 @@
+﻿{
+    "case_id":  "fastgpt-pr-6494",
+    "pr_number":  "6494",
+    "title":  "feat: Pause Recovery",
+    "base_commit":  "0fc2bce28c8ca5e14eeeb730c9c08fae2b4c2ca3",
+    "pnpm_version":  "10.33.4",
+    "requires_bun":  false
+}
